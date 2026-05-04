@@ -34,6 +34,7 @@ const VIEW_MODULES = {
     settings: `./views/settings.js${_v}`,
     help:     `./views/help.js${_v}`,
     apps:     `./views/apps.js${_v}`,
+    store:    `./views/store.js${_v}`,
 };
 
 async function loadViews() {

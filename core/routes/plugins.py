@@ -494,9 +494,17 @@ async def install_plugin(
     url: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     force: bool = Form(False),
+    source: Optional[str] = Form(None),
+    store_slug: Optional[str] = Form(None),
     _=Depends(require_login),
 ):
-    """Install a plugin from GitHub URL or zip upload."""
+    """Install a plugin from GitHub URL or zip upload.
+
+    Optional store-provenance fields (used by the in-app Plugin Store):
+    - source: free-form origin tag, e.g. "store"
+    - store_slug: catalog slug for cross-reference on update checks
+    Both are persisted to plugin_state when provided; absence is fine.
+    """
     from core.settings_manager import settings
     # Block zip uploads in managed mode (GitHub installs OK — signing gate handles security)
     if settings.is_managed() and file:
@@ -768,6 +776,17 @@ async def install_plugin(
         else:
             state.save("install_method", "zip_upload")
         state.save("installed_at", datetime.utcnow().isoformat() + "Z")
+        # Optional store-provenance fields. Sanitize light — they land in
+        # the user's own plugin_state file, not a multi-tenant surface.
+        if source:
+            state.save("source", str(source)[:64])
+        if store_slug:
+            # Match bazaar's slug regex so we don't accept garbage that
+            # would fail any later catalog lookup.
+            import re as _re
+            cleaned_slug = _re.sub(r'[^a-z0-9\-_]', '', str(store_slug).lower())[:120]
+            if cleaned_slug:
+                state.save("store_slug", cleaned_slug)
 
         # ── Rescan to discover the new plugin ──
         plugin_loader.rescan()

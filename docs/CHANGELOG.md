@@ -1,3 +1,6 @@
+# 2.6.2 - Plugin Store
+- Brought plugin store to the app
+- Featured plugins feature
 # 2.6.1 - Plugin page and fixes
 - New plugin page
 - Default wakewords load properly now
