@@ -80,19 +80,48 @@ body {
 /* =============================================================================
    APPS PAGE
    ============================================================================= */
-.apps-page { padding: 24px; max-width: 800px; margin: 0 auto; }
+.apps-page { padding: 24px; width: 100%; }
 .apps-header h2 { margin: 0 0 20px; }
-.apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
+.apps-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-auto-flow: row;
+    gap: 18px;
+}
 .app-tile {
-    display: flex; flex-direction: column; align-items: center; gap: 8px;
-    padding: 20px 12px; border-radius: 12px; cursor: pointer;
-    background: var(--bg-secondary, #1a1a2e); border: 1px solid var(--border, #333);
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 14px;
+    row-gap: 8px;
+    align-items: center;
+    padding: 22px 24px;
+    border-radius: 12px;
+    cursor: pointer;
+    background: var(--bg-secondary, #1a1a2e);
+    border: 1px solid var(--border, #333);
+    text-align: left;
     transition: transform 0.15s, border-color 0.15s;
 }
-.app-tile:hover { transform: translateY(-2px); border-color: var(--accent, #4a9eff); }
-.app-tile-icon { font-size: 2rem; }
-.app-tile-label { font-size: var(--font-sm); font-weight: 600; color: var(--text); text-align: center; }
-.app-tile-desc { font-size: var(--font-xs); color: var(--text-muted); text-align: center; }
+.app-tile:hover { transform: translateY(-2px); border-color: var(--trim-border, #4a9eff); }
+.app-tile-icon {
+    grid-column: 1; grid-row: 1;
+    font-size: 2rem;
+    line-height: 1;
+}
+.app-tile-label {
+    grid-column: 2; grid-row: 1;
+    font-size: var(--font-lg);
+    font-weight: 600;
+    color: var(--text-bright, var(--text));
+    text-align: left;
+}
+.app-tile-desc {
+    grid-column: 1 / -1; grid-row: 2;
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+    text-align: left;
+    line-height: 1.4;
+}
 .app-host { display: flex; flex-direction: column; height: 100%; }
 .app-host-header {
     display: flex; align-items: center; gap: 12px;
