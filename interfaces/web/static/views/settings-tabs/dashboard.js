@@ -75,38 +75,8 @@ export default {
                         </div>
                     </div>
 
-                    <div class="dash-action-panels">
-                        ${_renderPanel('system', 'System', [
-                            { id: 'sys-disk', html: '<span class="dim">checking storage...</span>' },
-                            { id: 'sys-mem',  html: '<span class="dim">checking memory...</span>' },
-                        ], [
-                            { icon: '↻', label: 'Restart Sapphire', id: 'dash-restart' },
-                            { icon: '⏻', label: 'Shutdown',         id: 'dash-shutdown', kind: 'danger' },
-                        ])}
-
-                        ${_renderPanel('updates', 'Updates', [
-                            { id: 'upd-status',  html: '<span class="dim">checking...</span>' },
-                            { id: 'upd-plugins', html: '<span class="dim">plugin updates: —</span>' },
-                        ], [
-                            { icon: '↑', label: 'Check now',          id: 'dash-check-update' },
-                            { icon: '⤴', label: 'Force pull (git)',   id: 'dash-force-update' },
-                        ])}
-
-                        ${_renderPanel('backups', 'Backups', [
-                            { id: 'bkp-line1', html: '<span class="dim">checking backups...</span>' },
-                            { id: 'bkp-line2', html: '<span class="dim">—</span>' },
-                        ], [
-                            { icon: '\u{1F4BE}', label: 'Backup now',          id: 'dash-backup-now' },
-                            { icon: '\u{1F4C2}', label: 'Open backup history', id: 'dash-open-backups' },
-                        ])}
-
-                        ${_renderPanel('maintenance', 'Maintenance', [
-                            { id: 'mnt-uptime', html: '<span class="dim">uptime —</span>' },
-                            { id: 'mnt-status', html: 'status <strong>Online</strong>' },
-                        ], [
-                            { icon: '⌫', label: 'Clear JS cache',         id: 'dash-clear-cache' },
-                            { icon: '⟳', label: 'Reload static assets',  id: 'dash-reload-assets' },
-                        ])}
+                    <div class="dash-action-panels" id="dash-panels">
+                        <span class="dim" style="font-size:11px;padding:8px">Loading widgets...</span>
                     </div>
                 </div>
 
@@ -157,70 +127,7 @@ export default {
             import('../../core/router.js').then(r => r.switchView('help'));
         });
 
-        // ── System actions ──────────────────────────────────────────
-        el.querySelector('#dash-restart')?.addEventListener('click', async () => {
-            if (!confirm('Restart Sapphire?')) return;
-            try {
-                const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                await fetch('/api/system/restart', { method: 'POST', headers: { 'X-CSRF-Token': csrf } });
-                ui.showToast('Restarting...', 'success');
-                setTimeout(() => pollForRestart(), 2000);
-            } catch { ui.showToast('Restart failed', 'error'); }
-        });
-        el.querySelector('#dash-shutdown')?.addEventListener('click', async () => {
-            if (!confirm('Shut down Sapphire? You will need to restart it manually.')) return;
-            try {
-                const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                await fetch('/api/system/shutdown', { method: 'POST', headers: { 'X-CSRF-Token': csrf } });
-                ui.showToast('Shutting down...', 'success');
-            } catch { ui.showToast('Shutdown failed', 'error'); }
-        });
-
-        // ── Update actions ──────────────────────────────────────────
-        el.querySelector('#dash-check-update')?.addEventListener('click', () => {
-            const status = el.querySelector('#upd-status');
-            if (status) status.innerHTML = '<span class="dim">checking...</span>';
-            checkForUpdate(el, 0, true);
-        });
-        el.querySelector('#dash-force-update')?.addEventListener('click', () => doForceUpdate(el));
-
-        // ── Backup actions ──────────────────────────────────────────
-        el.querySelector('#dash-backup-now')?.addEventListener('click', async () => {
-            const summary = el.querySelector('#bkp-summary');
-            if (summary) summary.innerHTML = '<span class="dim">backing up...</span>';
-            try {
-                const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                const res = await fetch('/api/backup/create', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
-                    body: JSON.stringify({ type: 'manual' })
-                });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                ui.showToast(`Backup created: ${data.filename || 'done'}`, 'success');
-                loadBackupStatus(el);
-            } catch (e) { ui.showToast(`Backup failed: ${e.message}`, 'error'); loadBackupStatus(el); }
-        });
-        el.querySelector('#dash-open-backups')?.addEventListener('click', () => {
-            const settingsView = el.closest('.settings-view') || el.closest('[data-view="settings"]');
-            if (settingsView) {
-                settingsView.dispatchEvent(new CustomEvent('settings-navigate', { detail: { tab: 'backup' }, bubbles: true }));
-            }
-        });
-
-        // ── Maintenance actions ─────────────────────────────────────
-        el.querySelector('#dash-clear-cache')?.addEventListener('click', () => {
-            if ('caches' in window) {
-                caches.keys().then(names => names.forEach(n => caches.delete(n)));
-            }
-            ui.showToast('Cache cleared — reloading...', 'success');
-            setTimeout(() => window.location.reload(true), 500);
-        });
-        el.querySelector('#dash-reload-assets')?.addEventListener('click', () => {
-            window.location.reload();
-        });
-
-        // ── Spotlight tile click → store deep-link ──────────────────
+        // ── Spotlight tile click → store deep-link (lower content row) ──
         el.querySelector('#dash-spotlight-card')?.addEventListener('click', e => {
             const tile = e.target.closest('.dash-rec-tile');
             if (tile) {
@@ -228,13 +135,21 @@ export default {
             }
         });
 
-        // ── Initial mood paint (so status word picks up its color) ──
+        // ── Mount panels via the widget registration system ─────────
+        // The 5 built-ins each render through their own module. The host
+        // owns the panel chrome (title + actions dropdown) and calls
+        // module.render() to populate the body.
+        mountPanels(el).catch(e => console.warn('mountPanels failed', e));
+
+        // ── Initial mood paint (status word picks up its color when
+        //    the Maintenance widget's #mnt-status is in the DOM) ──
         _setMood(el, el.querySelector('#dash-orb')?.getAttribute('data-mood') || 'healthy');
 
-        // ── Initial data fetches ────────────────────────────────────
+        // ── Hero-level data fetches ─────────────────────────────────
+        // These keep the orb mood + component pills + lower content row
+        // populated. Per-panel data fetches live inside each widget now.
         loadSystemInfo(el);
         checkForUpdate(el);
-        loadBackupStatus(el);
         loadComponentStatus(el);
         loadPluginSpotlight(el);
         loadMetrics(el);
@@ -248,27 +163,13 @@ export default {
 // HERO HELPERS
 // =============================================================================
 
-function _renderPanel(slug, title, infoLines, actions) {
-    const linesHtml = infoLines.map(line => `<div class="dash-action-panel-info-line" id="${line.id}">${line.html}</div>`).join('');
-    const actionsHtml = actions.map(a =>
-        `<button class="${a.kind || ''}" id="${a.id}">${a.icon ? `<span class="action-icon">${a.icon}</span>` : ''}${_esc(a.label)}</button>`
-    ).join('');
-    return `
-        <div class="dash-action-panel" data-panel="${slug}">
-            <div class="dash-action-panel-title">${_esc(title)}</div>
-            <div class="dash-action-panel-info">${linesHtml}</div>
-            <details class="dash-action-dropdown" name="dash-hero-actions">
-                <summary><span>Actions</span><span class="chev">▾</span></summary>
-                <div class="dash-action-dropdown-menu">${actionsHtml}</div>
-            </details>
-        </div>
-    `;
-}
-
 function _setMood(el, mood) {
     const orb = el.querySelector('#dash-orb');
-    const status = el.querySelector('#mnt-status');
     if (orb) orb.setAttribute('data-mood', mood);
+    // The Maintenance widget renders #mnt-status async — may not be in
+    // the DOM yet at first call. Subsequent mood-signal updates re-paint
+    // it once the widget has mounted.
+    const status = el.querySelector('#mnt-status');
     if (status) {
         const label = MOOD_LABELS[mood] || 'Online';
         const color = MOOD_COLORS[mood] || MOOD_COLORS.healthy;
@@ -436,40 +337,147 @@ function _startNpcStar(el) {
 
 
 // =============================================================================
+// PANEL MOUNTING — built-in widgets through the registration system
+// =============================================================================
+//
+// Each entry below is a built-in widget that ships with core. Stage 2 of
+// the dashboard-widgets plan adds GET /api/dashboard/widgets to load this
+// list from user/webui/dashboard.json instead of hardcoding here. For
+// Stage 1, the goal is just to render the same panels via the new
+// register-import-render flow without behavior change.
+
+const STAGE1_PANELS = [
+    { instance_id: 'sys',  plugin: 'core', widget_id: 'system',         render_url: '/core-widgets/system.js',         size: '1x1' },
+    { instance_id: 'upd',  plugin: 'core', widget_id: 'updates',        render_url: '/core-widgets/updates.js',        size: '1x1' },
+    { instance_id: 'bkp',  plugin: 'core', widget_id: 'backups',        render_url: '/core-widgets/backups.js',        size: '1x1' },
+    { instance_id: 'mnt',  plugin: 'core', widget_id: 'maintenance',    render_url: '/core-widgets/maintenance.js',    size: '1x1' },
+    { instance_id: 'spot', plugin: 'core', widget_id: 'mini-spotlight', render_url: '/core-widgets/mini-spotlight.js', size: '1x1' },
+];
+
+// Cleanup callbacks returned by each widget's render(). Run when the
+// dashboard tab leaves or panels remount.
+let _panelRegistry = [];
+
+function _buildPanelChrome(panel) {
+    const div = document.createElement('div');
+    div.className = `dash-action-panel size-${panel.size}`;
+    div.dataset.panel = panel.widget_id;
+    div.dataset.instance = panel.instance_id;
+    div.innerHTML = `
+        <div class="dash-action-panel-title"></div>
+        <div class="dash-action-panel-info"></div>
+        <details class="dash-action-dropdown" name="dash-hero-actions">
+            <summary><span>Actions</span><span class="chev">▾</span></summary>
+            <div class="dash-action-dropdown-menu"></div>
+        </details>
+    `;
+    return div;
+}
+
+async function mountPanels(el) {
+    const container = el.querySelector('#dash-panels');
+    if (!container) return;
+    // Tear down any previously-mounted panels first.
+    for (const p of _panelRegistry) {
+        try { p.cleanup?.(); } catch (e) { console.warn('panel cleanup', p.instance_id, e); }
+    }
+    _panelRegistry = [];
+    container.innerHTML = '';
+
+    // Shared API surface passed to each widget via ctx.api. Plugin widgets
+    // will receive the same shape so they only need to learn one contract.
+    const api = {
+        fetch: (url, init) => window.fetch(url, init),
+        toast: (msg, kind) => ui.showToast(msg, kind),
+        listStorePlugins,
+        pollForRestart: () => setTimeout(() => pollForRestart(), 2000),
+        navigateSettingsTab: (tab) => {
+            const settingsView = el.closest('.settings-view') || el.closest('[data-view="settings"]');
+            if (settingsView) {
+                settingsView.dispatchEvent(new CustomEvent('settings-navigate', { detail: { tab }, bubbles: true }));
+            }
+        },
+    };
+
+    const v = (window.__appVersion || 'dev');
+
+    for (const panel of STAGE1_PANELS) {
+        const wrapper = _buildPanelChrome(panel);
+        container.appendChild(wrapper);
+        const bodyEl = wrapper.querySelector('.dash-action-panel-info');
+        const titleEl = wrapper.querySelector('.dash-action-panel-title');
+        const menu = wrapper.querySelector('.dash-action-dropdown-menu');
+
+        const ctx = {
+            plugin: panel.plugin,
+            widget_id: panel.widget_id,
+            instance_id: panel.instance_id,
+            size: panel.size,
+            settings: panel.settings || {},
+            pluginWebPath: panel.plugin === 'core' ? '/core-widgets/' : `/plugin-web/${panel.plugin}/`,
+            api,
+        };
+
+        try {
+            // Cache-bust on each app version so widget code refreshes after upgrade.
+            const module = await import(`${panel.render_url}?v=${encodeURIComponent(v)}`);
+            const result = await module.render(bodyEl, ctx);
+            titleEl.textContent = result?.title || panel.widget_id;
+
+            // Build action buttons via DOM (avoid innerHTML for onClick wiring).
+            (result?.actions || []).forEach(a => {
+                const btn = document.createElement('button');
+                if (a.kind) btn.className = a.kind;
+                if (a.icon) {
+                    const ic = document.createElement('span');
+                    ic.className = 'action-icon';
+                    ic.textContent = a.icon;
+                    btn.appendChild(ic);
+                    btn.appendChild(document.createTextNode(' '));
+                }
+                btn.appendChild(document.createTextNode(a.label || ''));
+                if (typeof a.onClick === 'function') btn.addEventListener('click', a.onClick);
+                menu.appendChild(btn);
+            });
+
+            _panelRegistry.push({ instance_id: panel.instance_id, cleanup: result?.cleanup });
+        } catch (e) {
+            console.warn(`[panel ${panel.plugin}.${panel.widget_id}] render failed`, e);
+            titleEl.textContent = panel.widget_id;
+            bodyEl.innerHTML = `<div class="dash-action-panel-info-line"><span class="dim">render failed: ${_esc(e?.message || String(e))}</span></div>`;
+        }
+    }
+
+    // After Maintenance widget mounts (which creates #mnt-status), make
+    // sure the status word picks up the current mood color.
+    _setMood(el, el.querySelector('#dash-orb')?.getAttribute('data-mood') || 'healthy');
+}
+
+
+// =============================================================================
 // DATA LOADERS
 // =============================================================================
 
+// Hero-level system-info fetch — used for mood derivation (disk %) and
+// display name sync. Per-panel data fetches now live in widget render
+// modules. There's a small duplicate-fetch cost (System and Maintenance
+// widgets call this same endpoint) but in V2 we'll add a shared signals
+// API so widgets contribute without re-querying.
 async function loadSystemInfo(el) {
-    const diskEl = el.querySelector('#sys-disk');
-    const memEl  = el.querySelector('#sys-mem');
-    const uptimeEl = el.querySelector('#mnt-uptime');
     const nameEl = el.querySelector('#dash-hero-name');
     try {
         const res = await fetch('/api/dashboard/system-info');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const d = await res.json();
-        if (diskEl) diskEl.innerHTML = `<strong>${_esc(d.disk_used_gb)} GB</strong> on disk <span class="dim">· ${_esc(d.disk_pct)}% of ${_esc(d.disk_total_gb)} GB</span>`;
-        if (memEl)  memEl.innerHTML  = `<strong>${_esc(d.mem_mb)} MB</strong> resident <span class="dim">· ${_esc(d.threads || 0)} threads</span>`;
-        if (uptimeEl) uptimeEl.innerHTML = `uptime <strong>${_esc(d.uptime_str)}</strong>`;
-        if (typeof d.backups_hour === 'number') {
-            _backupsHour = d.backups_hour;
-            loadBackupStatus(el);
-        }
         if (typeof d.disk_pct === 'number') {
             _moodSignals.diskPct = d.disk_pct;
             _refreshMood(el);
         }
-        // Sync display name from backend if it differs from what's rendered
-        // (server-side setting wins; localStorage is a fast-path cache only).
         if (d.display_name && nameEl && nameEl.textContent.trim() !== d.display_name) {
             nameEl.textContent = d.display_name;
             try { localStorage.setItem('sapphireDisplayName', d.display_name); } catch (e2) { /* ignore */ }
         }
-    } catch (e) {
-        if (diskEl) diskEl.innerHTML = '<span class="dim">disk: unavailable</span>';
-        if (memEl)  memEl.innerHTML  = '<span class="dim">memory: unavailable</span>';
-        if (uptimeEl) uptimeEl.innerHTML = '<span class="dim">uptime: —</span>';
-    }
+    } catch { /* widgets show their own errors; mood stays at last known */ }
 }
 
 // Component status cache — lets the mood derivation read the latest snapshot.
@@ -533,71 +541,32 @@ function _setComponentDot(el, key, status) {
 // UPDATES
 // =============================================================================
 
-async function checkForUpdate(el, retry = 0, force = false) {
-    const statusEl = el.querySelector('#upd-status');
-    if (!statusEl) return;
+// Hero-level update check — for mood signals + branch label only. The
+// Updates panel widget renders the "current/available · vX · Xh ago"
+// status line itself.
+async function checkForUpdate(el, retry = 0) {
     try {
-        const res = await fetch('/api/system/update-check' + (force ? '?force=1' : ''));
+        const res = await fetch('/api/system/update-check');
         if (!res.ok) throw new Error('Check failed');
         updateStatus = await res.json();
-
         if (!updateStatus.last_check && retry < 3) {
-            statusEl.innerHTML = '<span class="dim">checking...</span>';
             setTimeout(() => checkForUpdate(el, retry + 1), 2000);
             return;
         }
-
+        // Branch label appears in the meta line under Sapphire's name.
         const branchEl = el.querySelector('#dash-branch');
         if (branchEl && updateStatus.branch) {
             const tag = updateStatus.is_fork ? `${updateStatus.branch} · fork` : updateStatus.branch;
             branchEl.textContent = `· ${_esc(tag)}`;
         }
-
         if (updateStatus.available) {
-            const ago = updateStatus.last_check ? _agoStr(updateStatus.last_check) : 'just now';
-            statusEl.innerHTML = `<span class="dash-pill warn" data-attention="warn">v${_esc(updateStatus.latest)} available</span> <span class="dim">· running v${_esc(updateStatus.current)} · ${_esc(ago)}</span>`;
             window.dispatchEvent(new CustomEvent('update-available', { detail: updateStatus }));
             _moodSignals.updateAvailable = true;
         } else {
-            const ago = updateStatus.last_check ? _agoStr(updateStatus.last_check) : 'just now';
-            statusEl.innerHTML = `<span class="dash-pill success">✓ current</span> <strong>v${_esc(updateStatus.current)}</strong> <span class="dim">· ${_esc(ago)}</span>`;
             _moodSignals.updateAvailable = false;
         }
         _refreshMood(el);
-    } catch (e) {
-        statusEl.innerHTML = '<span class="dim">could not check</span>';
-    }
-}
-
-function _agoStr(ts) {
-    const sec = Math.floor((Date.now() / 1000) - ts);
-    if (sec < 60) return 'just now';
-    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
-    if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
-    return `${Math.floor(sec / 86400)}d ago`;
-}
-
-async function doForceUpdate(el) {
-    if (!confirm('Schedule an update? Sapphire will pre-flight the git state, take a backup, then restart to pull and install dependencies.')) return;
-    const statusEl = el.querySelector('#upd-status');
-    try {
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-        const res = await fetch('/api/system/update', { method: 'POST', headers: { 'X-CSRF-Token': csrf } });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
-        }
-        const data = await res.json();
-        if (data.status === 'scheduled') {
-            ui.showToast(data.message || 'Update scheduled. Restarting...', 'success');
-            if (statusEl) statusEl.innerHTML = '<span class="dim">applying update (pull + dependencies)...</span>';
-            setTimeout(() => pollForRestart(), 2000);
-        } else {
-            ui.showToast(data.message || 'No update needed', 'success');
-        }
-    } catch (e) {
-        ui.showToast(`Update refused: ${e.message}`, 'error');
-    }
+    } catch { /* widget shows the error in its own line */ }
 }
 
 function pollForRestart() {
@@ -631,92 +600,28 @@ async function checkLastUpdateResult() {
 
 
 // =============================================================================
-// BACKUPS
-// =============================================================================
-
-// Module-level cache so loadBackupStatus can reach the schedule hour
-// loadSystemInfo learned about. Avoids a second backend round-trip.
-let _backupsHour = 3;
-
-async function loadBackupStatus(el) {
-    const line1 = el.querySelector('#bkp-line1');
-    const line2 = el.querySelector('#bkp-line2');
-    if (!line1) return;
-    try {
-        const res = await fetch('/api/backup/list');
-        if (!res.ok) throw new Error('failed');
-        const data = await res.json();
-        const backups = data.backups || {};
-        const all = [
-            ...(backups.daily || []), ...(backups.weekly || []),
-            ...(backups.monthly || []), ...(backups.manual || [])
-        ];
-        const hh = String(_backupsHour).padStart(2, '0');
-        if (all.length === 0) {
-            line1.innerHTML = '<span class="dim">no backups yet</span>';
-            if (line2) line2.innerHTML = `<span class="dim">Daily ${_esc(hh)}:00 · Last —</span>`;
-            return;
-        }
-        all.sort((a, b) => (`${b.date}_${b.time}`).localeCompare(`${a.date}_${a.time}`));
-        const latest = all[0];
-        const ago = _backupTimeAgo(latest.date, latest.time);
-        const totalSize = all.reduce((acc, b) => acc + (b.size || 0), 0);
-        const sizeMB = totalSize ? `${(totalSize / 1048576).toFixed(0)} MB` : '?';
-        line1.innerHTML = `<strong>${all.length}</strong> backups · <strong>${_esc(sizeMB)}</strong>`;
-        if (line2) line2.innerHTML = `<span class="dim">Daily ${_esc(hh)}:00 · Last <strong>${_esc(ago)}</strong></span>`;
-    } catch {
-        line1.innerHTML = '<span class="dim">unavailable</span>';
-        if (line2) line2.innerHTML = '';
-    }
-}
-
-function _backupTimeAgo(dateStr, timeStr) {
-    if (!dateStr) return 'unknown';
-    const h = timeStr?.slice(0, 2) || '00', m = timeStr?.slice(2, 4) || '00', s = timeStr?.slice(4, 6) || '00';
-    const parts = dateStr.split('-');
-    const d = new Date(+parts[0], +parts[1] - 1, +parts[2], +h, +m, +s);
-    if (isNaN(d.getTime())) return dateStr;
-    const sec = Math.floor((Date.now() - d.getTime()) / 1000);
-    if (sec < 60) return 'just now';
-    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
-    if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
-    return `${Math.floor(sec / 86400)}d ago`;
-}
-
-
-// =============================================================================
-// PLUGIN SPOTLIGHT — community shoutouts from sapphireblue.dev
+// PLUGIN SPOTLIGHT — community shoutouts from sapphireblue.dev (lower content row)
 // =============================================================================
 
 async function loadPluginSpotlight(el) {
     const card = el.querySelector('#dash-spotlight-card');
-    const updPlugins = el.querySelector('#upd-plugins');
     if (!card) return;
     let data;
     try {
         data = await listStorePlugins({ featured: true, perPage: 5 });
     } catch (e) {
         card.style.display = 'none';
-        if (updPlugins) updPlugins.innerHTML = '<span class="dim">plugin updates: store unavailable</span>';
         return;
     }
     const items = (data && data.items) || [];
     if (!items.length || data.unreachable) {
         card.style.display = 'none';
-        if (updPlugins) updPlugins.innerHTML = '<span class="dim">plugin updates: store unavailable</span>';
         return;
     }
 
-    // Plugin updates count from the spotlight set (a partial signal — only
-    // covers featured plugins, not every installed one). Better than nothing.
+    // Mood signal — partial (only covers featured plugins). The Updates
+    // widget surfaces the same number visually; this just feeds the orb.
     const updateCount = items.filter(i => i.installed_state === 'update_available').length;
-    if (updPlugins) {
-        if (updateCount > 0) {
-            updPlugins.innerHTML = `<span class="dash-pill warn" data-attention="warn">${updateCount}</span> plugin update${updateCount === 1 ? '' : 's'}`;
-        } else {
-            updPlugins.innerHTML = '<span class="dash-pill success">✓</span> plugins current';
-        }
-    }
     _moodSignals.pluginUpdatesCount = updateCount;
     _refreshMood(el);
 

@@ -100,6 +100,19 @@ except Exception as _font_e:  # never block boot on font fetch
 USER_FONTS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/user-fonts", StaticFiles(directory=str(USER_FONTS_DIR)), name="user-fonts")
 
+# Dashboard built-in widgets — register with the central widget registry,
+# then mount their JS render modules at /core-widgets/ so the dashboard
+# host can dynamic-import them.
+try:
+    from core.dashboard_builtins import register_all as _register_builtin_widgets
+    _register_builtin_widgets()
+except Exception as _w_e:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(f"built-in widget registration failed: {_w_e}")
+CORE_WIDGETS_DIR = PROJECT_ROOT / "core" / "dashboard_builtins" / "web"
+CORE_WIDGETS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/core-widgets", StaticFiles(directory=str(CORE_WIDGETS_DIR)), name="core-widgets")
+
 # Plugin web assets — serves from plugins/{name}/web/ and user/plugins/{name}/web/
 SYSTEM_PLUGINS_DIR = PROJECT_ROOT / "plugins"
 USER_PLUGINS_DIR_WEB = PROJECT_ROOT / "user" / "plugins"
