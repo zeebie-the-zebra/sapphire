@@ -3028,12 +3028,157 @@ div.hb-response-summary {
     }
 }
 
+/* Subliminal controls row — sits above the panels with near-zero
+   padding. Right-aligned. Low opacity by default; full on hover. */
+.dash-widget-controls {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 4px;
+    margin-top: 12px;
+    margin-bottom: 2px;
+    opacity: 0.45;
+    transition: opacity 0.2s ease;
+}
+.dash-widget-controls:hover { opacity: 1; }
+.dash-widget-controls button {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 4px 10px;
+    line-height: 1;
+    transition: background 0.15s, border-color 0.15s;
+}
+.dash-widget-controls button:hover {
+    background: rgba(74, 158, 255, 0.08);
+    border-color: rgba(74, 158, 255, 0.35);
+    color: var(--accent, #4a9eff);
+}
+
 /* Action panels — fenced rows under the identity. */
 .dash-action-panels {
     display: flex; gap: 12px; flex-wrap: wrap;
     position: relative; z-index: 1;
-    margin-top: 14px;
 }
+/* Size classes — single-row spans driven by widget's declared size.
+   For Stage 2, the actual layout is still flex; in Stage 3 we'll switch
+   to grid for predictable column-spans when resize lands. */
+.dash-action-panel.size-1x2 { flex: 2 2 360px; }
+.dash-action-panel.size-1x3 { flex: 3 3 540px; }
+.dash-action-panel.size-1x4 { flex: 4 4 720px; }
+
+/* ─── PICKER MODAL ─────────────────────────────────────────────── */
+.dash-picker-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+}
+.dash-picker {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 640px;
+    max-height: 80vh;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+}
+.dash-picker-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+}
+.dash-picker-header h3 { margin: 0; font-size: var(--font-base); }
+.dash-picker-close {
+    background: transparent; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 18px; padding: 4px 8px;
+}
+.dash-picker-close:hover { color: var(--text); }
+.dash-picker-body {
+    overflow-y: auto;
+    padding: 8px;
+}
+.dash-picker-group-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    padding: 10px 12px 6px;
+}
+.dash-picker-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    transition: background 0.15s;
+}
+.dash-picker-row:hover { background: rgba(74, 158, 255, 0.04); }
+.dash-picker-icon {
+    flex-shrink: 0;
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-tertiary, #2c2c2c);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 16px;
+}
+.dash-picker-meta { flex: 1; min-width: 0; }
+.dash-picker-name {
+    font-size: var(--font-sm); font-weight: 600;
+    color: var(--text);
+}
+.dash-picker-desc {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dash-picker-sizes {
+    display: flex; gap: 4px; margin-top: 4px;
+}
+.dash-picker-size-pill {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-muted);
+    background: var(--bg-tertiary, #2c2c2c);
+    padding: 1px 6px;
+    border-radius: 8px;
+}
+.dash-picker-add {
+    flex-shrink: 0;
+    background: var(--accent, #4a9eff);
+    border: none;
+    color: #fff;
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: var(--font-sm);
+    cursor: pointer;
+    font-family: inherit;
+}
+.dash-picker-add:hover { background: #5fa9ff; }
+.dash-picker-add[disabled] {
+    background: var(--bg-tertiary, #2c2c2c);
+    color: var(--text-dim);
+    cursor: not-allowed;
+}
+.dash-picker-footer {
+    padding: 10px 18px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: var(--font-sm);
+}
+.dash-picker-footer a {
+    color: var(--text-dim);
+    text-decoration: none;
+    cursor: pointer;
+}
+.dash-picker-footer a:hover { color: var(--accent, #4a9eff); }
 .dash-action-panel {
     display: flex; flex-direction: column; gap: 10px;
     background: rgba(255, 255, 255, 0.02);

@@ -75,6 +75,9 @@ export default {
                         </div>
                     </div>
 
+                    <div class="dash-widget-controls" id="dash-widget-controls">
+                        <button id="dash-add-widget" title="Add widget">+ Add</button>
+                    </div>
                     <div class="dash-action-panels" id="dash-panels">
                         <span class="dim" style="font-size:11px;padding:8px">Loading widgets...</span>
                     </div>
@@ -135,11 +138,14 @@ export default {
             }
         });
 
-        // ── Mount panels via the widget registration system ─────────
-        // The 5 built-ins each render through their own module. The host
+        // ── Mount panels from /api/dashboard/widgets ────────────────
+        // Each registered widget renders through its own module. The host
         // owns the panel chrome (title + actions dropdown) and calls
         // module.render() to populate the body.
         mountPanels(el).catch(e => console.warn('mountPanels failed', e));
+
+        // ── Controls row — `+` opens the picker ─────────────────────
+        el.querySelector('#dash-add-widget')?.addEventListener('click', () => openPicker(el));
 
         // ── Initial mood paint (status word picks up its color when
         //    the Maintenance widget's #mnt-status is in the DOM) ──
@@ -337,26 +343,54 @@ function _startNpcStar(el) {
 
 
 // =============================================================================
-// PANEL MOUNTING — built-in widgets through the registration system
+// PANEL MOUNTING — widgets load from /api/dashboard/widgets
 // =============================================================================
 //
-// Each entry below is a built-in widget that ships with core. Stage 2 of
-// the dashboard-widgets plan adds GET /api/dashboard/widgets to load this
-// list from user/webui/dashboard.json instead of hardcoding here. For
-// Stage 1, the goal is just to render the same panels via the new
-// register-import-render flow without behavior change.
-
-const STAGE1_PANELS = [
-    { instance_id: 'sys',  plugin: 'core', widget_id: 'system',         render_url: '/core-widgets/system.js',         size: '1x1' },
-    { instance_id: 'upd',  plugin: 'core', widget_id: 'updates',        render_url: '/core-widgets/updates.js',        size: '1x1' },
-    { instance_id: 'bkp',  plugin: 'core', widget_id: 'backups',        render_url: '/core-widgets/backups.js',        size: '1x1' },
-    { instance_id: 'mnt',  plugin: 'core', widget_id: 'maintenance',    render_url: '/core-widgets/maintenance.js',    size: '1x1' },
-    { instance_id: 'spot', plugin: 'core', widget_id: 'mini-spotlight', render_url: '/core-widgets/mini-spotlight.js', size: '1x1' },
-];
+// User's panel list lives in user/webui/dashboard.json (auto-seeded
+// with built-ins on first read). Each entry references a widget by
+// (plugin, widget_id) and carries instance_id + size + per-instance
+// settings. Backend annotates each entry with `available` + `render_url`
+// so the host can render placeholders for orphaned panels (plugin
+// uninstalled but still in the user's list).
 
 // Cleanup callbacks returned by each widget's render(). Run when the
 // dashboard tab leaves or panels remount.
 let _panelRegistry = [];
+
+async function _fetchUserPanels() {
+    try {
+        const res = await fetch('/api/dashboard/widgets');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        return data.panels || [];
+    } catch (e) {
+        console.warn('failed to load dashboard panels', e);
+        return [];
+    }
+}
+
+async function _saveUserPanels(panels) {
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const body = JSON.stringify({
+        version: 1,
+        panels: panels.map(p => ({
+            instance_id: p.instance_id,
+            plugin: p.plugin,
+            widget_id: p.widget_id,
+            size: p.size,
+            settings: p.settings || {},
+        })),
+    });
+    const res = await fetch('/api/dashboard/widgets', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+        body,
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+}
 
 function _buildPanelChrome(panel) {
     const div = document.createElement('div');
@@ -384,8 +418,14 @@ async function mountPanels(el) {
     _panelRegistry = [];
     container.innerHTML = '';
 
+    const panels = await _fetchUserPanels();
+    if (panels.length === 0) {
+        container.innerHTML = `<span class="dim" style="font-size:13px;padding:14px">Your command center is empty. Click <strong>+ Add</strong> above to get started.</span>`;
+        return;
+    }
+
     // Shared API surface passed to each widget via ctx.api. Plugin widgets
-    // will receive the same shape so they only need to learn one contract.
+    // receive the same shape so they only need to learn one contract.
     const api = {
         fetch: (url, init) => window.fetch(url, init),
         toast: (msg, kind) => ui.showToast(msg, kind),
@@ -401,12 +441,20 @@ async function mountPanels(el) {
 
     const v = (window.__appVersion || 'dev');
 
-    for (const panel of STAGE1_PANELS) {
+    for (const panel of panels) {
         const wrapper = _buildPanelChrome(panel);
         container.appendChild(wrapper);
         const bodyEl = wrapper.querySelector('.dash-action-panel-info');
         const titleEl = wrapper.querySelector('.dash-action-panel-title');
         const menu = wrapper.querySelector('.dash-action-dropdown-menu');
+
+        // Plugin uninstalled but still in user's list — render placeholder.
+        if (!panel.available) {
+            titleEl.textContent = panel.name || panel.widget_id;
+            bodyEl.innerHTML = `<div class="dash-action-panel-info-line"><span class="dim">(${_esc(panel.plugin)} unavailable)</span></div>`;
+            wrapper.querySelector('.dash-action-dropdown')?.remove();
+            continue;
+        }
 
         const ctx = {
             plugin: panel.plugin,
@@ -419,12 +467,10 @@ async function mountPanels(el) {
         };
 
         try {
-            // Cache-bust on each app version so widget code refreshes after upgrade.
             const module = await import(`${panel.render_url}?v=${encodeURIComponent(v)}`);
             const result = await module.render(bodyEl, ctx);
-            titleEl.textContent = result?.title || panel.widget_id;
+            titleEl.textContent = result?.title || panel.name || panel.widget_id;
 
-            // Build action buttons via DOM (avoid innerHTML for onClick wiring).
             (result?.actions || []).forEach(a => {
                 const btn = document.createElement('button');
                 if (a.kind) btn.className = a.kind;
@@ -443,7 +489,7 @@ async function mountPanels(el) {
             _panelRegistry.push({ instance_id: panel.instance_id, cleanup: result?.cleanup });
         } catch (e) {
             console.warn(`[panel ${panel.plugin}.${panel.widget_id}] render failed`, e);
-            titleEl.textContent = panel.widget_id;
+            titleEl.textContent = panel.name || panel.widget_id;
             bodyEl.innerHTML = `<div class="dash-action-panel-info-line"><span class="dim">render failed: ${_esc(e?.message || String(e))}</span></div>`;
         }
     }
@@ -451,6 +497,145 @@ async function mountPanels(el) {
     // After Maintenance widget mounts (which creates #mnt-status), make
     // sure the status word picks up the current mood color.
     _setMood(el, el.querySelector('#dash-orb')?.getAttribute('data-mood') || 'healthy');
+}
+
+
+// =============================================================================
+// PICKER MODAL — choose a widget to add
+// =============================================================================
+
+async function openPicker(el) {
+    let backdrop = document.querySelector('.dash-picker-backdrop');
+    if (backdrop) backdrop.remove();
+
+    backdrop = document.createElement('div');
+    backdrop.className = 'dash-picker-backdrop';
+    backdrop.innerHTML = `
+        <div class="dash-picker" role="dialog" aria-modal="true">
+            <div class="dash-picker-header">
+                <h3>Add a widget</h3>
+                <button class="dash-picker-close" title="Close">×</button>
+            </div>
+            <div class="dash-picker-body">
+                <span class="dim" style="display:block;padding:14px;font-size:var(--font-sm)">Loading...</span>
+            </div>
+            <div class="dash-picker-footer">
+                <a class="dash-picker-restore">Restore defaults</a>
+                <span class="dim" style="font-size:var(--font-xs)">click Add on any row</span>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const close = () => backdrop.remove();
+    backdrop.querySelector('.dash-picker-close').addEventListener('click', close);
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+        if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+
+    const body = backdrop.querySelector('.dash-picker-body');
+    let available = [];
+    let installed = [];
+    try {
+        const [availRes, instRes] = await Promise.all([
+            fetch('/api/dashboard/widgets/available'),
+            fetch('/api/dashboard/widgets'),
+        ]);
+        available = (await availRes.json()).widgets || [];
+        installed = (await instRes.json()).panels || [];
+    } catch {
+        body.innerHTML = '<span class="dim" style="display:block;padding:14px">Could not load widget catalog.</span>';
+        return;
+    }
+
+    const installedKeys = new Set(installed.map(p => `${p.plugin}.${p.widget_id}`));
+
+    // Group by plugin: core first, then alphabetical.
+    const grouped = {};
+    for (const w of available) {
+        (grouped[w.plugin] = grouped[w.plugin] || []).push(w);
+    }
+    const pluginOrder = Object.keys(grouped).sort((a, b) => {
+        if (a === 'core') return -1;
+        if (b === 'core') return 1;
+        return a.localeCompare(b);
+    });
+
+    body.innerHTML = '';
+    for (const plug of pluginOrder) {
+        const groupTitle = document.createElement('div');
+        groupTitle.className = 'dash-picker-group-title';
+        groupTitle.textContent = plug === 'core' ? 'Built-in' : plug;
+        body.appendChild(groupTitle);
+        for (const w of grouped[plug]) {
+            const key = `${w.plugin}.${w.widget_id}`;
+            const row = document.createElement('div');
+            row.className = 'dash-picker-row';
+            const sizes = (w.sizes || ['1x1']).map(s => `<span class="dash-picker-size-pill">${_esc(s)}</span>`).join('');
+            const isInstalled = installedKeys.has(key);
+            const btnLabel = isInstalled
+                ? (w.multi_instance ? 'Add another' : 'Added')
+                : 'Add';
+            const btnDisabled = isInstalled && !w.multi_instance;
+            row.innerHTML = `
+                <div class="dash-picker-icon">${_esc(w.icon || '\u{25A2}')}</div>
+                <div class="dash-picker-meta">
+                    <div class="dash-picker-name">${_esc(w.name)}</div>
+                    ${w.description ? `<div class="dash-picker-desc">${_esc(w.description)}</div>` : ''}
+                    <div class="dash-picker-sizes">${sizes}</div>
+                </div>
+                <button class="dash-picker-add" ${btnDisabled ? 'disabled' : ''}>${_esc(btnLabel)}</button>
+            `;
+            row.querySelector('.dash-picker-add').addEventListener('click', async () => {
+                if (btnDisabled) return;
+                const updated = installed.concat([{
+                    instance_id: 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                    plugin: w.plugin,
+                    widget_id: w.widget_id,
+                    size: w.default_size || '1x1',
+                    settings: {},
+                }]);
+                try {
+                    await _saveUserPanels(updated);
+                    ui.showToast(`Added ${w.name}`, 'success');
+                    close();
+                    mountPanels(el);
+                } catch (e) {
+                    ui.showToast(`Failed to add: ${e.message}`, 'error');
+                }
+            });
+            body.appendChild(row);
+        }
+    }
+
+    backdrop.querySelector('.dash-picker-restore').addEventListener('click', async () => {
+        const defaults = [
+            { plugin: 'core', widget_id: 'system', size: '1x1' },
+            { plugin: 'core', widget_id: 'updates', size: '1x1' },
+            { plugin: 'core', widget_id: 'backups', size: '1x1' },
+            { plugin: 'core', widget_id: 'maintenance', size: '1x1' },
+            { plugin: 'core', widget_id: 'mini-spotlight', size: '1x1' },
+        ];
+        // Add any defaults not already installed (don't duplicate single-instance ones).
+        const next = installed.slice();
+        for (const d of defaults) {
+            if (!next.some(p => p.plugin === d.plugin && p.widget_id === d.widget_id)) {
+                next.push({
+                    instance_id: 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                    ...d, settings: {},
+                });
+            }
+        }
+        try {
+            await _saveUserPanels(next);
+            ui.showToast('Defaults restored', 'success');
+            close();
+            mountPanels(el);
+        } catch (e) {
+            ui.showToast(`Failed: ${e.message}`, 'error');
+        }
+    });
 }
 
 
