@@ -3944,6 +3944,26 @@ div.hb-response-summary {
     opacity: 0.7;
 }
 
+.message-degraded {
+    font-style: italic;
+    color: var(--text-muted);
+    font-size: 0.9em;
+    opacity: 0.85;
+    line-height: 1.4;
+}
+
+.task-validation-notice {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-left: 3px solid #d4a017;
+    background: rgba(212, 160, 23, 0.08);
+    border-radius: var(--radius-sm, 4px);
+    color: var(--text-primary, inherit);
+    font-size: var(--font-sm, 0.85rem);
+    line-height: 1.4;
+}
+.task-validation-notice strong { color: #d4a017; }
+
 .message-content .inline-image {
     max-width: 100%;
     max-height: 600px;

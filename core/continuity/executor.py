@@ -445,6 +445,23 @@ class ContinuityExecutor:
                 # Run through isolated ExecutionContext — no singleton contact
                 response = ctx.run(msg, history_messages=history_messages)
 
+                # If the run ended degraded (context overflow, tool exhaustion,
+                # empty LLM, hallucinated tools), the empty assistant message
+                # in ctx.new_messages is intentionally blank — Apr-24 fix kept
+                # error text out of TTS / Discord / Telegram. But the chat UI
+                # then renders a totally empty bubble with no signal to the
+                # user. Attach degraded_reason as metadata on the empty asst
+                # message so the frontend can render it as an italic system
+                # note. Frontend MUST keep this out of any speak/relay paths.
+                degraded = getattr(ctx, 'degraded_reason', None)
+                if degraded and ctx.new_messages:
+                    for _m in ctx.new_messages:
+                        if _m.get("role") == "assistant" and not _m.get("content"):
+                            _meta = dict(_m.get("metadata") or {})
+                            _meta["degraded_reason"] = degraded
+                            _m["metadata"] = _meta
+                            break
+
                 # Persist the FULL conversation (including tool calls + results)
                 # to the target chat. ctx.new_messages has everything generated
                 # during this run: user msg, assistant+tool_calls, tool results,
@@ -454,6 +471,12 @@ class ContinuityExecutor:
                 else:
                     # Fallback to simple pair if new_messages not available
                     session_manager.append_to_chat(target_chat, msg, response or "")
+
+                if degraded:
+                    publish(Events.CONTINUITY_TASK_ERROR, {
+                        "task": task.get("name", "Unknown"),
+                        "error": degraded,
+                    })
 
                 if response_cb and response:
                     try: response_cb(response)

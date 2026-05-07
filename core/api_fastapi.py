@@ -271,14 +271,24 @@ async def security_headers(request: Request, call_next):
     #     via fetch/XHR to an attacker domain
     #   - frame-ancestors 'none' blocks clickjacking
     #   - default-src 'self' blocks surprise external resource loads
-    # Img-src includes data: (avatar fallbacks, modal icons) and https: for
-    # community-supplied screenshot URLs. Tightening to strict CSP requires
-    # cleaning up the inline handlers across the codebase first — out of scope.
+    #
+    # Allowed external script CDNs: esm.sh, jsdelivr, unpkg — the standard
+    # ESM hosts plugin authors use to load runtime deps (e.g. avatar plugin
+    # imports three.js from esm.sh). Plugins using exotic CDNs need to vendor
+    # or use these.
+    #
+    # blob: in media-src is required for TTS playback — `URL.createObjectURL`
+    # returns blob: URLs that <audio src> consumes. blob: in img-src covers
+    # generated-image surfaces (image-gen plugin and similar).
+    #
+    # Tightening to strict CSP requires cleaning up the inline handlers across
+    # the codebase first — out of scope.
     response.headers['Content-Security-Policy'] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline' https://esm.sh https://cdn.jsdelivr.net https://unpkg.com; "
         "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https:; "
+        "img-src 'self' data: blob: https:; "
+        "media-src 'self' blob:; "
         "font-src 'self' data:; "
         "connect-src 'self'; "
         "frame-ancestors 'none'; "

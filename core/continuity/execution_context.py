@@ -275,8 +275,30 @@ class ExecutionContext:
         _ctx = self.task_settings.get("context_limit")
         context_limit = _ctx if _ctx is not None else getattr(config, 'CONTEXT_LIMIT', 0)
 
+        # Tool schemas are part of the actual API payload, so they MUST be
+        # included in the budget. Without this, a task with 158 tools loaded
+        # blows past the provider context cap even when message-content trim
+        # claims things are fine. Reported in the wild 2026-05-05 — a heartbeat
+        # with a heavy toolset hit this and produced an empty bubble. Trim of
+        # message content can't free schema bytes; the user has to either
+        # reduce the toolset or raise context_limit. Surfacing both numbers
+        # in the error message tells them which lever to pull.
+        from core.chat.history import count_tokens
+        tool_schema_tokens = 0
+        if self.tools:
+            try:
+                import json as _json
+                tool_schema_tokens = sum(
+                    count_tokens(_json.dumps(t, ensure_ascii=False))
+                    for t in self.tools
+                )
+            except Exception:
+                # Rough fallback if a tool schema isn't JSON-serializable
+                tool_schema_tokens = len(self.tools) * 100
+
         logger.info(f"[ExecCtx] Running: provider='{self.provider_key}', "
-                     f"tools={len(self.tools) if self.tools else 0}, "
+                     f"tools={len(self.tools) if self.tools else 0} "
+                     f"(~{tool_schema_tokens} schema tokens), "
                      f"history={len(history_messages) if history_messages else 0} msgs")
         final_content = None
 
@@ -290,8 +312,8 @@ class ExecutionContext:
             # orphaned tool-result heads, retry under 80% of limit, and only
             # give up with a specific reason if trim can't help.
             if context_limit > 0:
-                from core.chat.history import count_tokens
-                total_tokens = sum(count_tokens(str(m.get("content", ""))) for m in messages)
+                msg_tokens = sum(count_tokens(str(m.get("content", ""))) for m in messages)
+                total_tokens = msg_tokens + tool_schema_tokens
                 if total_tokens > context_limit * 0.9:
                     sys_idx = 1 if messages and messages[0].get("role") == "system" else 0
                     non_system = len(messages) - sys_idx
@@ -305,17 +327,35 @@ class ExecutionContext:
                         # just got dropped (would become orphan at LLM call time)
                         if len(messages) > sys_idx and messages[sys_idx].get("role") == "assistant" and messages[sys_idx].get("tool_calls"):
                             messages.pop(sys_idx)
-                        new_total = sum(count_tokens(str(m.get("content", ""))) for m in messages)
+                        new_msg_tokens = sum(count_tokens(str(m.get("content", ""))) for m in messages)
+                        new_total = new_msg_tokens + tool_schema_tokens
                         logger.warning(
                             f"[ExecCtx] Context trim: dropped ~{drop} oldest msgs "
-                            f"({total_tokens} → {new_total} tokens, limit {context_limit})"
+                            f"({total_tokens} → {new_total} tokens, "
+                            f"limit {context_limit}; tool schemas {tool_schema_tokens})"
                         )
                         total_tokens = new_total
+                        msg_tokens = new_msg_tokens
                     if total_tokens > context_limit * 0.9:
                         # Trim couldn't rescue this turn — give a specific reason
+                        # that points at the actual lever to pull. With heavy
+                        # toolsets, schemas often exceed the limit on their own
+                        # and clearing chat history won't help.
+                        n_tools = len(self.tools) if self.tools else 0
+                        if tool_schema_tokens > context_limit * 0.7:
+                            advice = (
+                                f"Toolset is too large for this context_limit "
+                                f"({n_tools} tools = {tool_schema_tokens} schema tokens). "
+                                f"Reduce toolset size or raise context_limit."
+                            )
+                        else:
+                            advice = (
+                                f"Clear older chat history or raise context_limit."
+                            )
                         overflow_reason = (
-                            f"(Context overflow — {total_tokens}/{context_limit} tokens even after "
-                            f"trim. Clear older chat history or raise this task's context_limit.)"
+                            f"(Context overflow — {total_tokens}/{context_limit} tokens "
+                            f"({msg_tokens} messages + {tool_schema_tokens} tool schemas "
+                            f"from {n_tools} tools). {advice})"
                         )
                         logger.error(f"[ExecCtx] {overflow_reason}")
                         break
@@ -378,7 +418,18 @@ class ExecutionContext:
                 messages.append({"role": "assistant", "content": final_content})
                 break
             else:
-                logger.warning("[ExecCtx] Empty response from LLM")
+                # Provider returned no content AND no tool_calls. This is
+                # rare but happens with some smaller / quantized models or
+                # when a provider trims to fit its own input cap and has
+                # no budget left for output. Without setting degraded_reason
+                # the empty assistant message hits the chat with no signal
+                # to the user — surface the cause via metadata. Scout 2 #3.
+                self.degraded_reason = (
+                    "LLM returned empty content with no tool calls "
+                    "(provider may have hit its own input cap or model "
+                    "produced no output)."
+                )
+                logger.warning(f"[ExecCtx] {self.degraded_reason}")
                 break
 
         # Before synthesizing a final placeholder, inject tool-result placeholders

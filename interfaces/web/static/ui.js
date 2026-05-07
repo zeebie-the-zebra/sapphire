@@ -236,7 +236,21 @@ const createMessage = (msg, idx = null, total = null, isHistoryRender = false) =
     }
     
     Parsing.parseContent(contentDiv, msg, isHistoryRender, scrollToBottomIfSticky);
-    
+
+    // Degraded-task signal: when a heartbeat / scheduled task ends without
+    // a real reply (context overflow, tool exhaustion, empty LLM), the
+    // backend keeps `content` empty so the text never reaches TTS / Discord
+    // / Telegram (Apr-24 incident), but it also tags `metadata.degraded_reason`
+    // so we can show the user WHY in chat. Italic muted note — no audio path.
+    if (role === 'assistant' && !msg.content && msg.metadata?.degraded_reason) {
+        const note = createElem(
+            'div',
+            { class: 'message-degraded' },
+            `⚠️ ${msg.metadata.degraded_reason}`
+        );
+        contentDiv.appendChild(note);
+    }
+
     // Add metadata footer for assistant messages
     if (role === 'assistant' && msg.metadata) {
         const meta = msg.metadata;
