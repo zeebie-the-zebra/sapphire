@@ -5,6 +5,7 @@
 // Design source: tmp/dashboard-hero.html (Variant B, Dancing Script).
 import * as ui from '../../ui.js';
 import { listStorePlugins } from '../../shared/store-api.js';
+import { isSafeHref } from '../../shared/url-safety.js';
 
 let updateStatus = null;
 
@@ -930,7 +931,13 @@ async function openPicker(el) {
             `;
             row.querySelector('.dash-picker-add').addEventListener('click', async () => {
                 if (btnDisabled) return;
-                const updated = installed.concat([{
+                // Refetch the current panel list rather than using the stale
+                // closure-captured `installed`. Defends against rapid Add
+                // clicks (multi_instance) and multi-tab edits.
+                let current;
+                try { current = await _fetchUserPanels(); }
+                catch { current = installed; }
+                const updated = current.concat([{
                     instance_id: 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
                     plugin: w.plugin,
                     widget_id: w.widget_id,
@@ -941,7 +948,12 @@ async function openPicker(el) {
                     await _saveUserPanels(updated);
                     ui.showToast(`Added ${w.name}`, 'success');
                     close();
-                    mountPanels(el);
+                    await mountPanels(el);
+                    // Re-init drag if edit mode is active — mountPanels
+                    // rebuilds DOM so Sortable's binding is gone.
+                    if (el.querySelector('.dash-root')?.classList.contains('dashboard-editing')) {
+                        _initSortable(el);
+                    }
                 } catch (e) {
                     ui.showToast(`Failed to add: ${e.message}`, 'error');
                 }
@@ -958,8 +970,11 @@ async function openPicker(el) {
             { plugin: 'core', widget_id: 'maintenance', size: '1x1' },
             { plugin: 'core', widget_id: 'mini-spotlight', size: '1x1' },
         ];
-        // Add any defaults not already installed (don't duplicate single-instance ones).
-        const next = installed.slice();
+        // Refetch current state — `installed` may be stale.
+        let current;
+        try { current = await _fetchUserPanels(); }
+        catch { current = installed; }
+        const next = current.slice();
         for (const d of defaults) {
             if (!next.some(p => p.plugin === d.plugin && p.widget_id === d.widget_id)) {
                 next.push({
@@ -972,7 +987,10 @@ async function openPicker(el) {
             await _saveUserPanels(next);
             ui.showToast('Defaults restored', 'success');
             close();
-            mountPanels(el);
+            await mountPanels(el);
+            if (el.querySelector('.dash-root')?.classList.contains('dashboard-editing')) {
+                _initSortable(el);
+            }
         } catch (e) {
             ui.showToast(`Failed: ${e.message}`, 'error');
         }
@@ -999,7 +1017,10 @@ async function loadSystemInfo(el) {
             _moodSignals.diskPct = d.disk_pct;
             _refreshMood(el);
         }
-        if (d.display_name && nameEl && nameEl.textContent.trim() !== d.display_name) {
+        // Only sync from backend if the user isn't actively editing —
+        // otherwise the late-arriving system-info clobbers their typed text.
+        if (d.display_name && nameEl && nameEl.textContent.trim() !== d.display_name
+            && document.activeElement !== nameEl) {
             nameEl.textContent = d.display_name;
             try { localStorage.setItem('sapphireDisplayName', d.display_name); } catch (e2) { /* ignore */ }
         }
@@ -1154,7 +1175,7 @@ async function loadPluginSpotlight(el) {
     const list = card.querySelector('#dash-recommended-list');
     if (!list) return;
     list.innerHTML = items.map(item => {
-        const author = item.author_url
+        const author = (item.author_url && isSafeHref(item.author_url))
             ? `<a href="${_esc(item.author_url)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${_esc(item.author || 'Unknown')}</a>`
             : _esc(item.author || 'Unknown');
         const installed = item.installed_state === 'current'

@@ -11,6 +11,7 @@ function _esc(s) {
 
 export async function render(container, ctx) {
     let aborted = false;
+    let firstPaint = true;
 
     async function refresh() {
         try {
@@ -18,18 +19,32 @@ export async function render(container, ctx) {
             if (!res.ok) throw new Error('failed');
             const d = await res.json();
             if (aborted) return;
-            container.innerHTML = `
-                <div class="dash-action-panel-info-line">uptime <strong>${_esc(d.uptime_str)}</strong></div>
-                <div class="dash-action-panel-info-line" id="mnt-status">status <strong>—</strong></div>
-            `;
-            // Hand the status node to the hero so it can paint mood color.
-            ctx.api.bindMaintenanceStatus?.(container.querySelector('#mnt-status'));
+            // First paint creates both lines (uptime + status placeholder).
+            // Subsequent refreshes only update uptime — the host's _setMood
+            // owns #mnt-status and writes mood color into it. Rewriting the
+            // status line every 60s would clobber the painted color.
+            // Bug fix 2026-05-07.
+            if (firstPaint) {
+                container.innerHTML = `
+                    <div class="dash-action-panel-info-line dash-mnt-uptime">uptime <strong>${_esc(d.uptime_str)}</strong></div>
+                    <div class="dash-action-panel-info-line" id="mnt-status">status <strong>—</strong></div>
+                `;
+                firstPaint = false;
+            } else {
+                const upEl = container.querySelector('.dash-mnt-uptime');
+                if (upEl) upEl.innerHTML = `uptime <strong>${_esc(d.uptime_str)}</strong>`;
+            }
         } catch {
             if (aborted) return;
-            container.innerHTML = `
-                <div class="dash-action-panel-info-line"><span class="dim">uptime: —</span></div>
-                <div class="dash-action-panel-info-line"><span class="dim">status: —</span></div>
-            `;
+            // Only paint error state on first failure — don't overwrite an
+            // already-painted status word.
+            if (firstPaint) {
+                container.innerHTML = `
+                    <div class="dash-action-panel-info-line dash-mnt-uptime"><span class="dim">uptime: —</span></div>
+                    <div class="dash-action-panel-info-line" id="mnt-status">status <strong>—</strong></div>
+                `;
+                firstPaint = false;
+            }
         }
     }
 

@@ -452,6 +452,17 @@ class PluginLoader:
         # Widget render modules are served at /plugin-web/{name}/{render_path}.
         widgets = capabilities.get("widgets", [])
         if widgets:
+            # Reserve plugin name 'core' for built-in widget registration.
+            # Registering a plugin under 'core' would merge its widgets with
+            # built-ins in the registry; unloading would wipe ALL built-ins.
+            # 2026-05-07 chaos-scout finding.
+            if name == "core":
+                logger.warning(
+                    f"[PLUGINS] plugin name 'core' is reserved for built-in widgets; "
+                    f"refusing to register widgets from plugin '{name}'"
+                )
+                widgets = []
+        if widgets:
             try:
                 from core.dashboard_widgets import register_widget, WidgetSpec
                 for w in widgets:
@@ -718,9 +729,12 @@ class PluginLoader:
         self._unregister_routes(name)
 
         # Unregister dashboard widgets contributed by this plugin.
+        # Refuse to touch the 'core' namespace — that's where built-ins live;
+        # blasting it would wipe System/Updates/Backups/Maintenance/Spotlight.
         try:
             from core.dashboard_widgets import unregister_plugin_widgets
-            unregister_plugin_widgets(name)
+            if name != "core":
+                unregister_plugin_widgets(name)
         except Exception as e:
             logger.warning(f"[PLUGINS] {name}: failed to unregister widgets: {e}")
 

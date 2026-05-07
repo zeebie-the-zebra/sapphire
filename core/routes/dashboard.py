@@ -66,7 +66,11 @@ def _seed_defaults() -> dict:
 
 def _load() -> dict:
     """Read the dashboard file. Auto-seeds and writes defaults if missing
-    or malformed (so a fresh install has a working dashboard immediately)."""
+    or malformed (so a fresh install has a working dashboard immediately).
+
+    On parse failure, the malformed file is preserved as `dashboard.json.bak`
+    before reseeding — so a one-shot corruption doesn't silently destroy
+    the user's customizations forever. 2026-05-07 chaos-scout finding."""
     if not DASHBOARD_FILE.exists():
         DASHBOARD_FILE.parent.mkdir(parents=True, exist_ok=True)
         data = _seed_defaults()
@@ -78,7 +82,15 @@ def _load() -> dict:
             raise ValueError("missing 'panels'")
         return data
     except Exception as e:
-        logger.warning(f"dashboard.json malformed ({e}); reseeding")
+        backup = DASHBOARD_FILE.with_suffix(DASHBOARD_FILE.suffix + ".bak")
+        try:
+            backup.write_bytes(DASHBOARD_FILE.read_bytes())
+        except Exception as backup_err:
+            logger.warning(f"dashboard.json backup before reseed failed: {backup_err}")
+        logger.warning(
+            f"dashboard.json malformed ({e}); reseeding defaults — "
+            f"prior contents saved to {backup.name}"
+        )
         data = _seed_defaults()
         DASHBOARD_FILE.write_text(json.dumps(data, indent=2))
         return data

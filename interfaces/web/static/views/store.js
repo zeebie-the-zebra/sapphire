@@ -20,6 +20,7 @@ import {
     getStoreCategories, installFromStore,
 } from '../shared/store-api.js';
 import { renderMarkdown } from '../shared/markdown.js';
+import { isSafeHref } from '../shared/url-safety.js';
 import * as ui from '../ui.js';
 
 const SUBMIT_URL = 'https://sapphireblue.dev/plugins/submit-your-plugin/';
@@ -139,7 +140,7 @@ function renderSidebar() {
 
 function renderCard(item) {
     const featured = item.featured ? '<span class="store-featured-tag">★ Featured</span>' : '';
-    const author = item.author_url
+    const author = (item.author_url && isSafeHref(item.author_url))
         ? `<a href="${_esc(item.author_url)}" target="_blank" rel="noopener noreferrer">${_esc(item.author)}</a>`
         : _esc(item.author || 'Unknown');
     const version = item.version ? `<span class="store-card-version">v${_esc(item.version)}</span>` : '';
@@ -339,11 +340,11 @@ async function renderDetail(slug) {
 
     if (!item || item.unreachable) { renderUnreachable(); return; }
 
-    const author = item.author_url
+    const author = (item.author_url && isSafeHref(item.author_url))
         ? `<a href="${_esc(item.author_url)}" target="_blank" rel="noopener noreferrer">${_esc(item.author)}</a>`
         : _esc(item.author || 'Unknown');
     const longHtml = item.long_description ? renderMarkdown(item.long_description) : '';
-    const screenshot = item.screenshot_url
+    const screenshot = (item.screenshot_url && isSafeHref(item.screenshot_url))
         ? `<img class="store-detail-screenshot" src="${_esc(item.screenshot_url)}" alt="">`
         : '';
     const featured = item.featured ? '<span class="store-featured-tag">★ Featured</span>' : '';
@@ -379,7 +380,9 @@ async function renderDetail(slug) {
                 ${longHtml || '<p class="store-empty">No long description provided.</p>'}
             </div>
             <footer class="store-detail-footer">
-                <a href="${_esc(item.github_url)}" target="_blank" rel="noopener noreferrer">View source on ${_esc(item.source_type || 'GitHub')} →</a>
+                ${isSafeHref(item.github_url)
+                    ? `<a href="${_esc(item.github_url)}" target="_blank" rel="noopener noreferrer">View source on ${_esc(item.source_type || 'GitHub')} →</a>`
+                    : ''}
                 <span class="store-detail-cat">${_esc(_categoryIcon(item.category))} ${_esc(_findCategoryLabel(item.category))}</span>
             </footer>
         </article>
