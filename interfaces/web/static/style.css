@@ -134,6 +134,16 @@ body {
 .app-back-btn:hover { color: var(--text); background: var(--bg-secondary); }
 .app-host-title { font-weight: 600; color: var(--text); }
 .app-host-content { flex: 1; overflow: auto; padding: 16px; }
+.app-tile-ghost {
+    border-style: dashed;
+    background: transparent;
+    color: var(--text-muted);
+}
+.app-tile-ghost:hover {
+    border-style: solid;
+    color: var(--text);
+}
+.app-tile-ghost .app-tile-icon { opacity: 0.7; }
 
 /* =============================================================================
    NAV RAIL ITEMS
