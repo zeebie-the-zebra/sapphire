@@ -77,6 +77,7 @@ export default {
 
                     <div class="dash-widget-controls" id="dash-widget-controls">
                         <button id="dash-add-widget" title="Add widget">+ Add</button>
+                        <button id="dash-edit-widgets" title="Edit dashboard">✎ Edit</button>
                     </div>
                     <div class="dash-action-panels" id="dash-panels">
                         <span class="dim" style="font-size:11px;padding:8px">Loading widgets...</span>
@@ -144,8 +145,9 @@ export default {
         // module.render() to populate the body.
         mountPanels(el).catch(e => console.warn('mountPanels failed', e));
 
-        // ── Controls row — `+` opens the picker ─────────────────────
+        // ── Controls row — `+` opens the picker, `✎` toggles edit mode
         el.querySelector('#dash-add-widget')?.addEventListener('click', () => openPicker(el));
+        el.querySelector('#dash-edit-widgets')?.addEventListener('click', () => toggleEditMode(el));
 
         // ── Initial mood paint (status word picks up its color when
         //    the Maintenance widget's #mnt-status is in the DOM) ──
@@ -392,20 +394,348 @@ async function _saveUserPanels(panels) {
     }
 }
 
-function _buildPanelChrome(panel) {
+// Debounced save — drag/resize cascades coalesce into one PUT.
+let _saveTimer = null;
+let _savePending = null;
+function _scheduleSave(panels) {
+    _savePending = panels;
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(() => {
+        const toSave = _savePending;
+        _saveTimer = null; _savePending = null;
+        _saveUserPanels(toSave).catch(e =>
+            ui.showToast(`Save failed: ${e.message}`, 'error'));
+    }, 250);
+}
+
+function _buildPanelChrome(panel, supportedSizes) {
     const div = document.createElement('div');
     div.className = `dash-action-panel size-${panel.size}`;
     div.dataset.panel = panel.widget_id;
     div.dataset.instance = panel.instance_id;
-    div.innerHTML = `
-        <div class="dash-action-panel-title"></div>
-        <div class="dash-action-panel-info"></div>
-        <details class="dash-action-dropdown" name="dash-hero-actions">
-            <summary><span>Actions</span><span class="chev">▾</span></summary>
-            <div class="dash-action-dropdown-menu"></div>
-        </details>
+    div.dataset.plugin = panel.plugin;
+    div.dataset.widget = panel.widget_id;
+    div.dataset.size = panel.size;
+
+    // Drag handle — 6-dot SVG (clean at any size, font-independent).
+    // Always present; only visible/draggable in edit mode.
+    const handle = document.createElement('div');
+    handle.className = 'dash-action-panel-edit-handle';
+    handle.title = 'Drag to reorder';
+    handle.innerHTML = `
+        <svg viewBox="0 0 8 14" width="8" height="14" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="2" cy="2"  r="1.3" fill="currentColor"/>
+            <circle cx="6" cy="2"  r="1.3" fill="currentColor"/>
+            <circle cx="2" cy="7"  r="1.3" fill="currentColor"/>
+            <circle cx="6" cy="7"  r="1.3" fill="currentColor"/>
+            <circle cx="2" cy="12" r="1.3" fill="currentColor"/>
+            <circle cx="6" cy="12" r="1.3" fill="currentColor"/>
+        </svg>
     `;
+    div.appendChild(handle);
+
+    // Delete button.
+    const del = document.createElement('button');
+    del.className = 'dash-action-panel-edit-delete';
+    del.title = 'Remove widget';
+    del.textContent = '×';
+    del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _deletePanel(panel.instance_id);
+    });
+    div.appendChild(del);
+
+    // Title and info-line wrapper.
+    const titleEl = document.createElement('div');
+    titleEl.className = 'dash-action-panel-title';
+    div.appendChild(titleEl);
+
+    const infoEl = document.createElement('div');
+    infoEl.className = 'dash-action-panel-info';
+    div.appendChild(infoEl);
+
+    // Resize pills (only the sizes the widget allows; hidden if just one).
+    if (supportedSizes && supportedSizes.length > 1) {
+        const sizes = document.createElement('div');
+        sizes.className = 'dash-action-panel-edit-sizes';
+        for (const s of supportedSizes) {
+            const btn = document.createElement('button');
+            btn.textContent = s;
+            if (s === panel.size) btn.classList.add('active');
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                _resizePanel(panel.instance_id, s);
+            });
+            sizes.appendChild(btn);
+        }
+        div.appendChild(sizes);
+    }
+
+    // Actions dropdown.
+    const drop = document.createElement('details');
+    drop.className = 'dash-action-dropdown';
+    drop.name = 'dash-hero-actions';
+    drop.innerHTML = `
+        <summary><span>Actions</span><span class="chev">▾</span></summary>
+        <div class="dash-action-dropdown-menu"></div>
+    `;
+    div.appendChild(drop);
+
     return div;
+}
+
+// Edit-mode state. The dashboard root div gets `dashboard-editing` and
+// SortableJS attaches/detaches on the panels container.
+let _sortableInstance = null;
+let _editEl = null;
+
+function toggleEditMode(el) {
+    const root = el.querySelector('.dash-root');
+    const button = el.querySelector('#dash-edit-widgets');
+    if (!root) return;
+    const editing = root.classList.toggle('dashboard-editing');
+    button?.classList.toggle('editing', editing);
+    if (editing) {
+        button.textContent = '✓ Done';
+        _editEl = el;
+        _initSortable(el);
+    } else {
+        button.textContent = '✎ Edit';
+        _editEl = null;
+        _destroySortable();
+    }
+}
+
+function _initSortable(el) {
+    if (!window.Sortable) {
+        console.warn('Sortable not loaded');
+        return;
+    }
+    const container = el.querySelector('#dash-panels');
+    if (!container) return;
+    _destroySortable();
+    _sortableInstance = window.Sortable.create(container, {
+        animation: 180,
+        handle: '.dash-action-panel-edit-handle',
+        ghostClass: 'sortable-ghost',
+        chosenClass: 'sortable-chosen',
+        onEnd: () => _persistOrder(el),
+    });
+}
+
+function _destroySortable() {
+    if (_sortableInstance) {
+        try { _sortableInstance.destroy(); } catch {}
+        _sortableInstance = null;
+    }
+}
+
+// Read panel order from DOM (Sortable just rearranged it) and save.
+async function _persistOrder(el) {
+    const panels = await _fetchUserPanels();
+    const byId = new Map(panels.map(p => [p.instance_id, p]));
+    const ordered = [];
+    el.querySelectorAll('#dash-panels .dash-action-panel').forEach(node => {
+        const inst = node.dataset.instance;
+        const p = byId.get(inst);
+        if (p) ordered.push(p);
+    });
+    if (ordered.length !== panels.length) {
+        // Something out of sync — refetch and remount.
+        mountPanels(el);
+        return;
+    }
+    _scheduleSave(ordered);
+}
+
+async function _deletePanel(instance_id) {
+    const el = _editEl || document.querySelector('[data-view="settings"]') || document;
+    const panels = await _fetchUserPanels();
+    const next = panels.filter(p => p.instance_id !== instance_id);
+    if (next.length === panels.length) return;
+    try {
+        await _saveUserPanels(next);  // immediate save, not debounced — user-visible action
+        await mountPanels(el);
+        // After remount, restore edit-mode visuals (panels are fresh DOM).
+        if (el.querySelector('.dash-root')?.classList.contains('dashboard-editing')) {
+            _initSortable(el);
+        }
+    } catch (e) {
+        ui.showToast(`Delete failed: ${e.message}`, 'error');
+    }
+}
+
+// =============================================================================
+// WIDGET SETTINGS MODAL — builds a form from the widget's settings_schema,
+// saves to the panel's per-instance settings via PUT /api/dashboard/widgets.
+// Auto-attached to the Actions dropdown when a widget declares a schema.
+// =============================================================================
+
+async function openWidgetSettings(el, instance_id) {
+    const panels = await _fetchUserPanels();
+    const panel = panels.find(p => p.instance_id === instance_id);
+    if (!panel) {
+        ui.showToast('Widget not found', 'error');
+        return;
+    }
+    const schema = panel.settings_schema || [];
+    if (schema.length === 0) {
+        ui.showToast('This widget has no settings', 'error');
+        return;
+    }
+
+    const existing = panel.settings || {};
+    let backdrop = document.querySelector('.dash-picker-backdrop');
+    if (backdrop) backdrop.remove();
+
+    backdrop = document.createElement('div');
+    backdrop.className = 'dash-picker-backdrop';
+    backdrop.innerHTML = `
+        <div class="dash-picker" role="dialog" aria-modal="true">
+            <div class="dash-picker-header">
+                <h3>${_esc(panel.name || panel.widget_id)} — settings</h3>
+                <button class="dash-picker-close" title="Close">×</button>
+            </div>
+            <div class="dash-picker-body" style="padding:16px"></div>
+            <div class="dash-picker-footer">
+                <a class="dash-picker-cancel">Cancel</a>
+                <button class="dash-picker-add" data-act="save">Save</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const close = () => backdrop.remove();
+    backdrop.querySelector('.dash-picker-close').addEventListener('click', close);
+    backdrop.querySelector('.dash-picker-cancel').addEventListener('click', close);
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+        if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+
+    const body = backdrop.querySelector('.dash-picker-body');
+    const fieldNodes = {};
+
+    for (const field of schema) {
+        const wrap = document.createElement('label');
+        wrap.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-bottom:14px';
+        const label = document.createElement('span');
+        label.style.cssText = 'font-size:var(--font-sm);color:var(--text-muted)';
+        label.textContent = field.label || field.key;
+        wrap.appendChild(label);
+
+        const cur = existing[field.key] !== undefined ? existing[field.key] : field.default;
+        let input;
+        switch (field.type) {
+            case 'textarea': {
+                input = document.createElement('textarea');
+                input.rows = field.rows || 3;
+                input.style.cssText = 'width:100%;padding:8px 10px;background:var(--bg-tertiary,#2c2c2c);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:13px;resize:vertical';
+                input.value = (cur ?? '');
+                break;
+            }
+            case 'select': {
+                input = document.createElement('select');
+                input.style.cssText = 'width:100%;padding:6px 10px;background:var(--bg-tertiary,#2c2c2c);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:13px';
+                for (const opt of (field.options || [])) {
+                    const o = document.createElement('option');
+                    o.value = opt.value;
+                    o.textContent = opt.label || opt.value;
+                    if (String(cur) === String(opt.value)) o.selected = true;
+                    input.appendChild(o);
+                }
+                break;
+            }
+            case 'number': {
+                input = document.createElement('input');
+                input.type = 'number';
+                input.style.cssText = 'width:100%;padding:6px 10px;background:var(--bg-tertiary,#2c2c2c);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:13px';
+                if (typeof cur === 'number') input.value = cur;
+                if (field.min !== undefined) input.min = field.min;
+                if (field.max !== undefined) input.max = field.max;
+                if (field.step !== undefined) input.step = field.step;
+                break;
+            }
+            case 'boolean': {
+                input = document.createElement('input');
+                input.type = 'checkbox';
+                input.checked = !!cur;
+                input.style.cssText = 'width:auto;margin-top:4px';
+                break;
+            }
+            case 'color': {
+                input = document.createElement('input');
+                input.type = 'color';
+                input.value = cur || '#4a9eff';
+                input.style.cssText = 'width:60px;height:30px;padding:0;border:1px solid var(--border);border-radius:6px;background:transparent';
+                break;
+            }
+            case 'text':
+            default: {
+                input = document.createElement('input');
+                input.type = 'text';
+                input.style.cssText = 'width:100%;padding:6px 10px;background:var(--bg-tertiary,#2c2c2c);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:inherit;font-size:13px';
+                input.value = (cur ?? '');
+                break;
+            }
+        }
+        wrap.appendChild(input);
+
+        if (field.help) {
+            const help = document.createElement('span');
+            help.style.cssText = 'font-size:var(--font-xs);color:var(--text-dim);margin-top:2px';
+            help.textContent = field.help;
+            wrap.appendChild(help);
+        }
+
+        body.appendChild(wrap);
+        fieldNodes[field.key] = { input, type: field.type };
+    }
+
+    backdrop.querySelector('[data-act="save"]').addEventListener('click', async () => {
+        const newSettings = { ...existing };
+        for (const [key, { input, type }] of Object.entries(fieldNodes)) {
+            if (type === 'boolean') {
+                newSettings[key] = input.checked;
+            } else if (type === 'number') {
+                newSettings[key] = input.value === '' ? null : Number(input.value);
+            } else {
+                newSettings[key] = input.value;
+            }
+        }
+        // Replace the panel's settings in the user's list.
+        const next = panels.map(p =>
+            p.instance_id === instance_id ? { ...p, settings: newSettings } : p);
+        try {
+            await _saveUserPanels(next);
+            ui.showToast('Settings saved', 'success');
+            close();
+            await mountPanels(el);
+            if (el.querySelector('.dash-root')?.classList.contains('dashboard-editing')) {
+                _initSortable(el);
+            }
+        } catch (e) {
+            ui.showToast(`Save failed: ${e.message}`, 'error');
+        }
+    });
+}
+
+
+async function _resizePanel(instance_id, size) {
+    const el = _editEl || document.querySelector('[data-view="settings"]') || document;
+    const panels = await _fetchUserPanels();
+    const target = panels.find(p => p.instance_id === instance_id);
+    if (!target || target.size === size) return;
+    target.size = size;
+    try {
+        await _saveUserPanels(panels);
+        await mountPanels(el);
+        if (el.querySelector('.dash-root')?.classList.contains('dashboard-editing')) {
+            _initSortable(el);
+        }
+    } catch (e) {
+        ui.showToast(`Resize failed: ${e.message}`, 'error');
+    }
 }
 
 async function mountPanels(el) {
@@ -437,12 +767,13 @@ async function mountPanels(el) {
                 settingsView.dispatchEvent(new CustomEvent('settings-navigate', { detail: { tab }, bubbles: true }));
             }
         },
+        openWidgetSettings: (instance_id) => openWidgetSettings(el, instance_id),
     };
 
     const v = (window.__appVersion || 'dev');
 
     for (const panel of panels) {
-        const wrapper = _buildPanelChrome(panel);
+        const wrapper = _buildPanelChrome(panel, panel.sizes || ['1x1']);
         container.appendChild(wrapper);
         const bodyEl = wrapper.querySelector('.dash-action-panel-info');
         const titleEl = wrapper.querySelector('.dash-action-panel-title');
@@ -471,7 +802,17 @@ async function mountPanels(el) {
             const result = await module.render(bodyEl, ctx);
             titleEl.textContent = result?.title || panel.name || panel.widget_id;
 
-            (result?.actions || []).forEach(a => {
+            const allActions = [...(result?.actions || [])];
+            // Auto-append "⚙ Settings..." when the widget declares a schema.
+            // Plugin authors don't have to wire this themselves.
+            if ((panel.settings_schema || []).length > 0) {
+                allActions.push({
+                    icon: '⚙',
+                    label: 'Settings...',
+                    onClick: () => openWidgetSettings(el, panel.instance_id),
+                });
+            }
+            allActions.forEach(a => {
                 const btn = document.createElement('button');
                 if (a.kind) btn.className = a.kind;
                 if (a.icon) {

@@ -26,6 +26,7 @@ class WidgetSpec:
     sizes: list[str] = field(default_factory=lambda: ["1x1"])
     default_size: str = "1x1"
     multi_instance: bool = False
+    settings_schema: list = field(default_factory=list)  # field defs auto-rendered as a settings form
     api_version: int = 1
 
     def to_public_dict(self) -> dict:

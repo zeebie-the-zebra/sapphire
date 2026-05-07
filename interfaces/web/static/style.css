@@ -3059,17 +3059,125 @@ div.hb-response-summary {
     color: var(--accent, #4a9eff);
 }
 
-/* Action panels — fenced rows under the identity. */
+/* Action panels — fenced rows under the identity.
+   Flex layout with growth ratios driven by size class. A 1x2 panel
+   grows twice as wide as a 1x1 in the same row. Five default 1x1 panels
+   still fit on one row (flex grows them proportionally). When a widget
+   resizes to 1x4 it can wrap onto its own line cleanly. */
 .dash-action-panels {
     display: flex; gap: 12px; flex-wrap: wrap;
     position: relative; z-index: 1;
 }
-/* Size classes — single-row spans driven by widget's declared size.
-   For Stage 2, the actual layout is still flex; in Stage 3 we'll switch
-   to grid for predictable column-spans when resize lands. */
+.dash-action-panel.size-1x1 { flex: 1 1 200px; }
 .dash-action-panel.size-1x2 { flex: 2 2 360px; }
 .dash-action-panel.size-1x3 { flex: 3 3 540px; }
-.dash-action-panel.size-1x4 { flex: 4 4 720px; }
+.dash-action-panel.size-1x4 { flex: 1 1 100%; }
+@media (max-width: 768px) {
+    .dash-action-panel { flex: 1 1 100% !important; }
+}
+
+/* ─── EDIT MODE — drag handle, delete, resize pills ───────────── */
+
+/* Edit affordances live in the DOM always but hide by default. They
+   fade in via opacity transition when .dash-root.dashboard-editing is
+   set on the dashboard wrapper. Subliminal — visible but never sudden. */
+.dash-action-panel { position: relative; }
+.dash-action-panel-edit-handle,
+.dash-action-panel-edit-delete,
+.dash-action-panel-edit-sizes {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 5;
+}
+.dashboard-editing .dash-action-panel-edit-handle,
+.dashboard-editing .dash-action-panel-edit-delete,
+.dashboard-editing .dash-action-panel-edit-sizes {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Subtle border + cursor change on the whole panel in edit mode signals
+   "this is malleable now" without yelling. */
+.dashboard-editing .dash-action-panel {
+    border-color: rgba(74, 158, 255, 0.25);
+    cursor: grab;
+}
+.dashboard-editing .dash-action-panel:active { cursor: grabbing; }
+
+.dash-action-panel-edit-handle {
+    position: absolute;
+    top: 8px; left: 6px;
+    width: 22px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim);
+    border-radius: 4px;
+    cursor: grab;
+    user-select: none;
+    transition: background 0.15s, color 0.15s;
+}
+.dash-action-panel-edit-handle:hover {
+    background: rgba(74, 158, 255, 0.08);
+    color: var(--accent, #4a9eff);
+}
+.dash-action-panel-edit-handle svg { display: block; }
+/* Make room for the drag handle so it doesn't overlap the title text. */
+.dashboard-editing .dash-action-panel-title { padding-left: 26px; }
+.dashboard-editing .dash-action-panel-info  { padding-left: 0; }
+.dash-action-panel-edit-delete {
+    position: absolute;
+    top: 4px; right: 4px;
+    width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-dim);
+    font-size: 14px;
+    cursor: pointer;
+    line-height: 1;
+}
+.dash-action-panel-edit-delete:hover {
+    background: rgba(255, 107, 107, 0.12);
+    border-color: rgba(255, 107, 107, 0.5);
+    color: #ff6b6b;
+}
+.dash-action-panel-edit-sizes {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+.dash-action-panel-edit-sizes button {
+    flex: 0 0 auto;
+    background: var(--bg-tertiary, #2c2c2c);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    cursor: pointer;
+}
+.dash-action-panel-edit-sizes button:hover {
+    border-color: var(--accent, #4a9eff);
+    color: var(--accent, #4a9eff);
+}
+.dash-action-panel-edit-sizes button.active {
+    background: rgba(74, 158, 255, 0.12);
+    border-color: var(--accent, #4a9eff);
+    color: var(--accent, #4a9eff);
+}
+
+/* Sortable.js drag visuals */
+.dash-action-panel.sortable-ghost  { opacity: 0.35; }
+.dash-action-panel.sortable-chosen { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+
+/* Edit-mode toggle (`✎`) gets a slight active state when editing. */
+.dash-widget-controls button.editing {
+    background: rgba(74, 158, 255, 0.12);
+    border-color: rgba(74, 158, 255, 0.35);
+    color: var(--accent, #4a9eff);
+}
 
 /* ─── PICKER MODAL ─────────────────────────────────────────────── */
 .dash-picker-backdrop {

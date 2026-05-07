@@ -448,6 +448,37 @@ class PluginLoader:
         if tool_paths and self._function_manager:
             self._function_manager.register_plugin_tools(name, plugin_dir, tool_paths)
 
+        # Register dashboard widgets — same shape as other capabilities.
+        # Widget render modules are served at /plugin-web/{name}/{render_path}.
+        widgets = capabilities.get("widgets", [])
+        if widgets:
+            try:
+                from core.dashboard_widgets import register_widget, WidgetSpec
+                for w in widgets:
+                    if not isinstance(w, dict):
+                        continue
+                    widget_id = w.get("id")
+                    if not widget_id:
+                        logger.warning(f"[PLUGINS] {name} widget missing 'id'; skipping")
+                        continue
+                    render_path = w.get("render", f"widgets/{widget_id}.js")
+                    register_widget(WidgetSpec(
+                        plugin=name,
+                        widget_id=widget_id,
+                        name=w.get("name", widget_id),
+                        render_url=f"/plugin-web/{name}/{render_path}",
+                        description=w.get("description", ""),
+                        icon=w.get("icon", ""),
+                        sizes=w.get("sizes", ["1x1"]),
+                        default_size=w.get("default_size", "1x1"),
+                        multi_instance=w.get("multi_instance", False),
+                        settings_schema=w.get("settings_schema", []) or [],
+                        api_version=w.get("api_version", 1),
+                    ))
+                logger.info(f"[PLUGINS] Registered {len(widgets)} widget(s) for {name}")
+            except Exception as e:
+                logger.warning(f"[PLUGINS] Widget registration failed for {name}: {e}")
+
         # Register HTTP routes
         routes = capabilities.get("routes", [])
         if routes:
@@ -680,11 +711,18 @@ class PluginLoader:
         return None
 
     def unload_plugin(self, name: str):
-        """Unload a plugin — deregister all hooks, tools, routes, providers, schedule tasks, event sources, and scopes."""
+        """Unload a plugin — deregister all hooks, tools, routes, providers, schedule tasks, event sources, scopes, and dashboard widgets."""
         hook_runner.unregister_plugin(name)
         if self._function_manager:
             self._function_manager.unregister_plugin_tools(name)
         self._unregister_routes(name)
+
+        # Unregister dashboard widgets contributed by this plugin.
+        try:
+            from core.dashboard_widgets import unregister_plugin_widgets
+            unregister_plugin_widgets(name)
+        except Exception as e:
+            logger.warning(f"[PLUGINS] {name}: failed to unregister widgets: {e}")
 
         # Unregister scopes this plugin contributed so a later manifest edit
         # with a different default takes effect on re-register instead of

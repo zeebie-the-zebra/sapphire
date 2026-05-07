@@ -38,6 +38,7 @@ A tool is a single function the AI can call. A plugin is an autonomous package t
 | [Routes](routes.md) | Custom HTTP endpoints — path params, auth enforcement, handler signature |
 | [Schedule](schedule.md) | Cron tasks — manifest fields, handler contract, examples |
 | [Daemons](daemons.md) | Background event listeners — Telegram, Discord, Email, custom sources |
+| [Widgets](widgets.md) | Dashboard panels — manifest, render contract, settings schema, sample plugin |
 | [Settings](settings.md) | Manifest-declared settings, custom web UI, settings API, danger confirms |
 | [Web UI](web-ui.md) | Shared JS modules, CSS variables, modals, CSRF, style injection |
 | [Signing](signing.md) | Verification states, sideloading, signing your own plugins |

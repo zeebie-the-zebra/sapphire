@@ -129,14 +129,16 @@ async def get_dashboard_widgets(_=Depends(require_login)):
     for p in data.get("panels", []):
         spec = get_widget(p.get("plugin"), p.get("widget_id"))
         panels.append({
-            "instance_id": p.get("instance_id") or _new_instance_id(),
-            "plugin":      p.get("plugin"),
-            "widget_id":   p.get("widget_id"),
-            "size":        p.get("size", "1x1"),
-            "settings":    p.get("settings", {}) or {},
-            "available":   spec is not None,
-            "render_url":  spec.render_url if spec else None,
-            "name":        spec.name if spec else p.get("widget_id"),
+            "instance_id":     p.get("instance_id") or _new_instance_id(),
+            "plugin":          p.get("plugin"),
+            "widget_id":       p.get("widget_id"),
+            "size":            p.get("size", "1x1"),
+            "settings":        p.get("settings", {}) or {},
+            "available":       spec is not None,
+            "render_url":      spec.render_url if spec else None,
+            "name":            spec.name if spec else p.get("widget_id"),
+            "sizes":           spec.sizes if spec else ["1x1"],
+            "settings_schema": spec.settings_schema if spec else [],
         })
     return {"version": data.get("version", 1), "panels": panels}
 
@@ -185,14 +187,15 @@ async def get_available_widgets(_=Depends(require_login)):
     items = []
     for spec in list_widgets():
         items.append({
-            "plugin":         spec.plugin,
-            "widget_id":      spec.widget_id,
-            "name":           spec.name,
-            "description":    spec.description,
-            "icon":           spec.icon,
-            "sizes":          spec.sizes,
-            "default_size":   spec.default_size,
-            "multi_instance": spec.multi_instance,
-            "render_url":     spec.render_url,
+            "plugin":          spec.plugin,
+            "widget_id":       spec.widget_id,
+            "name":            spec.name,
+            "description":     spec.description,
+            "icon":            spec.icon,
+            "sizes":           spec.sizes,
+            "default_size":    spec.default_size,
+            "multi_instance":  spec.multi_instance,
+            "settings_schema": spec.settings_schema,
+            "render_url":      spec.render_url,
         })
     return {"widgets": items}

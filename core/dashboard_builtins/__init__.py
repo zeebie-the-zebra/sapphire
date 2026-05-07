@@ -53,7 +53,7 @@ _BUILTINS = [
         name="Plugin Spotlight",
         description="Three randomly-rotating featured plugins.",
         icon="\U0001f6cd️",
-        sizes=["1x1"],
+        sizes=["1x1", "1x2", "1x4"],
         default_size="1x1",
         render_url="/core-widgets/mini-spotlight.js",
     ),
