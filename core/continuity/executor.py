@@ -247,13 +247,22 @@ class ContinuityExecutor:
             if setting_key in task:
                 settings[setting_key] = task[setting_key]
             else:
-                settings[setting_key] = "default"
+                # Pre-2026-05-07 we wrote 'default' here. That defeated the
+                # force-None protection in ExecutionContext._build_scopes:
+                # by the time it ran, every scope key was already in
+                # task_settings, so the `if setting_key not in task_settings`
+                # branch was dead code. The "silent-default closed" comment
+                # was a lie — only the warning fired, the real protection
+                # was bypassed. Now we leave the key UNSET so _build_scopes
+                # can force-None it, disabling the scope for this task as
+                # designed. Wildcard scout 2026-05-07 finding (verified).
                 missing_scopes.append(setting_key)
         if missing_scopes:
             logger.warning(
                 f"[Continuity] Task '{task.get('name', '?')}' missing scope keys "
-                f"{missing_scopes} — defaulting to 'default' scope. Writes from "
-                f"this task land in shared memory. Edit the task to set explicit scopes."
+                f"{missing_scopes} — those scopes will be DISABLED for this run "
+                f"(force-None at task entry). Edit the task to set explicit scopes "
+                f"if writes from this task should land somewhere."
             )
         return settings
 

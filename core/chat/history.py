@@ -495,6 +495,25 @@ class ConversationHistory:
                 del msg["tool_calls"]
                 msg.pop("thinking_raw", None)
 
+        # Drop assistant messages that ended up with no tool_calls AND no
+        # content. Without this, the orphan strip above produces an empty-
+        # content assistant; Claude/Anthropic providers (claude.py:715,
+        # anthropic_compat.py:145/164) DROP empty assistants from the API
+        # payload via `if content and content.strip()`. The result is two
+        # adjacent user messages — alternation violation → API 400 → every
+        # subsequent send fails with the same 400 → user has to delete the
+        # chat to recover. Filtering the empty assistant here keeps the
+        # alternation valid. Voice mode amplifies (more crash windows mid-
+        # tool-call). Wildcard scout 2026-05-07 chat-wedge.
+        msgs = [
+            m for m in msgs
+            if not (
+                m.get("role") == "assistant"
+                and not m.get("tool_calls")
+                and not str(m.get("content", "")).strip()
+            )
+        ]
+
         return msgs
 
     def clear_thinking_raw(self):
@@ -932,6 +951,39 @@ class ChatSessionManager:
                 file_settings = json.loads(row["settings"])
                 self.current_settings = get_system_defaults()
                 self.current_settings.update(file_settings)
+
+                # Belt-and-suspenders: if the loaded history ends with an
+                # assistant(tool_calls) whose tool_results are missing, the
+                # previous run was killed mid-tool-cycle. Arm `_in_tool_cycle`
+                # so the next stream's cancel-cleanup `finally` fires and
+                # injects placeholder tool_results — without this the orphan
+                # state is invisible to the streamer until something already
+                # tried to use it. The read-time strip in
+                # `get_messages_for_llm` ALSO defends, but that path only
+                # fires at LLM-call time; arming here closes the gap for any
+                # other consumer of `current_chat.messages`. Wildcard scout
+                # 2026-05-07 chat-wedge belt-and-suspenders.
+                msgs = self.current_chat.messages
+                if msgs:
+                    last_asst_idx = None
+                    for k in range(len(msgs) - 1, -1, -1):
+                        if msgs[k].get("role") == "assistant":
+                            last_asst_idx = k
+                            break
+                    if last_asst_idx is not None:
+                        last_asst = msgs[last_asst_idx]
+                        if last_asst.get("tool_calls"):
+                            call_ids = {tc.get("id", "") for tc in last_asst["tool_calls"]}
+                            result_ids = set()
+                            for m in msgs[last_asst_idx + 1:]:
+                                if m.get("role") == "tool":
+                                    result_ids.add(m.get("tool_call_id", ""))
+                            if not call_ids.issubset(result_ids):
+                                self._in_tool_cycle = True
+                                logger.info(
+                                    f"Chat '{chat_name}' loaded with unresolved "
+                                    f"tool_calls — arming _in_tool_cycle for cleanup"
+                                )
 
                 logger.info(f"Loaded chat '{chat_name}' with {len(self.current_chat.messages)} messages")
                 return True
