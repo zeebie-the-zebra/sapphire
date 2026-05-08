@@ -31,6 +31,15 @@ def _backup_filter(tarinfo):
     # exclusion is the right tradeoff. Witch-hunt 2026-04-21 finding C5.
     if name.endswith('_mcp_key.json'):
         return None
+    # mcp_client.json holds OUTBOUND bearer tokens (Authorization headers)
+    # for MCP servers Sapphire connects to as a client. Different naming
+    # convention from `*_mcp_key.json` (which is the inbound auth pattern),
+    # so the rule above didn't catch it. Same blast radius — plaintext
+    # credentials riding into RAID + offsite. Re-issuable from the MCP
+    # server's admin UI, so excluding from backups is the right tradeoff.
+    # Wildcard scout 2026-05-07 MCP C1.
+    if name.endswith('mcp_client.json'):
+        return None
     return tarinfo
 
 

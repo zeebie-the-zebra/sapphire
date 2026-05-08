@@ -458,12 +458,27 @@ class ConversationHistory:
         if context_limit > 0:
             safety_buffer = int(context_limit * 0.01) + 512
             effective_limit = context_limit - safety_buffer - reserved_tokens
-            
-            total_tokens = sum(count_tokens(str(m.get("content", ""))) for m in msgs)
-            
+
+            # Use the multimodal-aware helper. Pre-fix this used
+            # `count_tokens(str(m.get("content", "")))` which stringifies a
+            # multimodal list to include the base64 image data — a 5MB JPEG
+            # was scoring ~1.7M tokens and tripping the trim to nuke ALL
+            # history the moment an image landed in the chat. The user-
+            # visible symptom was "I sent an image and Sapphire suddenly
+            # forgot the last 30 turns." `count_message_tokens` (defined
+            # above at L122-160) handles dict-typed multimodal blocks
+            # correctly and excludes images by default. Wildcard scout
+            # 2026-05-07 multimodal #1.
+            total_tokens = sum(
+                count_message_tokens(m.get("content", ""), include_images=False)
+                for m in msgs
+            )
+
             while total_tokens > effective_limit and len(msgs) > 1:
                 removed = msgs.pop(0)
-                total_tokens -= count_tokens(str(removed.get("content", "")))
+                total_tokens -= count_message_tokens(
+                    removed.get("content", ""), include_images=False
+                )
 
         # Clean up orphaned tool results at the front.
         # Trimming can remove an assistant message with tool_calls while leaving
@@ -471,7 +486,9 @@ class ConversationHistory:
         while len(msgs) > 1 and msgs[0].get("role") in ("tool",):
             removed = msgs.pop(0)
             if context_limit > 0:
-                total_tokens -= count_tokens(str(removed.get("content", "")))
+                total_tokens -= count_message_tokens(
+                    removed.get("content", ""), include_images=False
+                )
 
         # Clean up orphaned tool_use blocks.
         # If server shuts down mid-tool-call, an assistant message with tool_calls
@@ -1138,6 +1155,18 @@ class ChatSessionManager:
                 except Exception:
                     pass  # Table may not exist yet
                 conn.commit()
+                # Reclaim freed pages now that we deleted a chat (potentially
+                # with megabytes of tool_images blobs). `auto_vacuum=INCREMENTAL`
+                # is enabled at _init_db but only does anything when something
+                # actually calls `incremental_vacuum`. Without this call, the
+                # file high-water-mark only shrinks during weekly VACUUM runs
+                # in backup.py. Cap at 100 pages (~400KB) to avoid a long
+                # pause on a heavy delete. Wildcard scout 2026-05-07 L1.
+                try:
+                    conn.execute("PRAGMA incremental_vacuum(100)")
+                    conn.commit()
+                except Exception:
+                    pass
                 logger.info(f"Deleted chat: {chat_name}")
                 
                 # Ensure default exists
@@ -1513,6 +1542,13 @@ class ChatSessionManager:
                         (chat_name, *orphans),
                     )
                     conn.commit()
+                    # Reclaim freed pages from the BLOB deletes — see
+                    # delete_chat for the rationale. Wildcard scout 2026-05-07 L1.
+                    try:
+                        conn.execute("PRAGMA incremental_vacuum(100)")
+                        conn.commit()
+                    except Exception:
+                        pass
                     logger.debug(
                         f"Pruned {len(orphans)} orphan tool_image(s) from chat '{chat_name}'"
                     )

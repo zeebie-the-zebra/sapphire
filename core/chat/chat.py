@@ -18,6 +18,37 @@ from .llm_providers import get_provider, get_provider_for_url, get_provider_by_k
 logger = logging.getLogger(__name__)
 
 
+def _detect_image_media_type(b64_data: str) -> str:
+    """Best-effort detect media_type from base64 image bytes.
+
+    Tools that return images often forget to set `media_type`. Pre-fix
+    we defaulted to 'image/jpeg', which Claude rejects with a 400 when
+    the actual bytes are PNG (header/data mismatch). Peeking the magic
+    bytes covers PNG/JPEG/GIF/WEBP — the four formats real tool-image
+    outputs actually produce. Returns 'image/png' as the safer default
+    since most tool-gen images are PNG (image-gen tools, screenshots,
+    matplotlib charts). Wildcard scout 2026-05-07 multimodal #2.
+    """
+    if not b64_data:
+        return 'image/png'
+    try:
+        import base64 as _b64
+        # Decode just the prefix — a 24-byte head is plenty for sigs
+        head = _b64.b64decode(b64_data[:64], validate=False)[:16]
+    except Exception:
+        return 'image/png'
+    if head.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if head.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if head.startswith(b'GIF87a') or head.startswith(b'GIF89a'):
+        return 'image/gif'
+    if head.startswith(b'RIFF') and head[8:12] == b'WEBP':
+        return 'image/webp'
+    # Unknown — PNG default is safer than JPEG (broader provider support)
+    return 'image/png'
+
+
 def _inject_tool_images(messages, tool_images):
     """Inject tool-returned images as a user message for the next LLM turn.
 
@@ -26,10 +57,12 @@ def _inject_tool_images(messages, tool_images):
     """
     content = [{"type": "text", "text": "[Tool returned image(s) for analysis]"}]
     for img in tool_images:
+        data = img.get("data", "")
+        media_type = img.get("media_type") or _detect_image_media_type(data)
         content.append({
             "type": "image",
-            "data": img.get("data", ""),
-            "media_type": img.get("media_type", "image/jpeg")
+            "data": data,
+            "media_type": media_type,
         })
     messages.append({"role": "user", "content": content})
     logger.info(f"[TOOL] Injected {len(tool_images)} tool image(s) into conversation")

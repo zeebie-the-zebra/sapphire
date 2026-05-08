@@ -177,11 +177,25 @@ class AnthropicCompatProvider(BaseProvider):
 
             elif role == "user":
                 if isinstance(content, list):
-                    # Filter out image blocks (not supported), keep text
+                    # Filter out image blocks (this provider class doesn't
+                    # support image content). Pre-fix this stripped silently;
+                    # the model's "I don't see an image" reply was confusing
+                    # to users who'd just attached one. Log when we strip so
+                    # the cause is visible. Wildcard scout 2026-05-07 M3.
+                    image_count = sum(
+                        1 for b in content
+                        if isinstance(b, dict) and b.get("type") == "image"
+                    )
                     text_blocks = [
                         b for b in content
                         if not (isinstance(b, dict) and b.get("type") == "image")
                     ]
+                    if image_count:
+                        logger.warning(
+                            f"[ANTHROPIC-COMPAT] Stripping {image_count} image "
+                            f"block(s) from user message — this provider class "
+                            f"doesn't pass images. Model will not see them."
+                        )
                     if text_blocks:
                         api_messages.append({"role": "user", "content": text_blocks})
                 else:

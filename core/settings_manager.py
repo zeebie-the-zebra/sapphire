@@ -757,15 +757,38 @@ class SettingsManager:
                     # Reload settings
                     logger.info("Detected settings file change, reloading...")
                     self.reload()
-                    
-                    # Trigger all registered callbacks
+
+                    # Advance _last_mtime BEFORE callback dispatch — pre-fix
+                    # the watcher self-triggered when reload callbacks
+                    # (switch_tts_provider etc.) ran long enough that the
+                    # next poll iteration came around with the file's new
+                    # mtime != stored mtime → second reload → second
+                    # provider rebuild. Bumping the stamp first closes that
+                    # window. Wildcard scout 2026-05-07 W1.
+                    try:
+                        self._last_mtime = user_path.stat().st_mtime
+                    except Exception:
+                        pass
+
+                    # Snapshot callback list under the lock, then dispatch
+                    # OUTSIDE the lock. Pre-fix, the dispatch ran inside
+                    # `with self._lock:` — provider rebuilds (Kokoro server
+                    # restart, STT recorder rebuild, embedder reload) can
+                    # take seconds and stalled every concurrent settings
+                    # read for the entire rebuild duration. Stop-the-world.
+                    # `set()` already uses this snapshot-then-dispatch
+                    # pattern at L405-410. Wildcard scout 2026-05-07 W2.
                     with self._lock:
-                        for key, callback in self._reload_callbacks.items():
-                            if key in self._config:
-                                try:
-                                    callback(self._config[key])
-                                except Exception as e:
-                                    logger.error(f"Callback failed for {key}: {e}")
+                        snapshot = [
+                            (key, cb, self._config.get(key))
+                            for key, cb in self._reload_callbacks.items()
+                            if key in self._config
+                        ]
+                    for key, callback, value in snapshot:
+                        try:
+                            callback(value)
+                        except Exception as e:
+                            logger.error(f"Callback failed for {key}: {e}")
             
             except Exception as e:
                 logger.error(f"File watcher error: {e}")
