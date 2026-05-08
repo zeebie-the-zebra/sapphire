@@ -368,7 +368,7 @@ class SettingsManager:
             return False
         return key in self.MANAGED_LOCKED_KEYS
 
-    def set(self, key, value, persist=False):
+    def set(self, key, value, persist=False, _skip_callbacks=False):
         """
         Set a setting value.
 
@@ -376,6 +376,15 @@ class SettingsManager:
             key: Setting key
             value: New value
             persist: If True, save to user/settings.json
+            _skip_callbacks: If True, suppress hot-reload callbacks for this
+                set. Used by route handlers that will explicitly run the
+                provider-switch themselves — without this, the callback +
+                explicit switch double-fire (e.g., Kokoro restart twice,
+                STT recorder torn down + rebuilt twice with flap risk).
+                Reload callbacks are still desirable for plugin_loader's
+                unload-plugin path, file-watcher reloads, and direct
+                settings UI saves — those keep the default behavior.
+                Voice-prep code review 2026-05-07 #J.
         """
         if self.is_locked(key):
             logger.warning(f"[MANAGED] Blocked write to locked setting: {key}")
@@ -403,7 +412,7 @@ class SettingsManager:
                 self._runtime[key] = value  # Track for survival across reloads
 
             # Trigger hot-reload callback if registered
-            if key in self._reload_callbacks:
+            if not _skip_callbacks and key in self._reload_callbacks:
                 try:
                     self._reload_callbacks[key](value)
                 except Exception as e:

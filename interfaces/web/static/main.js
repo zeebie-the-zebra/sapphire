@@ -147,11 +147,21 @@ async function init() {
                     const rail = document.getElementById('nav-rail');
                     const navAppsBtn = document.getElementById('nav-apps');
                     for (const app of navApps.slice(0, MAX_NAV_APPS)) {
-                        // Create nav item
+                        // Create nav item — use DOM API for icon/label since
+                        // they originate from plugin manifest data which is
+                        // user-supplied and shouldn't reach innerHTML.
+                        // Day-ruiner scout 2026-05-07 #A.
                         const btn = document.createElement('button');
                         btn.className = 'nav-item';
                         btn.dataset.view = `app-${app.name}`;
-                        btn.innerHTML = `<span class="nav-icon">${app.icon || '📦'}</span><span class="nav-label">${app.label}</span>`;
+                        const iconSpan = document.createElement('span');
+                        iconSpan.className = 'nav-icon';
+                        iconSpan.textContent = app.icon || '📦';
+                        const labelSpan = document.createElement('span');
+                        labelSpan.className = 'nav-label';
+                        labelSpan.textContent = app.label || '';
+                        btn.appendChild(iconSpan);
+                        btn.appendChild(labelSpan);
                         if (navAppsBtn) rail.insertBefore(btn, navAppsBtn);
                         else {
                             const spacer = rail.querySelector('.nav-spacer');

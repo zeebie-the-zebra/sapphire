@@ -277,7 +277,10 @@ function _renderCard(p, locked) {
     // by tile border color + a chip near the bottom.
     const hasSettings = p.settingsUI && p.enabled;
     const isUser = p.band === 'user';
-    const icon = p.icon || '\uD83D\uDD0C';
+    // Icon is server-sanitized to emoji-class chars only, but escape here
+    // anyway as defense-in-depth \u2014 innerHTML injection should never trust
+    // a plugin manifest field. Day-ruiner scout 2026-05-07 #A.
+    const icon = _esc(p.icon || '\uD83D\uDD0C');
     const trustClass = _trustClass(p, locked);
 
     // Kebab items — less-frequent actions tucked away. Update + gear stay

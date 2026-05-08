@@ -1258,7 +1258,7 @@ async function loadMissingDeps(el, ctx) {
         card.style.display = '';
         list.innerHTML = withDeps.map(p => `
             <div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
-                <span>${p.icon || '🔌'}</span>
+                <span>${_esc(p.icon || '🔌')}</span>
                 <span style="flex:1"><strong>${_esc(p.title || p.name)}</strong> needs: ${_esc(p.missing_deps.join(', '))}</span>
                 <button class="btn btn-sm dash-deps-fix" data-plugin="${_esc(p.name)}"
                     style="font-size:0.75em;padding:2px 10px;background:rgba(255,165,0,0.2);border:1px solid rgba(255,165,0,0.4);color:#e0a030;cursor:pointer;border-radius:var(--radius-sm)">

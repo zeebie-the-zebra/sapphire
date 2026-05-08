@@ -30,6 +30,18 @@ except ImportError:
     Fernet = None
     InvalidToken = Exception
 
+
+class DecryptionError(Exception):
+    """Raised by `_unscramble_strict` when an encrypted credential field
+    can't be decrypted. Signals 'this value exists on disk and is encrypted
+    but we can't read it right now' — distinct from 'this value is empty
+    or absent'. Routes that read-existing-then-save MUST distinguish these
+    because saving an empty value back through the encrypt path commits
+    real data loss (`refresh_token` / `app_password` permanently gone after
+    a routine field edit). Day-ruiner scout 2026-05-07 #C.
+    """
+    pass
+
 logger = logging.getLogger(__name__)
 
 CREDENTIALS_FILE = CONFIG_DIR / 'credentials.json'
@@ -458,7 +470,14 @@ class CredentialsManager:
         return f"enc:{encrypted}"
 
     def _unscramble(self, value: str) -> str:
-        """Decrypt an 'enc:...' value. Plaintext passes through unchanged."""
+        """Decrypt an 'enc:...' value. Plaintext passes through unchanged.
+
+        Returns '' on decrypt failure for read paths that just want a
+        best-effort display value. CALLERS THAT WRITE BACK should use
+        `_unscramble_strict` (raises) — silently rewriting a successfully-
+        encrypted credential as `''` is a routine-edit data-loss class.
+        Day-ruiner scout 2026-05-07 #C.
+        """
         if not value or not value.startswith('enc:'):
             return value
         try:
@@ -468,6 +487,31 @@ class CredentialsManager:
         except (InvalidToken, Exception) as e:
             logger.critical(f"Failed to decrypt credential — encryption key may have changed or salt file lost: {e}")
             return ''
+
+    def _unscramble_strict(self, value: str) -> str:
+        """Like `_unscramble` but raises `DecryptionError` on failure
+        instead of returning ''. Use this from any code that will WRITE
+        BACK the result — the route handler "preserve untouched fields"
+        flow is the canonical example. Pre-fix, those routes pulled
+        encrypted fields, got '' on decrypt failure (e.g. salt file lost
+        after backup restore), and silently committed empty back through
+        the encrypt path → data loss on a routine save. With strict, the
+        route catches DecryptionError and refuses to save."""
+        if not value or not value.startswith('enc:'):
+            return value
+        try:
+            key = self._get_scramble_key()
+            f = Fernet(key)
+            return f.decrypt(value[4:].encode()).decode()
+        except (InvalidToken, Exception) as e:
+            logger.critical(
+                f"Strict decrypt failed — encryption key may have changed "
+                f"or salt file lost: {e}"
+            )
+            raise DecryptionError(
+                "Credential is encrypted but cannot be decrypted "
+                "(salt file may be missing or rotated)"
+            ) from e
 
     # =========================================================================
     # LLM API Keys

@@ -36,6 +36,69 @@ STATIC_DIR = PROJECT_ROOT / "interfaces" / "web" / "static"
 
 _install_lock = threading.Lock()
 
+
+def _safe_emoji_icon(icon):
+    """Sanitize a plugin manifest 'icon' field for safe rendering.
+
+    Pre-fix, `manifest.get("icon")` shipped raw to UI for every discovered
+    plugin (signed or not). Multiple frontend sinks then injected it into
+    innerHTML — `<div>${icon}</div>` — which made a malicious manifest
+    `"icon": "<img src=x onerror=fetch('/api/credentials/list')...>"` fire
+    XSS in the admin context the moment the user opened Settings → Plugins.
+    Defense-in-depth: server-side strip non-renderable input AND the client
+    `_esc()` calls (added separately). Day-ruiner scout 2026-05-07 #A.
+
+    We allow common emoji characters and a small set of plain ASCII
+    fallbacks (alphanumerics + space + dash + underscore + .). Anything
+    else (including all `<`, `>`, `&`, `"`, `'`, `script`, etc.) is
+    stripped. If the result is empty, return empty string and the UI
+    will fall back to its default placeholder.
+    """
+    if not icon or not isinstance(icon, str):
+        return ""
+    # Truncate first — manifest fields are user-supplied; bound the input
+    # so a 1MB icon can't even reach the regex.
+    icon = icon[:32]
+    out = []
+    for ch in icon:
+        cp = ord(ch)
+        # Allowed: emoji range, common pictographs, ASCII alphanumeric +
+        # space/dash/underscore/period. NO `<`, `>`, `&`, `"`, `'`, etc.
+        if (
+            (0x1F000 <= cp <= 0x1FFFF) or  # Emoji & symbols
+            (0x2600 <= cp <= 0x27BF) or    # Misc symbols + dingbats
+            (0x2300 <= cp <= 0x23FF) or    # Misc tech (⏰ etc)
+            (0x2000 <= cp <= 0x206F) or    # General punctuation (zero-width joiner etc)
+            (0xFE00 <= cp <= 0xFE0F) or    # Variation selectors (emoji presentation)
+            ch.isalnum() or
+            ch in ' -_.'
+        ):
+            out.append(ch)
+    return ''.join(out).strip()
+
+
+def _safe_http_url(url):
+    """Validate a manifest URL is http(s)://, else return empty.
+
+    Pre-fix, `manifest.get("url")` shipped raw and the plugins UI rendered
+    it into an `<a href>` for the kebab "Open website" link. A manifest
+    `"url": "javascript:fetch('/api/credentials/list')..."` fired JS in
+    admin context on click. Server-side scheme allowlist closes this.
+    Day-ruiner scout 2026-05-07 #E.
+    """
+    if not url or not isinstance(url, str):
+        return ""
+    url = url.strip()
+    # Allow http and https only. Reject javascript:, data:, file:, vbscript:,
+    # protocol-relative `//attacker.com`, and anything with whitespace
+    # (which can smuggle past lazy parsers).
+    if not (url.startswith('https://') or url.startswith('http://')):
+        return ""
+    if any(c in url for c in '\r\n\t '):
+        return ""
+    return url[:512]  # Bound length too
+
+
 # Plugin settings paths
 USER_WEBUI_DIR = PROJECT_ROOT / 'user' / 'webui'
 USER_PLUGINS_JSON = USER_WEBUI_DIR / 'plugins.json'
@@ -179,10 +242,10 @@ async def list_plugins(request: Request, _=Depends(require_login)):
                     "verify_msg": info.get("verify_msg"),
                     "verify_tier": info.get("verify_tier", "unsigned"),
                     "verified_author": info.get("verified_author"),
-                    "url": manifest.get("url"),
+                    "url": _safe_http_url(manifest.get("url")),
                     "version": manifest.get("version"),
                     "author": manifest.get("author"),
-                    "icon": manifest.get("icon"),
+                    "icon": _safe_emoji_icon(manifest.get("icon")),
                     "band": info.get("band"),
                     "has_script": has_script,
                     "sidebar_accordion": manifest.get("capabilities", {}).get("sidebar_accordion"),
@@ -374,7 +437,7 @@ async def list_apps(_=Depends(require_login)):
         apps.append({
             "name": name,
             "label": app_config.get("label", manifest.get("display_name", name)),
-            "icon": app_config.get("icon", manifest.get("emoji", "")),
+            "icon": _safe_emoji_icon(app_config.get("icon", manifest.get("emoji", ""))),
             "description": app_config.get("description", manifest.get("description", "")),
             "nav": app_config.get("nav", False),
         })
@@ -1514,8 +1577,30 @@ async def set_email_account(scope: str, request: Request, _=Depends(require_logi
     if existing.get('auth_type') == 'oauth2':
         raise HTTPException(status_code=400, detail="This is an OAuth account managed by the O365 plugin. Disconnect it there first.")
 
-    # If no new password provided, keep existing
+    # If no new password provided, keep existing — but verify the existing
+    # encrypted field actually decrypts. Pre-fix, _unscramble silently
+    # returned '' on decrypt failure (e.g. salt file missing after backup
+    # restore from another machine), and this branch then committed that
+    # empty value back through the encrypt path → app_password permanently
+    # gone. With the strict check, we refuse the save and ask the user to
+    # re-enter the password. Day-ruiner scout 2026-05-07 #C.
     if not app_password:
+        from core.credentials_manager import DecryptionError
+        try:
+            raw = existing.get('_app_password_raw') or existing.get('app_password', '')
+            # `existing` was already unscrambled by get_email_account —
+            # check the underlying stored value via a strict decrypt to
+            # distinguish "user has no password set" from "decrypt failed".
+            stored = credentials._credentials.get('email_accounts', {}).get(scope, {}).get('app_password', '')
+            credentials._unscramble_strict(stored)
+        except DecryptionError:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Cannot read existing app password (encryption salt may have changed "
+                    "after a backup restore). Re-enter the password to save."
+                ),
+            )
         app_password = existing.get('app_password', '')
 
     if credentials.set_email_account(scope, address, app_password, imap_server, smtp_server, imap_port, smtp_port):
@@ -1745,15 +1830,45 @@ async def set_gcal_account(scope: str, request: Request, _=Depends(require_login
     calendar_id = data.get('calendar_id', 'primary').strip()
     label = data.get('label', '').strip()
 
-    # If no new secret provided, keep existing
+    # If no new secret provided, keep existing — but strict-decrypt the
+    # existing stored value to confirm we have a real value, not '' from
+    # a swallowed decryption failure. Without this, a salt-file mismatch
+    # (e.g. backup restore from another machine) would silently empty the
+    # client_secret on a routine edit. Day-ruiner scout 2026-05-07 #C.
+    from core.credentials_manager import DecryptionError
     if not client_secret:
+        try:
+            stored_cs = credentials._credentials.get('gcal_accounts', {}).get(scope, {}).get('client_secret', '')
+            credentials._unscramble_strict(stored_cs)
+        except DecryptionError:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Cannot read existing client_secret (encryption salt may have "
+                    "changed after a backup restore). Re-enter the secret to save."
+                ),
+            )
         existing = credentials.get_gcal_account(scope)
         client_secret = existing.get('client_secret', '')
 
     if not client_id:
         raise HTTPException(status_code=400, detail="Client ID is required")
 
-    # Preserve existing refresh token if present
+    # Preserve existing refresh token if present — strict-decrypt to detect
+    # the same wipe scenario as above. Refresh tokens are EVEN more painful
+    # to lose because Google only issues one per `prompt=consent` flow.
+    try:
+        stored_rt = credentials._credentials.get('gcal_accounts', {}).get(scope, {}).get('refresh_token', '')
+        credentials._unscramble_strict(stored_rt)
+    except DecryptionError:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Cannot read existing refresh_token (encryption salt may have "
+                "changed). Disconnect this account from the gcal plugin and "
+                "re-authorize via OAuth to recover."
+            ),
+        )
     existing = credentials.get_gcal_account(scope)
     refresh_token = existing.get('refresh_token', '')
 

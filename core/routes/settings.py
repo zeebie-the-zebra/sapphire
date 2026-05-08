@@ -256,7 +256,14 @@ async def update_settings_batch(request: Request, _=Depends(require_login)):
                 results.append({"key": key, "status": "success", "tier": "hot"})
                 continue
             tier = settings.validate_tier(key)
-            settings.set(key, value, persist=False)
+            # Skip reload callback for provider-switch keys — the deferred
+            # action below runs the switch explicitly. Without skip, callback
+            # + explicit switch double-fire (see voice-prep review #J).
+            settings.set(
+                key, value,
+                persist=False,
+                _skip_callbacks=(key in _PROVIDER_SWITCH_KEYS),
+            )
             # Provider-switch keys defer their persist until post-switch success.
             if persist and key not in _PROVIDER_SWITCH_KEYS:
                 persisted_keys[key] = value
@@ -489,7 +496,15 @@ async def update_setting(key: str, request: Request, _=Depends(require_login)):
     # Day-ruiner scout 2026-05-07 #3.
     _PROVIDER_SWITCH_KEYS = {'STT_PROVIDER', 'TTS_PROVIDER', 'EMBEDDING_PROVIDER'}
     is_provider_switch = key in _PROVIDER_SWITCH_KEYS
-    settings.set(key, value, persist=(persist and not is_provider_switch))
+    # Skip the reload callback — this route runs the switch explicitly below.
+    # Without _skip_callbacks=True, the callback fires here AND the explicit
+    # _do_*_switch fires later, double-running the switch (Kokoro restart
+    # twice, STT recorder flap risk). Voice-prep review 2026-05-07 #J.
+    settings.set(
+        key, value,
+        persist=(persist and not is_provider_switch),
+        _skip_callbacks=is_provider_switch,
+    )
     if key in {'SOCKS_ENABLED', 'SOCKS_HOST', 'SOCKS_PORT', 'SOCKS_TIMEOUT'}:
         clear_session_cache()
     if key == 'WAKE_WORD_ENABLED':
