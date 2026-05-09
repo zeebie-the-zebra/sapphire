@@ -6,7 +6,6 @@ Commands checked against a configurable blacklist before execution.
 
 import subprocess
 import re
-import shlex
 import json
 import logging
 from pathlib import Path
@@ -100,21 +99,18 @@ def _check_blacklist(command):
 
 
 def _run_local(command, timeout, max_output=None):
-    """Run command locally via subprocess."""
+    """Run command locally via subprocess.
+
+    shell=True on every platform: AI-written commands look like shell input
+    (`~` expansion, `&&`, pipes, redirects). The blacklist is the safety
+    boundary, not the absence of a shell.
+    """
     logger.info(f"LOCAL $ {command[:100]}")
     try:
-        import sys
-        if sys.platform == 'win32':
-            result = subprocess.run(
-                command, capture_output=True, text=True,
-                timeout=timeout, shell=True,
-            )
-        else:
-            argv = shlex.split(command)
-            result = subprocess.run(
-                argv, capture_output=True, text=True,
-                timeout=timeout,
-            )
+        result = subprocess.run(
+            command, capture_output=True, text=True,
+            timeout=timeout, shell=True,
+        )
 
         output = result.stdout
         stderr = result.stderr.strip()
