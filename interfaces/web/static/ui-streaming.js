@@ -630,9 +630,37 @@ export const finishStreaming = (updateToolbarsCallback) => {
 };
 
 export const cancelStreaming = () => {
-    const streamingMessage = document.getElementById('streaming-message');
-    if (streamingMessage) streamingMessage.remove();
-    
+    // Don't delete the partial — finalize it like finishStreaming does, so the
+    // user sees what was rendered up to the stop. The full message lands in
+    // history once the backend finishes draining; F5 / refresh shows the
+    // authoritative version. Without this, the partial vanishes and only
+    // reappears after the chat reloads, which looks broken.
+    const msg = document.getElementById('streaming-message');
+    if (msg) {
+        msg.removeAttribute('id');
+        delete msg.dataset.streaming;
+        msg.dataset.cancelled = 'true';
+
+        const contentDiv = msg.querySelector('.message-content');
+        if (contentDiv) {
+            contentDiv.querySelectorAll('p').forEach(p => {
+                if (!p.textContent.trim() && !p.innerHTML.trim()) p.remove();
+            });
+            contentDiv.querySelectorAll('.accordion-think.streaming').forEach(acc => {
+                acc.classList.remove('streaming');
+            });
+            contentDiv.querySelectorAll('.accordion-tool.loading').forEach(acc => {
+                acc.remove();
+            });
+            wrapImageGalleries(contentDiv);
+
+            const marker = document.createElement('div');
+            marker.className = 'cancel-marker';
+            marker.textContent = '⊘ Cancelled';
+            contentDiv.appendChild(marker);
+        }
+    }
+
     streamMsg = null;
     streamContent = '';
     resetState();

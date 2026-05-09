@@ -8848,6 +8848,16 @@ a.gallery-caption:hover {
     justify-content: flex-end;
 }
 
+.cancel-marker {
+    margin-top: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: var(--text-muted, #888);
+    border-left: 2px solid var(--text-muted, #888);
+    opacity: 0.75;
+    font-style: italic;
+}
+
 /* Responsive — collapse sidebar on narrow screens */
 @media (max-width: 768px) {
     .store-body { grid-template-columns: 1fr; }
