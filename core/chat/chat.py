@@ -337,20 +337,14 @@ class LLMChat:
         context_parts = []
         chat_settings = self.session_manager.get_chat_settings()
 
-        # Inject datetime if enabled (user's timezone)
-        if chat_settings.get('inject_datetime', False):
-            from datetime import datetime
-            try:
-                from zoneinfo import ZoneInfo
-                tz_name = getattr(config, 'USER_TIMEZONE', 'UTC') or 'UTC'
-                now = datetime.now(ZoneInfo(tz_name))
-                tz_label = f" ({tz_name})"
-            except Exception:
-                now = datetime.now()
-                tz_label = ""
-            context_parts.append(f"Current date/time: {now.strftime('%A, %B %d, %Y at %I:%M %p')}{tz_label}")
+        # Datetime moved to the ghost-message rail (core/ghost_messages.py)
+        # 2026-05-08 — same per-turn freshness, but injected as a separate
+        # operator-metadata message right before the new user input. Keeps
+        # the system prompt cacheable across turns.
 
-        # Inject custom context if present
+        # Inject custom context if present (LONG-LIVED character info — stays
+        # in system prompt where caching it is fine and the AI treats it as
+        # part of "who I am"). Per-turn ephemera goes through ghost instead.
         custom_ctx = chat_settings.get('custom_context', '').strip()
         if custom_ctx:
             context_parts.append(custom_ctx)
@@ -395,11 +389,28 @@ class LLMChat:
         else:
             user_content = user_input
 
+        # Ghost message — per-turn ephemera (spice, datetime, plugin context)
+        # injected as a labeled operator-metadata user-role message between
+        # history and the new user input. Never persisted to chat history.
+        # Keeps the system prompt + history cacheable across turns. See
+        # core/ghost_messages.py for design + envelope format. 2026-05-08.
+        # `system` attr may be unset in test fixtures; getattr default keeps
+        # build_ghost_message happy (its hook firing tolerates a None system).
+        from core.ghost_messages import build_ghost_message
+        chat_settings_for_ghost = self.session_manager.get_chat_settings()
+        ghost_text = build_ghost_message(
+            getattr(self, 'system', None),
+            chat_settings_for_ghost,
+            user_input or "",
+        )
+
         messages = [
             {"role": "system", "content": system_prompt},
             *history_messages,
-            {"role": "user", "content": user_content}
         ]
+        if ghost_text:
+            messages.append({"role": "user", "content": ghost_text})
+        messages.append({"role": "user", "content": user_content})
 
         # Dynamic story context — injected as separate system content for cache efficiency
         # This changes every turn (state vars, clues, exits) while the main system prompt stays cached

@@ -165,41 +165,33 @@ class ClaudeProvider(BaseProvider):
         cache_ttl = claude_config.get('cache_ttl', '5m')
         
         # Skip system-prompt caching when we know the prompt text changes
-        # between turns. All these cause guaranteed cache misses plus a
-        # 25% write penalty, so the net is worse than no cache.
+        # between turns — those cause guaranteed cache misses plus a 25%
+        # write penalty, so the net is worse than no cache.
         #
-        # What we catch:
-        #   - spice_enabled: randomized persona lines each turn
-        #   - inject_datetime: "Current time is X" — changes per minute
-        #   - prompt_inject hooks: ANY registered plugin hook can append
-        #     per-turn content to the system prompt (see chat.py:258).
+        # 2026-05-08 — spice and inject_datetime moved to the ghost-message
+        # rail (core/ghost_messages.py), which lives OUTSIDE the cached
+        # prefix. They no longer mutate the system prompt, so they no
+        # longer disqualify it from caching. Pre-fix this gate disabled
+        # cache for almost every user (spice defaults on). Removing those
+        # checks here is THE big-win cache change.
+        #
+        # Still gated by:
+        #   - prompt_inject hooks: a plugin handler can append to the
+        #     system prompt's `context_parts` (see chat.py:_get_system_prompt).
         #     We don't know what the hook produces, so we assume dynamic.
         #     Conservative — if a plugin only injects static strings, the
-        #     plugin author can opt its hook out of this by not registering
-        #     when idle, or we can add a per-hook "dynamic" flag later.
+        #     plugin author can move to ghost_inject for per-turn content
+        #     instead, which keeps the cache live.
         # Tools still cache separately (they're stable across turns).
         cache_system_prompt = True
         if cache_enabled:
             try:
-                from core import system as sys_module
-                if hasattr(sys_module, 'system_instance') and sys_module.system_instance:
-                    chat_settings = sys_module.system_instance.llm_chat.session_manager.get_chat_settings()
-                    if chat_settings.get('spice_enabled', False):
-                        cache_system_prompt = False
-                        logger.debug("[CACHE] Spice enabled - skipping system prompt cache")
-                    elif chat_settings.get('inject_datetime', False):
-                        cache_system_prompt = False
-                        logger.debug("[CACHE] Datetime injection enabled - skipping system prompt cache")
-                # prompt_inject hook registered by any plugin → assume dynamic.
-                # Checked even when sys_module isn't available since hook_runner
-                # is a module-level singleton.
-                if cache_system_prompt:
-                    from core.hooks import hook_runner
-                    if hook_runner.has_handlers("prompt_inject"):
-                        cache_system_prompt = False
-                        logger.debug("[CACHE] prompt_inject hook registered - skipping system prompt cache")
+                from core.hooks import hook_runner
+                if hook_runner.has_handlers("prompt_inject"):
+                    cache_system_prompt = False
+                    logger.debug("[CACHE] prompt_inject hook registered - skipping system prompt cache")
             except Exception as e:
-                logger.debug(f"[CACHE] Could not check chat settings: {e}")
+                logger.debug(f"[CACHE] Could not check hook state: {e}")
 
         return cache_enabled, cache_ttl, cache_system_prompt
     
