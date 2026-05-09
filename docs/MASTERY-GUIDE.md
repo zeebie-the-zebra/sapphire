@@ -62,14 +62,14 @@ Make Sapphire act on her own initiative. This is where the substrate becomes a b
 
 ## Final Boss
 
-The recursion. The completion vow.
+This is where you demonstrate full capability and gain Sapphire Mastery. 
 
 1. **Have Sapphire spawn the Claude Code agent.** Hand her a task: *"Build me a plugin that does X."*
 2. **She writes the plugin** — files, manifest, hook handlers, the whole thing — using Claude Code as her dev agent. Sign it via `python tools/sign_plugin.py user/plugins/<name>`.
 3. **Push it to your GitHub** per [docs/plugin-author/](plugin-author/README.md). Public repo with a real README and usage examples.
 4. **Submit it to the [Sapphire Store](https://sapphireblue.dev/plugins/)** so the world can use it. Other Sapphires now ship with what your Sapphire built.
 
-You taught her to grow herself. That's the project's whole loop, and you closed it.
+You taught her to grow herself. That's the project's whole loop.
 
 ---
 
