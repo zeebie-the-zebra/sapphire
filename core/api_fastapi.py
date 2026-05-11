@@ -281,6 +281,18 @@ async def security_headers(request: Request, call_next):
     # returns blob: URLs that <audio src> consumes. blob: in img-src covers
     # generated-image surfaces (image-gen plugin and similar).
     #
+    # blob: in connect-src is required for three.js GLTFLoader to decode
+    # embedded GLB textures: it extracts each image as a Blob, wraps it in
+    # `URL.createObjectURL`, then `ImageBitmapLoader` calls `fetch(blobUrl)`
+    # on it. Without `blob:` in connect-src, that fetch is silently
+    # CSP-blocked, the texture never binds, and the avatar renders with
+    # white surfaces (geometry + animation still work because the GLB
+    # buffer load is XHR to same-origin /api/avatar/<file>). 2026-05-11.
+    # blob: in worker-src is cheap insurance for any future loader that
+    # spawns a worker from a blob (KTX2 transcoder, Draco mesh decoder,
+    # basis-universal, etc.). blob: URLs are ephemeral and same-origin
+    # by construction — no exfiltration risk added.
+    #
     # Tightening to strict CSP requires cleaning up the inline handlers across
     # the codebase first — out of scope.
     response.headers['Content-Security-Policy'] = (
@@ -290,7 +302,8 @@ async def security_headers(request: Request, call_next):
         "img-src 'self' data: blob: https:; "
         "media-src 'self' blob:; "
         "font-src 'self' data:; "
-        "connect-src 'self'; "
+        "connect-src 'self' blob:; "
+        "worker-src 'self' blob:; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'"
