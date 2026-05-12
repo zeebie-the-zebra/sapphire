@@ -399,10 +399,18 @@ class ConversationHistory:
                 # Include tool_calls if present
                 if msg.get("tool_calls"):
                     llm_msg["tool_calls"] = msg["tool_calls"]
-                    
+
                     # Claude needs thinking_raw during tool cycles (has signatures)
                     if provider == "claude" and in_tool_cycle and msg.get("thinking_raw"):
                         llm_msg["thinking_raw"] = msg["thinking_raw"]
+
+                    # Carry `thinking` through on tool-calling assistant turns so
+                    # providers that require reasoning round-trip can pull from it
+                    # via their sanitizer (DeepSeek-reasoner official enforces this
+                    # — 400 without it on request 2+ of a tool cycle). Providers
+                    # that don't need it ignore the field. 2026-05-11.
+                    if msg.get("thinking"):
+                        llm_msg["thinking"] = msg["thinking"]
                 
             elif role == "tool":
                 # Tolerate tool messages missing `name` — historically
