@@ -150,6 +150,23 @@ def build_ghost_message(
         except Exception as e:
             logger.warning(f"[GHOST] ghost_inject hook fire raised: {e}")
         for plugin_name, text in (ghost_event.ghost_contributions or []):
+            # Defensive: a plugin returning a non-string (dict, list, int)
+            # would crash here via `.strip()` and wedge the chat turn —
+            # `add_user_message` runs after `_build_base_messages`, so the
+            # exception lands BEFORE the user message is persisted. The
+            # outer except in chat_streaming.py:759 then adds `[Error: ...]`
+            # as assistant, producing two consecutive asst messages that
+            # break Claude's strict alternation requirement. Coerce to str
+            # and skip empty silently. 2026-05-14.
+            if not isinstance(text, str):
+                try:
+                    text = str(text)
+                except Exception:
+                    logger.warning(
+                        f"[GHOST] {plugin_name} contributed non-stringifiable "
+                        f"value of type {type(text).__name__} — skipping"
+                    )
+                    continue
             if text and text.strip():
                 # Truncate paranoid long contributions — a runaway plugin
                 # shouldn't be able to dominate the model's context window

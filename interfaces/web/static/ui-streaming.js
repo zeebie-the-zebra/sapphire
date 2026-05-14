@@ -5,6 +5,13 @@ import { createAccordion, createCodeBlock, processMarkdown, wrapImageGalleries, 
 // Streaming state
 let streamMsg = null;
 let streamContent = '';
+// Monotonic id bumped on every startStreaming / cancelStreaming. Lets the
+// SSE reader in api.js drop chunks that belong to a stream the UI already
+// abandoned. Without this, Stop→immediate-Send can land OLD stream's
+// trailing chunks (still in the SSE buffer between abort and rejection)
+// in the NEW message's DOM. 2026-05-14.
+let _streamId = 0;
+export const getCurrentStreamId = () => _streamId;
 let state = {
     inThink: false, thinkBuf: '', thinkCnt: 0, thinkType: null, thinkAcc: null, thinkAccEl: null,
     inCode: false, codeLang: '', codeBuf: '', codePre: null,
@@ -114,13 +121,14 @@ const processPendingToolEvents = (scrollCallback) => {
 };
 
 export const startStreaming = (container, messageElement, scrollCallback) => {
+    _streamId++;  // new stream — invalidates any in-flight chunks from a previous one
     const contentDiv = messageElement.querySelector('.message-content');
     const p = createElem('p');
     contentDiv.appendChild(p);
-    
+
     const existingThinks = container.querySelectorAll('details summary');
     const thinkCount = Array.from(existingThinks).filter(s => s.textContent.includes('Think')).length;
-    
+
     streamMsg = { el: contentDiv, para: p, last: p };
     streamContent = '';
     resetState(p);
@@ -630,6 +638,7 @@ export const finishStreaming = (updateToolbarsCallback) => {
 };
 
 export const cancelStreaming = () => {
+    _streamId++;  // any chunks still in the SSE pipeline are now stale
     // Don't delete the partial — finalize it like finishStreaming does, so the
     // user sees what was rendered up to the stop. The full message lands in
     // history once the backend finishes draining; F5 / refresh shows the

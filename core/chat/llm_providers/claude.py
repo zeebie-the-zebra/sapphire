@@ -656,15 +656,19 @@ class ClaudeProvider(BaseProvider):
         if not claude_messages or len(claude_messages) < 2:
             return  # too short for any cacheable history
 
-        # Detect the ghost envelope at second-to-last position
+        # Detect the ghost envelope at second-to-last position.
+        # Import the canonical sentinel so a future rename only touches one
+        # file. Legacy prefix kept inline for transition compatibility.
+        try:
+            from core.ghost_messages import _ENVELOPE_HEADER as _GHOST_PREFIX
+        except Exception:
+            _GHOST_PREFIX = "[Sapphire turn-context"
         second_to_last = claude_messages[-2]
-        # Sentinel detection — match either the legacy "[Operator metadata"
-        # prefix or the compact "[Sapphire turn-context" prefix. 2026-05-14.
         _content = second_to_last.get("content") if isinstance(second_to_last.get("content"), str) else ""
         is_ghost = (
             second_to_last.get("role") == "user"
             and (
-                _content.startswith("[Sapphire turn-context")
+                _content.startswith(_GHOST_PREFIX)
                 or _content.startswith("[Operator metadata for assistant")
             )
         )

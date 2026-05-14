@@ -6,6 +6,7 @@ import fnmatch
 import json
 import logging
 from pathlib import Path
+from typing import Optional
 
 import requests
 
@@ -128,23 +129,31 @@ TOOLS = [
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _get_github_scope() -> str:
-    """Resolve the active github scope. Returns 'default' if scope is unset/None."""
+def _get_github_scope() -> Optional[str]:
+    """Resolve the active github scope. Returns None when scope is unset/disabled.
+
+    Returning 'default' on unset is a silent-default class regression: a user
+    who picks 'none' in the sidebar dropdown (chat-level disable) gets their
+    tool calls silently routed to the default account. Mirroring the email
+    plugin's pattern — return None and fail closed in the caller. 2026-05-14.
+    """
     try:
         from core.chat.function_manager import SCOPE_REGISTRY
         reg = SCOPE_REGISTRY.get('github')
         if reg:
             val = reg['var'].get()
-            return val if val else 'default'
+            return val if val else None
     except Exception as e:
-        logger.debug(f"github: scope resolution failed, using 'default': {e}")
-    return 'default'
+        logger.debug(f"github: scope resolution failed: {e}")
+    return None
 
 
 def _get_github_creds():
     """Load the active scope's github credentials. Returns (username, pat, error_str_or_None)."""
     from core.credentials_manager import credentials
     scope = _get_github_scope()
+    if scope is None:
+        return '', '', "GitHub is disabled for this chat."
     acct = credentials.get_github_account(scope)
     if not acct.get('pat'):
         return '', '', f"No GitHub PAT for scope '{scope}'. Add one in Settings > Plugins > GitHub."
@@ -393,6 +402,43 @@ def _file_push_directory(args, username, pat):
     local = Path(local_path).expanduser().resolve()
     if not local.exists() or not local.is_dir():
         return f"local_path does not exist or isn't a directory: {local}", False
+
+    # SANDBOX: reject paths outside Sapphire's project root, and explicitly
+    # reject `user/` (private chats, knowledge DB, plugin signing key) and
+    # CONFIG_DIR (encrypted credentials + scramble salt). Without this, an
+    # AI prompted to "back up my sapphire install" or a prompt-injected
+    # ghost message could push the entire credentials directory to a public
+    # GitHub repo — Fernet ciphertext + same-dir salt = recoverable plaintext
+    # for every stored PAT, OAuth refresh token, and email password. The
+    # plugin signing private key would also be exfiltrated, letting the
+    # attacker forge signed malicious plugin updates. 2026-05-14.
+    try:
+        project_root = Path(__file__).resolve().parents[3]
+        user_dir = (project_root / 'user').resolve()
+        if not local.is_relative_to(project_root):
+            return (
+                f"local_path must be inside the Sapphire project root, not {local}",
+                False,
+            )
+        if local.is_relative_to(user_dir):
+            return (
+                "local_path inside user/ is forbidden — that directory holds "
+                "private chats, credentials, and the plugin signing key.",
+                False,
+            )
+        try:
+            from core.setup import CONFIG_DIR
+            config_dir = CONFIG_DIR.resolve()
+            if local.is_relative_to(config_dir):
+                return (
+                    "local_path inside the config directory is forbidden — it "
+                    "holds encrypted credentials and the decryption salt.",
+                    False,
+                )
+        except Exception:
+            pass  # if CONFIG_DIR can't be imported here, the user/ guard already covers the typical layout
+    except Exception as e:
+        return f"Path sandbox check failed: {e}", False
 
     # Collect files
     files = []

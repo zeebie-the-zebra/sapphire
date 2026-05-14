@@ -431,6 +431,10 @@ export const appendStream = (chunk) => {
     Streaming.appendStream(chunk, scrollToBottomIfSticky);
 };
 
+// Stream-id passthrough — send-handlers uses it to drop stale chunks after
+// a Stop→immediate-Send. Bumped inside Streaming on every start/cancel.
+export const getCurrentStreamId = () => Streaming.getCurrentStreamId();
+
 export const startTool = (toolId, toolName, args) => {
     Streaming.startTool(toolId, toolName, args, scrollToBottomIfSticky);
 };

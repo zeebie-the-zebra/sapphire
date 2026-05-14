@@ -23,7 +23,7 @@
     "web/objects.js": "sha256:e2cf8b8267153d7a2a9a7c1aac843af391731c01d2d889bf69b8bf048f5a1775",
     "web/player-controller.js": "sha256:6df8289350f01f185f7c8c4d9e39f9d762b5aa05de367ed3deb39e6c9b4d8450",
     "web/sidebar.html": "sha256:c0d25cc097f997c3413abd941e6bbbde238cb6c65e35a0d19885d75b40fc5e25",
-    "web/sidebar.js": "sha256:0b7d5442617121c686615929e4255d7465278567f64990bd1f366f76691b853b"
+    "web/sidebar.js": "sha256:9ca67af4d5c23caaafa7c1b573a6e221e5862b936883512105bd8b23a0aabdad"
   },
-  "signature": "Q9Y3uvH/hgYG2Bq9Rqz55874/DngNxzkB4KimTCjh18G5EemVzWkeJkzG19xLOW8nYJl160pe4eoC5IAnGf8CQ=="
+  "signature": "kcTYb8hqtpCa1/b+WlI58/LnvP+WUeUaEbcB5BNnMGNlzbAvYyS5YrXbEGV5GBmvG9HRU8aCObMMU9IEhNNZCA=="
 }
