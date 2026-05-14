@@ -750,5 +750,6 @@ class OpenAICompatProvider(BaseProvider):
             content=message_content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason,
-            usage=usage
+            usage=usage,
+            thinking=reasoning,  # raw reasoning_content for DeepSeek round-trip
         )

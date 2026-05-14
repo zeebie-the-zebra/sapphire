@@ -490,6 +490,11 @@ async function confirmAndInstall(slug, btn) {
                 storeSlug: item.slug,
             });
             ui.showToast(`${item.name} ${isUpdate ? 'updated' : 'installed'}.`, 'success');
+            // Trigger frontend main.js load for the new plugin. Without this,
+            // a default_enabled:true plugin lands on disk + backend registers
+            // its tools, but the frontend script never loads until the user
+            // does a full page reload. 2026-05-14.
+            document.dispatchEvent(new CustomEvent('sapphire:plugin_toggled'));
             close();
             // Refresh whichever surface is showing.
             if (state.detailSlug) renderDetail(state.detailSlug);

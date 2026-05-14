@@ -196,6 +196,17 @@ class AnthropicCompatProvider(BaseProvider):
                             f"block(s) from user message — this provider class "
                             f"doesn't pass images. Model will not see them."
                         )
+                    # When the message is image-only (no caption), substitute a
+                    # placeholder so the user turn doesn't get silently dropped.
+                    # Without this, the API payload skips a user turn, causing
+                    # consecutive-assistants alternation violation → 400 →
+                    # permanent chat wedge that survives across messages
+                    # (each retry re-sends the same wedged history). 2026-05-14.
+                    if not text_blocks and image_count:
+                        text_blocks = [{
+                            "type": "text",
+                            "text": "[Image attached but not shown — this provider does not support images.]",
+                        }]
                     if text_blocks:
                         api_messages.append({"role": "user", "content": text_blocks})
                 else:

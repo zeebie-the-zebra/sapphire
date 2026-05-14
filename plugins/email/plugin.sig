@@ -8,8 +8,8 @@
     "tests/test_archive_partial_success.py": "sha256:04f3d1e9f3c68a5fbb56ced21656cfc7a55877e54190fe120594113327948470",
     "tests/test_oauth_refresh_error.py": "sha256:038dbc93d434de7185bfa5a53db785d5c587a20771016b7a1ad49e684e57d10e",
     "tests/test_send_email_mutex.py": "sha256:279220d7b548b86428b3e843027327ef490f89236ded03b7fbb510b58bcc6c1f",
-    "tools/email_tool.py": "sha256:fb35d15fd283033050c20d0ed36b27bc75b14f374044b9a00473d911899c316d",
+    "tools/email_tool.py": "sha256:4fc2bbd59b29ebb58b3a113f7b9f34920e52fdb5acba9efda6cdc7d1ac568f82",
     "web/index.js": "sha256:7a06bb92b017588fe24610152faaa45365e2a44b4c277a596223cc3cf01e317f"
   },
-  "signature": "voyyupICPFH0X0kZZGfocf2bFTOoWdsaW4e20eDSwwC5loRu0D/hu2nHioL4ngiWdBJmBRfPGKNcLkqGspOkBw=="
+  "signature": "nXP3VUNs+8UnO1i1XBUsncOsTDEFaHxYJQNmWpqcpR84KfnLjB7JhWAILNiCOdGKko5uLi7xeVJXGBkjgnpiDQ=="
 }

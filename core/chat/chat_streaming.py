@@ -399,12 +399,19 @@ class StreamingChat:
                     # Combine prefill with current content for history
                     full_content = prefill + current_content if has_prefill else current_content
                     
-                    # Store message with tool calls - include thinking_raw for Claude tool cycles
+                    # Store message with tool calls - include thinking_raw for Claude
+                    # tool cycles, AND `thinking` for DeepSeek-reasoner's required
+                    # reasoning_content round-trip on subsequent iterations. Without
+                    # the `thinking` field here, the in-memory messages list omits
+                    # it, the openai_compat sanitizer's gate at line 427-430 finds
+                    # `msg.get('thinking') == None`, and the next API call after
+                    # tool execution hits 400 "Missing reasoning_content". 2026-05-14.
                     messages.append({
                         "role": "assistant",
                         "content": full_content,
                         "tool_calls": tool_calls_to_execute,
-                        "thinking_raw": thinking_raw  # Has signatures for Claude API
+                        "thinking_raw": thinking_raw,  # Has signatures for Claude API
+                        "thinking": current_thinking if current_thinking else None,
                     })
                     
                     # Save to history with new schema
@@ -433,7 +440,30 @@ class StreamingChat:
                         try:
                             function_args = json.loads(tool_call["function"]["arguments"])
                         except json.JSONDecodeError:
-                            function_args = {}
+                            # Mirror the non-streaming path (chat_tool_calling.py:372-385):
+                            # surface the parse error back to the LLM as a tool result
+                            # instead of silently calling the tool with empty args.
+                            # Smaller/quantized models occasionally emit malformed JSON;
+                            # without feedback the LLM can't self-correct and the tool
+                            # runs with default args (potentially destructive for tools
+                            # with permissive defaults). 2026-05-14.
+                            raw_args = tool_call.get("function", {}).get("arguments", "")
+                            logger.error(
+                                f"[STREAMING] Failed to parse tool arguments for "
+                                f"{function_name}: {raw_args!r}"
+                            )
+                            error_result = "Error: Invalid JSON arguments."
+                            self.main_chat.session_manager.add_tool_result(
+                                tool_call_id, function_name, error_result
+                            )
+                            yield {
+                                "type": "tool_end",
+                                "id": tool_call_id,
+                                "name": function_name,
+                                "result": error_result,
+                                "is_error": True,
+                            }
+                            continue
 
                         # Emit typed tool_start event
                         yield {

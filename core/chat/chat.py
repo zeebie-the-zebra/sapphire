@@ -620,10 +620,15 @@ class LLMChat:
                     if len(tool_calls_to_execute) < len(tool_calls_formatted):
                         logger.info(f"[LIMIT] Executing {len(tool_calls_to_execute)}/{len(tool_calls_formatted)} tools (MAX_PARALLEL_TOOLS={config.MAX_PARALLEL_TOOLS})")
                     
+                    # Include `thinking` so DeepSeek-reasoner's required
+                    # reasoning_content round-trip works on subsequent iterations.
+                    # See chat_streaming.py and openai_compat.py:427-430. 2026-05-14.
+                    _thinking = getattr(response_msg, "thinking", None)
                     messages.append({
                         "role": "assistant",
                         "content": filtered_content,
-                        "tool_calls": tool_calls_to_execute
+                        "tool_calls": tool_calls_to_execute,
+                        "thinking": _thinking,
                     })
                     self.session_manager.add_assistant_with_tool_calls(filtered_content, tool_calls_to_execute)
 

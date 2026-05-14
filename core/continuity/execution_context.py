@@ -372,9 +372,13 @@ class ExecutionContext:
             if response_msg.has_tool_calls:
                 filtered = filter_to_thinking_only(response_msg.content or "")
                 tool_calls = response_msg.get_tool_calls_as_dicts()[:max_parallel]
+                # Carry `thinking` for DeepSeek-reasoner round-trip on next
+                # iteration; harmless for other providers. 2026-05-14.
+                _thinking = getattr(response_msg, "thinking", None)
                 messages.append({
                     "role": "assistant", "content": filtered,
-                    "tool_calls": tool_calls
+                    "tool_calls": tool_calls,
+                    "thinking": _thinking,
                 })
                 self.tool_log.extend(tc.get('function', {}).get('name', '?') for tc in tool_calls)
                 # Cap at source: a runaway agent can append thousands. The

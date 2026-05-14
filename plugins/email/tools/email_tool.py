@@ -931,11 +931,19 @@ def _send_email(recipient_id=None, subject=None, body='', reply_to_index=None, a
 # ─── Scope Access ────────────────────────────────────────────────────────────
 
 def _get_current_people_scope():
+    """Resolve the active people scope. Returns None when unset/disabled.
+
+    Previously returned 'default' on exception — silent-default class regression
+    (same pattern as the github fix shipped 2026-05-14). Caller (`_get_recipients`)
+    must handle None and refuse rather than silently routing to the default
+    scope's contacts. 2026-05-14.
+    """
     try:
         from core.chat.function_manager import scope_people
         return scope_people.get()
-    except Exception:
-        return 'default'
+    except Exception as e:
+        logger.debug(f"email: people scope resolution failed: {e}")
+        return None
 
 
 # ─── Executor ────────────────────────────────────────────────────────────────
