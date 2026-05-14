@@ -197,6 +197,12 @@ We opened core contributions, reach out to me on Discord or email first if you w
 ## Sapphire Condensed Mastery Guide
 Sapphire is a wrapper for an LLM, so install Sapphire, load it in your web browser, link it to your LLM, say "hey sapphire" then hello to see it works. Go to Settings > Help and behold the search bar for all your needs. Then activate various prompts and LLM providers to see how they feel in Chat > sidebar > Settings. Change the text in any prompt or make a new one. Go to toolsets, make a new toolset and select what tools you want to use. Make your own Persona for your prompt + toolset. Expand AI tools via Plugins like email. Install a Schedule > Events > Daemon for your email/discord/telegram. Set a heartbeat for your AI to wake you up. Have Sapphire spawn an agent to research swiss cheese. Load Sapphire web UI on your phone browser. Create a Sapphire system service. Final Boss: Have Sapphire spawn the Claude Code agent to create a plugin for her own system, upload it to github on your account per docs/plugin-author, submit it to the Sapphire store so the world can use it.
 
+## Video Walkthrough
+
+A 4.5-hour playlist covering everything in Sapphire end-to-end — install, personas, plugins, agents, daemons, the works. Made for people who'd rather watch than read.
+
+[![Watch the Playlist](https://img.shields.io/badge/YouTube-4.5hr_Walkthrough-FF0000?logo=youtube&logoColor=white)](https://www.youtube.com/playlist?list=PL3x22_N-oxJEdAHy_GsokrMW9UzB13oTF)
+
 ## Licenses
 
 [AGPL-3.0](LICENSE) - Free to use, modify, and distribute. If you modify and deploy it as a service, you must share your source code changes.
