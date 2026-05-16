@@ -49,12 +49,28 @@ def _detect_image_media_type(b64_data: str) -> str:
     return 'image/png'
 
 
-def _inject_tool_images(messages, tool_images):
+def _inject_tool_images(messages, tool_images, provider=None):
     """Inject tool-returned images as a user message for the next LLM turn.
 
     Images are added as content blocks so providers can convert them
     to their native format (Claude source blocks, OpenAI image_url, etc).
+
+    If the provider doesn't support vision, fall back to a text-only
+    placeholder. Without this the next LLM call blows up with a 400
+    "model does not support image inputs" the moment any image-returning
+    tool (body_see, webcam, etc) fires on a text-only model. 2026-05-15.
     """
+    supports = bool(provider and getattr(provider, 'supports_images', False))
+    if not supports:
+        messages.append({
+            "role": "user",
+            "content": f"[Tool returned {len(tool_images)} image(s) — saved to disk. "
+                       f"Current model does not support image inputs, so the image "
+                       f"contents are not available for analysis this turn.]"
+        })
+        logger.info(f"[TOOL] Skipped image injection ({len(tool_images)} image(s)) — provider does not support vision")
+        return
+
     content = [{"type": "text", "text": "[Tool returned image(s) for analysis]"}]
     for img in tool_images:
         data = img.get("data", "")
@@ -648,7 +664,7 @@ class LLMChat:
 
                     # Inject tool-returned images as user message for next LLM turn
                     if tool_images:
-                        _inject_tool_images(messages, tool_images)
+                        _inject_tool_images(messages, tool_images, provider)
 
                     # Refresh tools list — tool_load may have added new tools
                     enabled_tools = self.function_manager.enabled_tools
@@ -687,7 +703,7 @@ class LLMChat:
                         )
 
                         if tool_images:
-                            _inject_tool_images(messages, tool_images)
+                            _inject_tool_images(messages, tool_images, provider)
 
                         logger.info(f"Text-based tool iteration {i+1} completed")
                         continue

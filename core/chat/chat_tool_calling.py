@@ -177,7 +177,7 @@ def wire_to_canonical(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return result
 
 
-def _extract_tool_images(result, history=None):
+def _extract_tool_images(result, history=None, provider=None):
     """Extract images from a tool result if it returned structured data.
 
     Tools can return {"text": "...", "images": [{"data": base64, "media_type": "image/..."}]}
@@ -185,6 +185,12 @@ def _extract_tool_images(result, history=None):
 
     Images are saved to the chat history DB and <<IMG::tool:id>> markers are embedded
     in the text so they persist in history and render via existing image infrastructure.
+
+    If the provider doesn't support vision, images are still saved (UI + history
+    still render them) but the LLM-bound images list is empty, and the tool result
+    text gets a "vision unavailable" suffix. This keeps the conversation a clean
+    tool-call → tool-result → assistant-response pair instead of injecting a fake
+    user message after the tool result. 2026-05-15.
 
     Returns (text_str, images_list). images_list contains the raw image dicts
     for injection into the next LLM turn.
@@ -195,6 +201,7 @@ def _extract_tool_images(result, history=None):
             img for img in result["images"]
             if isinstance(img, dict) and img.get("data")
         ]
+        supports_vision = bool(provider and getattr(provider, 'supports_images', False))
         # Save images to DB and embed markers in text
         # Images with display_only=True are saved for user gallery but not sent to LLM
         llm_images = []
@@ -202,8 +209,26 @@ def _extract_tool_images(result, history=None):
             img_id = _save_tool_image(img, history)
             if img_id:
                 text = f"<<IMG::tool:{img_id}>>\n{text}"
-            if not img.get("display_only"):
+            if not img.get("display_only") and supports_vision:
                 llm_images.append(img)
+        if images and not supports_vision:
+            # Non-vision model: image goes to disk + UI history, but the LLM
+            # can't see it. Generate a CLIP-based atmospheric description so
+            # the model still gets the "vibe" of what was captured.
+            vibe_parts = []
+            for img in images:
+                try:
+                    import base64 as _b64
+                    from core import vibes as _vibes
+                    raw = _b64.b64decode(img["data"])
+                    vibe_parts.append(_vibes.describe(raw))
+                except Exception as e:
+                    logger.warning(f"[VIBES] failed to describe image: {e}")
+            if vibe_parts:
+                text = (text + "\n\n" + "\n\n".join(vibe_parts)).strip()
+            else:
+                text = (text + "\n\n[Note: current model does not support image inputs — "
+                        f"image(s) were captured and saved but cannot be analyzed this turn.]").strip()
         return text, llm_images
     return str(result), []
 
@@ -391,7 +416,7 @@ class ToolCallingEngine:
                 function_result = f"Tool '{function_name}' failed: {str(tool_error)}"
 
             # Extract images if tool returned structured result
-            result_str, images = _extract_tool_images(function_result, history)
+            result_str, images = _extract_tool_images(function_result, history, provider)
             if images:
                 tool_images.extend(images)
                 logger.info(f"[TOOL] {function_name} returned {len(images)} image(s)")
@@ -469,7 +494,7 @@ class ToolCallingEngine:
             logger.error(f"Text-based tool failed for {function_name}: {tool_error}")
             function_result = f"Tool '{function_name}' failed: {str(tool_error)}"
 
-        result_str, tool_images = _extract_tool_images(function_result, history)
+        result_str, tool_images = _extract_tool_images(function_result, history, provider)
         if tool_images:
             logger.info(f"[TOOL] {function_name} returned {len(tool_images)} image(s) (text-based)")
         clean_result = strip_ui_markers(result_str)

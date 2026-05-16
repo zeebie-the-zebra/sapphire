@@ -437,33 +437,48 @@ class StreamingChat:
                         function_name = tool_call["function"]["name"]
                         tool_call_id = tool_call["id"]
 
-                        try:
-                            function_args = json.loads(tool_call["function"]["arguments"])
-                        except json.JSONDecodeError:
-                            # Mirror the non-streaming path (chat_tool_calling.py:372-385):
-                            # surface the parse error back to the LLM as a tool result
-                            # instead of silently calling the tool with empty args.
-                            # Smaller/quantized models occasionally emit malformed JSON;
-                            # without feedback the LLM can't self-correct and the tool
-                            # runs with default args (potentially destructive for tools
-                            # with permissive defaults). 2026-05-14.
-                            raw_args = tool_call.get("function", {}).get("arguments", "")
-                            logger.error(
-                                f"[STREAMING] Failed to parse tool arguments for "
-                                f"{function_name}: {raw_args!r}"
-                            )
-                            error_result = "Error: Invalid JSON arguments."
-                            self.main_chat.session_manager.add_tool_result(
-                                tool_call_id, function_name, error_result
-                            )
-                            yield {
-                                "type": "tool_end",
-                                "id": tool_call_id,
-                                "name": function_name,
-                                "result": error_result,
-                                "is_error": True,
-                            }
-                            continue
+                        raw_args = tool_call.get("function", {}).get("arguments", "")
+                        # Empty string is valid for no-arg tools — Claude/Anthropic
+                        # sends arguments='' (not '{}') when a tool has no params.
+                        # json.loads('') would fail. Treat empty as {} explicitly.
+                        # 2026-05-15.
+                        if raw_args == "" or raw_args is None:
+                            function_args = {}
+                        else:
+                            try:
+                                function_args = json.loads(raw_args)
+                            except json.JSONDecodeError:
+                                # Mirror the non-streaming path (chat_tool_calling.py:372-385):
+                                # surface the parse error back to the LLM as a tool result
+                                # instead of silently calling the tool with empty args.
+                                # Smaller/quantized models occasionally emit malformed JSON;
+                                # without feedback the LLM can't self-correct and the tool
+                                # runs with default args (potentially destructive for tools
+                                # with permissive defaults). 2026-05-14.
+                                logger.error(
+                                    f"[STREAMING] Failed to parse tool arguments for "
+                                    f"{function_name}: {raw_args!r}"
+                                )
+                                error_result = "Error: Invalid JSON arguments."
+                                # CRITICAL: also append to messages — without this, the next
+                                # LLM call sees a tool_use with no matching tool_result and
+                                # Anthropic returns a 400 that kills the whole turn.
+                                # 2026-05-15.
+                                wrapped_err = provider.format_tool_result(
+                                    tool_call_id, function_name, error_result
+                                )
+                                messages.append(wrapped_err)
+                                self.main_chat.session_manager.add_tool_result(
+                                    tool_call_id, function_name, error_result
+                                )
+                                yield {
+                                    "type": "tool_end",
+                                    "id": tool_call_id,
+                                    "name": function_name,
+                                    "result": error_result,
+                                    "is_error": True,
+                                }
+                                continue
 
                         # Emit typed tool_start event
                         yield {
@@ -478,7 +493,7 @@ class StreamingChat:
 
                         try:
                             function_result = self.main_chat.function_manager.execute_function(function_name, function_args, scopes=_scopes, allowed_tools=_allowed_tool_names, executor_snapshot=_executor_snapshot)
-                            result_str, tool_imgs = _extract_tool_images(function_result, self.main_chat.session_manager)
+                            result_str, tool_imgs = _extract_tool_images(function_result, self.main_chat.session_manager, provider)
                             if tool_imgs:
                                 iteration_tool_images.extend(tool_imgs)
                                 logger.info(f"[TOOL] {function_name} returned {len(tool_imgs)} image(s)")
@@ -541,7 +556,7 @@ class StreamingChat:
                     # Inject tool-returned images for next LLM turn
                     if iteration_tool_images:
                         from .chat import _inject_tool_images
-                        _inject_tool_images(messages, iteration_tool_images)
+                        _inject_tool_images(messages, iteration_tool_images, provider)
 
                     # Refresh tools list — tool_load may have added new tools
                     enabled_tools = self.main_chat.function_manager.enabled_tools
@@ -583,7 +598,7 @@ class StreamingChat:
                         # Inject tool-returned images for next LLM turn
                         if text_tool_images:
                             from .chat import _inject_tool_images
-                            _inject_tool_images(messages, text_tool_images)
+                            _inject_tool_images(messages, text_tool_images, provider)
 
                         # Emit tool events for UI
                         tool_name = function_call_data["function_call"]["name"]

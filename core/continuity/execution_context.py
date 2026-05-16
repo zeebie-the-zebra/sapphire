@@ -391,7 +391,7 @@ class ExecutionContext:
                     allowed_tools=self._allowed_tool_names
                 )
                 if tool_images:
-                    _inject_tool_images(messages, tool_images)
+                    _inject_tool_images(messages, tool_images, self.provider)
                 logger.info(f"[ExecCtx] Loop {i+1}: {tools_executed} tools executed")
                 # If the LLM requested tool calls but NONE executed (hallucinated
                 # tool names filtered out by allowed_tools, every call rejected),
@@ -420,7 +420,7 @@ class ExecutionContext:
                         allowed_tools=self._allowed_tool_names
                     )
                     if tool_images:
-                        _inject_tool_images(messages, tool_images)
+                        _inject_tool_images(messages, tool_images, self.provider)
                     continue
 
                 final_content = response_msg.content
