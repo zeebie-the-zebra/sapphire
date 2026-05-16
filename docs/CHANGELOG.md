@@ -1,3 +1,7 @@
+# 2.6.5 - Silero VAD
+- Vastly improved VAD
+- Wakeword speech cuts off at right times now
+- Bug fix for tools in toolset not being reachable
 # 2.6.4 - Ghost Message
 - Ghost messages are invisible message sent to AI and they work with caching
 - Spices and time shifted to new ghost messages
