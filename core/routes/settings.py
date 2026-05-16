@@ -102,8 +102,21 @@ async def get_all_settings(request: Request, _=Depends(require_login)):
             ):
                 all_settings[key] = '••••••••'
         user_overrides = settings.get_user_overrides()
+        # Defaults define the canonical type per key — frontend uses them
+        # for save-time type coercion. Without this, parseValue would fall
+        # back to the currently-stored value's type, which gets corrupted
+        # by any bug that writes a wrong type. 2026-05-16.
+        defaults = settings.get_defaults()
+        # Same masking as settings — never expose stored secrets even via defaults
+        for key in list(defaults.keys()):
+            if defaults.get(key) and (
+                any(key.upper().endswith(s) for s in _SENSITIVE_SUFFIXES)
+                or key in _SENSITIVE_KEYS
+            ):
+                defaults[key] = '••••••••'
         return {
             "settings": all_settings,
+            "defaults": defaults,
             "user_overrides": list(user_overrides.keys()),
             "count": len(all_settings),
             "managed": settings.is_managed(),

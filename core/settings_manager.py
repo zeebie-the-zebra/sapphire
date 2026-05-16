@@ -658,6 +658,15 @@ class SettingsManager:
     def get_all_settings(self):
         """Get all current settings (defaults + user overrides)"""
         return self._config.copy()
+
+    def get_defaults(self):
+        """Get the canonical default values (the schema). Used by the
+        frontend to drive type coercion on save — the default's type is
+        the source-of-truth type, not whatever happens to be in the user
+        settings file. This protects against data poisoning bugs where a
+        corrupted user value (wrong type) would otherwise self-perpetuate
+        through parseValue's duck-typing. 2026-05-16."""
+        return self._defaults.copy()
     
     def validate_tier(self, key):
         """

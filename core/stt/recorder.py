@@ -47,7 +47,9 @@ class AudioRecorder:
         # Silero VAD (default). Lazy-loaded on first use so module import
         # doesn't fail if onnxruntime is somehow broken. Falls back to
         # amplitude VAD if silero load/inference errors. 2026-05-16.
-        self._vad_backend = getattr(config, 'STT_VAD_BACKEND', 'silero')
+        # Boolean setting matches the UI checkbox shape — no translation
+        # layer means no class of "type mismatch on save" bugs possible.
+        self._silero_enabled = bool(getattr(config, 'STT_VAD_ENABLED', True))
         self._silero = None
         self._silero_buffer = np.zeros(0, dtype=np.int16)
         self._last_speech_prob = 0.0
@@ -120,11 +122,11 @@ class AudioRecorder:
         Amplitude (legacy): adaptive level threshold — sensitive to any
         loud non-speech sound. Always-available fallback.
 
-        Intent (STT_VAD_BACKEND) is the user's preference. Capability
-        (silero_vad.is_available()) is the system check — set by the boot
-        warmup. Effective backend = min(intent, capability).
+        Intent (STT_VAD_ENABLED, boolean) is the user's preference.
+        Capability (silero_vad.is_available()) is the system check — set
+        by the boot warmup. Silero only runs if both are true.
         """
-        if self._vad_backend == 'silero':
+        if self._silero_enabled:
             from core.stt import silero_vad as _svad
             if _svad.is_available():
                 try:
@@ -134,7 +136,7 @@ class AudioRecorder:
                         f"[VAD] Silero inference failed mid-recording ({e}) — "
                         f"falling back to amplitude for this session."
                     )
-                    self._vad_backend = 'amplitude'
+                    self._silero_enabled = False
                     self.level_history.clear()
             # Silero pending or failed at warmup — silently use amplitude
             # this recording. User intent (settings) is preserved.
@@ -346,7 +348,7 @@ class AudioRecorder:
                 
                 # Early abort if no speech detected within timeout (accidental wakeword trigger)
                 if not has_speech and (time.time() - start_time) > config.RECORDER_NO_SPEECH_TIMEOUT:
-                    if self._vad_backend == 'silero':
+                    if self._silero_enabled:
                         n = getattr(self, '_silero_score_count', 0)
                         mean = (self._silero_prob_sum / n) if n else 0.0
                         max_amp = getattr(self, '_silero_max_amp', 0)

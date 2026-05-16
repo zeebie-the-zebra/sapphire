@@ -27,19 +27,19 @@ _TTS_MAX_CHARS = 50_000  # ~8,000 words / ~20 pages — generous for stories, bl
 @router.get("/api/stt/vad-status")
 async def vad_status(_=Depends(require_login)):
     """Report silero warmup state for the Settings UI status badge.
-    Returns: {state: pending|ready|failed, reason, intent, available}
+    Returns: {state: pending|ready|failed, reason, enabled, available}
     - state: silero system capability (set by boot warmup)
-    - intent: user preference from STT_VAD_BACKEND setting
+    - enabled: user preference from STT_VAD_ENABLED setting (boolean)
     - available: convenience boolean — true iff state == "ready"
     """
     from core.stt import silero_vad as _svad
     status = _svad.get_warmup_status()
-    intent = getattr(config, 'STT_VAD_BACKEND', 'silero')
+    enabled = bool(getattr(config, 'STT_VAD_ENABLED', True))
     threshold = float(getattr(config, 'STT_VAD_SPEECH_THRESHOLD', 0.5))
     return {
         "state": status["state"],
         "reason": status["reason"],
-        "intent": intent,
+        "enabled": enabled,
         "available": status["state"] == "ready",
         "threshold": threshold,
     }

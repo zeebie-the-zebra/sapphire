@@ -159,9 +159,9 @@
     "long": "When enabled, uses VAD to filter out non-speech audio before transcription. Improves accuracy by ignoring silence and background noise. Recommended to keep enabled for better results and faster processing."
   },
   
-  "STT_VAD_BACKEND": {
-    "short": "Voice activity detection engine",
-    "long": "Which VAD method to use for detecting speech vs silence. 'silero' (recommended) uses a tiny ML model robust to background noise. 'amplitude' uses adaptive level thresholding (the Classic VAD). The Silero checkbox in the UI maps to this setting — when checked, this is 'silero' and the system falls back to amplitude automatically if Silero fails. When unchecked, only amplitude runs."
+  "STT_VAD_ENABLED": {
+    "short": "Use Silero VAD (recommended)",
+    "long": "When enabled, voice activity detection uses Silero — a tiny ML model robust to background noise. Falls back to Classic VAD (amplitude thresholding) if Silero fails to load. When disabled, only Classic VAD runs."
   },
   "STT_VAD_SPEECH_THRESHOLD": {
     "short": "Silero speech threshold (0.0-1.0)",
