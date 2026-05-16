@@ -417,12 +417,26 @@ class FunctionManager:
                     # 2026-05-16 fix.
                     elif self.current_toolset_name not in ("none", "custom") \
                             and toolset_manager.toolset_exists(self.current_toolset_name):
-                        active_funcs = set(toolset_manager.get_toolset_functions(self.current_toolset_name))
-                        enabled_names = {t['function']['name'] for t in self._enabled_tools}
-                        for tool in tools:
-                            fname = tool['function']['name']
-                            if fname in active_funcs and fname not in enabled_names:
-                                self._enabled_tools.append(tool)
+                        # Defensive: a user-hand-edited toolsets.json could have
+                        # 'functions' set to null or a string. set() of either
+                        # raises (TypeError) or silently iterates characters
+                        # (string). Either case ends up in the broad except
+                        # below, which swallows the error and leaves the plugin
+                        # partially registered. Guard explicitly. 2026-05-16.
+                        raw_funcs = toolset_manager.get_toolset_functions(self.current_toolset_name)
+                        if isinstance(raw_funcs, list):
+                            active_funcs = set(raw_funcs)
+                            enabled_names = {t['function']['name'] for t in self._enabled_tools}
+                            for tool in tools:
+                                fname = tool['function']['name']
+                                if fname in active_funcs and fname not in enabled_names:
+                                    self._enabled_tools.append(tool)
+                        else:
+                            logger.warning(
+                                f"Toolset '{self.current_toolset_name}' has malformed "
+                                f"functions field ({type(raw_funcs).__name__}, expected list) "
+                                f"— skipping auto-add for plugin '{plugin_name}'"
+                            )
 
                 logger.info(f"Plugin '{plugin_name}' tool '{module_name}': {len(tools)} tools registered")
 
@@ -538,7 +552,17 @@ class FunctionManager:
             # (mirrors register_plugin_tools fix). 2026-05-16.
             elif self.current_toolset_name not in ("none", "custom") \
                     and toolset_manager.toolset_exists(self.current_toolset_name):
-                active_funcs = set(toolset_manager.get_toolset_functions(self.current_toolset_name))
+                # See register_plugin_tools for the malformed-functions-field
+                # rationale — defensive guard against corrupted user JSON.
+                raw_funcs = toolset_manager.get_toolset_functions(self.current_toolset_name)
+                if not isinstance(raw_funcs, list):
+                    logger.warning(
+                        f"Toolset '{self.current_toolset_name}' has malformed "
+                        f"functions field ({type(raw_funcs).__name__}, expected list) "
+                        f"— skipping dynamic auto-add for module '{module_name}'"
+                    )
+                    raw_funcs = []
+                active_funcs = set(raw_funcs)
                 enabled_names = {t['function']['name'] for t in self._enabled_tools}
                 for tool in tools:
                     fname = tool['function']['name']

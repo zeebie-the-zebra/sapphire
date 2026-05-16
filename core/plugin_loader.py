@@ -892,11 +892,17 @@ class PluginLoader:
             if should_load:
                 try:
                     self._load_plugin(name)
-                    # Re-enable tools in active toolset
+                    # Re-enable tools in active toolset. Capture the toolset
+                    # name UNDER the function_manager's tools lock so a
+                    # concurrent toolset save (dev-watcher fires while user
+                    # is mid-save) can't slip a stale name past us and
+                    # silently clobber their save. 2026-05-16.
                     if self._function_manager:
-                        current = self._function_manager.current_toolset_name
+                        fm = self._function_manager
+                        with fm._tools_lock:
+                            current = fm.current_toolset_name
                         if current:
-                            self._function_manager.update_enabled_functions([current])
+                            fm.update_enabled_functions([current])
                     logger.info(f"[PLUGINS] Reloaded: {name}")
                     from core.event_bus import publish, Events
                     publish(Events.PLUGIN_RELOADED, {"plugin": name})
