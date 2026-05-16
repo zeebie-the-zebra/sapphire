@@ -78,7 +78,12 @@ export function parseValue(value, originalValue) {
         const parsed = parseFloat(value);
         return isNaN(parsed) ? originalValue : parsed;
     }
-    if (typeof originalValue === 'object') {
+    // `typeof null === 'object'` in JavaScript (legacy quirk). A null default
+    // means "no canonical type" — typically a polymorphic setting that can hold
+    // null, a string, or a number depending on user choice (e.g. audio device).
+    // Don't try to JSON.parse the value — pass it through and let the backend
+    // accept whatever type the UI control produces. 2026-05-16 fix.
+    if (originalValue !== null && typeof originalValue === 'object') {
         try { return JSON.parse(value); }
         catch { throw new Error('Invalid JSON'); }
     }
