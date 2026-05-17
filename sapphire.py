@@ -140,11 +140,15 @@ class VoiceChatSystem:
             logger.warning(f"Essential-plugin check failed: {_e}")
 
         # Re-apply toolset now that plugin tools are registered
-        # (toolset was applied before plugins loaded, so plugin tools were missed)
+        # (toolset was applied before plugins loaded, so plugin tools were missed).
+        # Capture the name UNDER _tools_lock so a concurrent mutation can't slip
+        # a stale value past us. Mirrors plugin_loader.py:902-905. 2026-05-16.
         fm = self.llm_chat.function_manager
-        if fm.current_toolset_name and fm.current_toolset_name != "none":
-            fm.update_enabled_functions([fm.current_toolset_name])
-            logger.info(f"Toolset '{fm.current_toolset_name}' re-applied after plugin scan")
+        with fm._tools_lock:
+            current = fm.current_toolset_name
+        if current and current != "none":
+            fm.update_enabled_functions([current])
+            logger.info(f"Toolset '{current}' re-applied after plugin scan")
 
         # RAG orphan cleanup runs AFTER plugin_loader.scan() (Phase 4 reorder).
         # Previously this ran at line 100, BEFORE plugin loading, which meant it
@@ -667,6 +671,12 @@ class VoiceChatSystem:
             if not skip_tts:
                 self.speak_error('processing')
         finally:
+            # Voice path has no toast channel — drain notices so they don't
+            # accumulate and leak into the next web turn as stale toasts
+            # (e.g. user voice-chats with missing toolset, fixes it, opens
+            # web → stale "missing" toast fires). In finally so the drain
+            # still runs if chat() raised mid-turn. 2026-05-16.
+            self.llm_chat.pending_notices = []
             self._processing_lock.release()
 
         return None
