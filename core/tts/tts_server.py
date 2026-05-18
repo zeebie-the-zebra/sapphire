@@ -163,6 +163,8 @@ class TTSHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == '/tts':
             self._handle_tts()
+        elif self.path == '/tts/stream':
+            self._handle_tts_stream()
         else:
             self.send_error(404)
 
@@ -273,6 +275,120 @@ class TTSHandler(BaseHTTPRequestHandler):
                     os.remove(file_path)
                 except Exception as _e:
                     logger.warning(f"Could not clean partial temp file {file_path}: {_e}")
+
+
+    def _handle_tts_stream(self):
+        """Streaming TTS — yield each Kokoro segment as a standalone OGG/Opus
+        chunk via HTTP Transfer-Encoding: chunked. Same request shape as /tts;
+        response is a sequence of self-contained OGG blobs (each one decodable
+        independently). Used by v2.7.0 streaming pipeline.
+
+        Pipeline lock is held for the full generation — Kokoro can't be
+        parallelized across requests safely. Streaming just yields bytes as
+        soon as each segment is encoded, instead of accumulating all first.
+        """
+        import io
+        global request_count
+        with request_count_lock:
+            request_count += 1
+            current_count = request_count
+
+        if current_count % 10 == 0:
+            mem_exceeded = check_memory()
+            req_exceeded = current_count >= MAX_REQUESTS
+            if mem_exceeded or req_exceeded:
+                schedule_restart(f"Memory: {mem_exceeded}, Requests: {current_count}/{MAX_REQUESTS}")
+
+        # Parse + validate input (same shape as /tts)
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > MAX_CONTENT_LENGTH:
+                _json_response(self, {'error': 'Request body too large'}, 413)
+                return
+            body = self.rfile.read(content_length)
+            data = json.loads(body)
+        except (json.JSONDecodeError, ValueError):
+            _json_response(self, {'error': 'Invalid JSON body'}, 400)
+            return
+
+        if 'text' not in data:
+            _json_response(self, {'error': 'No text provided'}, 400)
+            return
+
+        text_to_speak = clean_text(data['text'])
+        if not text_to_speak.strip():
+            _json_response(self, {'error': 'Text is empty after filtering'}, 400)
+            return
+
+        voice = data.get('voice') or DEFAULT_VOICE
+        try:
+            speed = float(data.get('speed', DEFAULT_SPEED))
+        except (ValueError, TypeError):
+            speed = DEFAULT_SPEED
+
+        # Headers committed — past this point we can't return JSON errors,
+        # only chunks or a close.
+        self.send_response(200)
+        self.send_header('Content-Type', 'audio/ogg')
+        self.send_header('Transfer-Encoding', 'chunked')
+        self.send_header('Cache-Control', 'no-cache')
+        self.send_header('X-Accel-Buffering', 'no')   # disable nginx buffering if proxied
+        self.end_headers()
+
+        segments_emitted = 0
+        first_chunk_ms = None
+        generation_start = time.time()
+
+        try:
+            with pipeline_lock:
+                generator = pipeline(text_to_speak, voice=voice, speed=speed)
+                for _, _, seg in generator:
+                    # Copy + free underlying tensor memory (same hazard as /tts path)
+                    audio = np.copy(seg)
+                    # Encode this segment to a standalone OGG/Opus blob in RAM
+                    buf = io.BytesIO()
+                    sf.write(buf, audio, AUDIO_SAMPLE_RATE,
+                             format='OGG', subtype='OPUS')
+                    ogg_bytes = buf.getvalue()
+                    del audio, buf
+
+                    # Write one HTTP chunked frame: "<hex-len>\r\n<bytes>\r\n"
+                    frame_header = f"{len(ogg_bytes):x}\r\n".encode('ascii')
+                    self.wfile.write(frame_header)
+                    self.wfile.write(ogg_bytes)
+                    self.wfile.write(b"\r\n")
+                    self.wfile.flush()
+
+                    if first_chunk_ms is None:
+                        first_chunk_ms = int((time.time() - generation_start) * 1000)
+                    segments_emitted += 1
+                del generator
+
+            # Terminating zero-length chunk
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
+            total_ms = int((time.time() - generation_start) * 1000)
+            logger.info(
+                f"Stream complete: {segments_emitted} segments, "
+                f"first_chunk={first_chunk_ms}ms total={total_ms}ms "
+                f"(req #{current_count})"
+            )
+            sys.stderr.flush()
+        except (BrokenPipeError, ConnectionResetError) as e:
+            logger.info(
+                f"Client disconnected mid-stream after {segments_emitted} segments: {e}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Stream error after {segments_emitted} segments: {e}",
+                exc_info=True,
+            )
+            # Best-effort terminating chunk so client doesn't hang
+            try:
+                self.wfile.write(b"0\r\n\r\n")
+                self.wfile.flush()
+            except Exception:
+                pass
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):

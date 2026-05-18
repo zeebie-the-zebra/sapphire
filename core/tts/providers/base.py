@@ -1,6 +1,6 @@
 """Base class for all TTS providers."""
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Iterator, Optional
 
 
 class BaseTTSProvider(ABC):
@@ -17,6 +17,11 @@ class BaseTTSProvider(ABC):
     SPEED_MIN: float = 0.5
     SPEED_MAX: float = 2.5
 
+    # True if this provider has a real streaming implementation (not the
+    # default wrap-generate fallback). Used by TTSClient to decide whether
+    # to expect chunked semantics or just one-shot bytes.
+    supports_streaming: bool = False
+
     @abstractmethod
     def generate(self, text: str, voice: str, speed: float, **kwargs) -> Optional[bytes]:
         """Generate audio bytes from text.
@@ -30,6 +35,23 @@ class BaseTTSProvider(ABC):
             Audio bytes in the provider's native format, or None on failure.
         """
         ...
+
+    def generate_stream(self, text: str, voice: str, speed: float, **kwargs) -> Iterator[bytes]:
+        """Yield audio chunks as they're produced. Each yielded chunk is a
+        self-contained, independently-decodable audio blob (e.g., one OGG
+        file). Order matters — chunks must play in yield order.
+
+        Default implementation calls generate() once and yields the whole
+        blob — backwards-compat for providers without a true streaming API.
+        Providers with real streaming APIs override + set
+        supports_streaming=True.
+
+        Returns:
+            Iterator yielding audio bytes. Empty iterator on failure.
+        """
+        audio = self.generate(text, voice, speed, **kwargs)
+        if audio:
+            yield audio
 
     @abstractmethod
     def is_available(self) -> bool:

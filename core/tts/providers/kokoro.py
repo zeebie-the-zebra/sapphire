@@ -1,7 +1,7 @@
 """Kokoro TTS provider — local HTTP server on port 5012."""
 import logging
 import time
-from typing import Optional
+from typing import Iterator, Optional
 
 import requests
 import config
@@ -17,6 +17,7 @@ class KokoroTTSProvider(BaseTTSProvider):
     audio_content_type = 'audio/ogg'
     SPEED_MIN = 0.5
     SPEED_MAX = 2.0
+    supports_streaming = True
 
     def __init__(self):
         self.primary_server = config.TTS_PRIMARY_SERVER
@@ -56,6 +57,56 @@ class KokoroTTSProvider(BaseTTSProvider):
 
         logger.error(f"Kokoro generate failed after {1 + len(delays)} attempts: {last_error}")
         return None
+
+    def generate_stream(self, text: str, voice: str, speed: float, **kwargs) -> Iterator[bytes]:
+        """POST to /tts/stream, yield each OGG segment as it arrives.
+
+        Falls back to non-streaming generate() on connect failure or non-200
+        response — same observable contract from the caller's view, just no
+        latency win.
+
+        No retry loop here: we've committed to a chunked response once headers
+        arrive, can't restart cleanly. The non-streaming /tts path keeps its
+        retries for the fallback case.
+        """
+        clamped_speed = max(self.SPEED_MIN, min(self.SPEED_MAX, speed))
+        if clamped_speed != speed:
+            logger.warning(f"Kokoro: clamped speed {speed} -> {clamped_speed}")
+
+        try:
+            server_url = self._get_server_url()
+            response = requests.post(
+                f"{server_url}/tts/stream",
+                json={
+                    'text': text.replace("*", ""),
+                    'voice': voice,
+                    'speed': clamped_speed,
+                },
+                stream=True,
+                timeout=60,
+            )
+            if response.status_code != 200:
+                logger.warning(
+                    f"Kokoro /tts/stream returned {response.status_code} — "
+                    f"falling back to non-streaming generate()"
+                )
+                audio = self.generate(text, voice, speed, **kwargs)
+                if audio:
+                    yield audio
+                return
+
+            # iter_content with chunk_size=None yields whatever the HTTP
+            # client received per chunked-transfer frame. Each yield is
+            # one or more complete OGG files (multiple may coalesce at the
+            # TCP layer for small payloads on localhost).
+            for chunk in response.iter_content(chunk_size=None):
+                if chunk:
+                    yield chunk
+        except Exception as e:
+            logger.warning(f"Kokoro /tts/stream failed: {e!r} — falling back to non-streaming")
+            audio = self.generate(text, voice, speed, **kwargs)
+            if audio:
+                yield audio
 
     def is_available(self) -> bool:
         """Check if Kokoro server is reachable."""

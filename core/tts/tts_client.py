@@ -1,5 +1,6 @@
 import sys
 import os
+import io
 import tempfile
 import time
 import threading
@@ -253,13 +254,26 @@ class TTSClient:
         gen = self._generation
         self.should_stop.clear()
 
+        # Route to streaming variant when the provider supports it AND
+        # the user has opted in via TTS_STREAMING_ENABLED. Falls back to
+        # the existing blob path transparently otherwise. 2026-05-17.
+        target = self._select_play_target()
         threading.Thread(
-            target=self._generate_and_play_audio,
+            target=target,
             args=(processed_text, gen),
             daemon=True
         ).start()
 
         return True
+
+    def _select_play_target(self):
+        """Pick streaming vs blob playback path. Streaming only when the
+        provider declares supports_streaming AND the setting is enabled."""
+        if not getattr(config, 'TTS_STREAMING_ENABLED', False):
+            return self._generate_and_play_audio
+        if not getattr(self._provider, 'supports_streaming', False):
+            return self._generate_and_play_audio
+        return self._generate_and_play_audio_stream
 
     def speak_sync(self, text):
         """Send text to TTS server, play audio, and block until playback finishes."""
@@ -286,8 +300,10 @@ class TTSClient:
         self.stop()
         self.should_stop.clear()
 
-        # Run synchronously on calling thread — no daemon, no race
-        self._generate_and_play_audio(processed_text)
+        # Run synchronously on calling thread — no daemon, no race.
+        # Same streaming-vs-blob dispatch as speak().
+        target = self._select_play_target()
+        target(processed_text)
         return True
         
     def _apply_pitch_shift(self, audio_data, samplerate, pitch=None):
@@ -467,6 +483,130 @@ class TTSClient:
                 was_playing = self._is_playing
                 self._is_playing = False
             if was_playing:
+                publish(Events.TTS_STOPPED)
+            gc.collect()
+
+    def _generate_and_play_audio_stream(self, text, gen=None):
+        """Streaming variant — pulls bytes from `provider.generate_stream()`,
+        decodes each chunk as an independent OGG, plays in order through a
+        single long-lived OutputStream. First chunk plays while later chunks
+        are still being generated server-side.
+
+        Same lifecycle as _generate_and_play_audio (lock, _is_playing,
+        TTS_PLAYING/TTS_STOPPED, post_tts hook, stop responsiveness). Falls
+        back transparently if the provider's generate_stream() yields just
+        one blob (base-class default).
+        """
+        if not self.audio_available:
+            return
+
+        def _stale():
+            return gen is not None and gen != self._generation
+
+        chunks_played = 0
+        duration_total = 0.0
+        stopped_early = False
+        output_stream = None
+        playing_started = False
+        first_chunk_at = None
+        t_start = time.time()
+
+        try:
+            with self.lock:
+                if self.should_stop.is_set() or _stale():
+                    return
+                self._is_playing = True
+
+            chunk_iter = self._provider.generate_stream(text, self.voice_name, self.speed)
+
+            for chunk_bytes in chunk_iter:
+                if self.should_stop.is_set() or _stale():
+                    stopped_early = True
+                    break
+                if not chunk_bytes:
+                    continue
+
+                try:
+                    audio_data, samplerate = sf.read(io.BytesIO(chunk_bytes))
+                except Exception as e:
+                    logger.warning(f"[TTS-stream] decode failed: {e}")
+                    continue
+
+                if len(audio_data.shape) > 1:
+                    audio_data = audio_data.mean(axis=1)
+                if samplerate != self.output_rate:
+                    audio_data = self._resample(audio_data, samplerate, self.output_rate)
+                    samplerate = self.output_rate
+                audio_data = audio_data.astype(np.float32)
+                duration_total += len(audio_data) / samplerate
+
+                # Open OutputStream lazily on first decodable chunk so we
+                # know the sample rate. Single stream across all chunks =
+                # no gaps between sentences.
+                if output_stream is None:
+                    output_stream = sd.OutputStream(
+                        samplerate=samplerate, device=self.output_device,
+                        channels=1, dtype='float32',
+                    )
+                    output_stream.start()
+                    with self.lock:
+                        if self.should_stop.is_set() or _stale():
+                            stopped_early = True
+                            break
+                        publish(Events.TTS_PLAYING)
+                        playing_started = True
+                    first_chunk_at = time.time() - t_start
+                    logger.debug(f"[TTS-stream] first chunk playing at +{first_chunk_at*1000:.0f}ms")
+
+                # 100ms slices for interruptibility — matches the non-stream path
+                slice_size = int(samplerate * 0.1)
+                for i in range(0, len(audio_data), slice_size):
+                    if self.should_stop.is_set() or _stale():
+                        stopped_early = True
+                        break
+                    slice_audio = audio_data[i:i + slice_size].reshape(-1, 1)
+                    try:
+                        output_stream.write(slice_audio)
+                    except sd.PortAudioError as pa_err:
+                        logger.warning(f"[TTS-stream] output device error mid-stream: {pa_err}")
+                        stopped_early = True
+                        break
+
+                chunks_played += 1
+                if stopped_early:
+                    break
+
+            if output_stream is not None:
+                try:
+                    output_stream.stop()
+                    output_stream.close()
+                except Exception as e:
+                    logger.debug(f"[TTS-stream] output close error: {e}")
+
+            if stopped_early:
+                logger.info(f"[TTS-stream] Stopped early after {chunks_played} chunks ({duration_total:.1f}s)")
+            else:
+                logger.debug(f"[TTS-stream] Complete: {chunks_played} chunks, {duration_total:.1f}s")
+
+            from core.hooks import hook_runner, HookEvent
+            if hook_runner.has_handlers("post_tts"):
+                hook_runner.fire("post_tts", HookEvent(
+                    tts_text=text, config=config,
+                    metadata={
+                        "duration": duration_total,
+                        "stopped_early": stopped_early,
+                        "chunks": chunks_played,
+                        "first_chunk_ms": int(first_chunk_at * 1000) if first_chunk_at else None,
+                        "streaming": True,
+                    },
+                ))
+        except Exception as e:
+            logger.error(f"Error in streaming TTS playback: {e}", exc_info=True)
+        finally:
+            with self.lock:
+                was_playing = self._is_playing
+                self._is_playing = False
+            if was_playing and playing_started:
                 publish(Events.TTS_STOPPED)
             gc.collect()
 
