@@ -240,18 +240,28 @@ const _b64ToBlob = (b64, contentType) => {
     return new Blob([bytes], { type: contentType || 'audio/ogg' });
 };
 
-const _ttsStreamCleanupCurrent = () => {
-    if (_ttsStreamUrl) {
-        try { URL.revokeObjectURL(_ttsStreamUrl); } catch {}
-        _ttsStreamUrl = null;
+const _disposeItem = (item) => {
+    if (!item) return;
+    if (item.url) {
+        try { URL.revokeObjectURL(item.url); } catch {}
+        item.url = null;
     }
-    if (_ttsStreamPlayer) {
-        _ttsStreamPlayer.onended = null;
-        _ttsStreamPlayer.onerror = null;
-        _ttsStreamPlayer.src = '';
-        _ttsStreamPlayer = null;
+    if (item.audio) {
+        item.audio.onended = null;
+        item.audio.onerror = null;
+        item.audio.src = '';
+        item.audio = null;
     }
 };
+
+const _ttsStreamCleanupCurrent = () => {
+    _disposeItem(_ttsStreamCurrent);
+    _ttsStreamCurrent = null;
+    _ttsStreamPlayer = null;
+    _ttsStreamUrl = null;
+};
+
+let _ttsStreamCurrent = null;  // {audio, url, blob, pause_after_ms, index, text, boundary}
 
 const _ttsStreamPlayNext = (gen) => {
     if (gen !== _ttsStreamGen) return;        // stopped + restarted under us
@@ -261,13 +271,21 @@ const _ttsStreamPlayNext = (gen) => {
         if (_ttsStreamEnded) {
             _ttsStreamActive = false;
             _ttsStreamCleanupCurrent();
+            isStreaming = false;
         }
         return;
     }
     const item = _ttsStreamQueue.shift();
     _ttsStreamCleanupCurrent();
-    _ttsStreamUrl = URL.createObjectURL(item.blob);
-    _ttsStreamPlayer = new Audio(_ttsStreamUrl);
+    _ttsStreamCurrent = item;
+    _ttsStreamPlayer = item.audio;
+    _ttsStreamUrl = item.url;
+    if (!_ttsStreamPlayer) {
+        // Defensive — should have been pre-built on enqueue
+        console.warn('[TTS-STREAM] item missing audio element, skipping');
+        _ttsStreamPlayNext(gen);
+        return;
+    }
     _ttsStreamPlayer.volume = muted ? 0 : volume;
     _ttsStreamPlayer.onended = () => {
         const pause = item.pause_after_ms || 0;
@@ -290,12 +308,27 @@ const _ttsStreamPlayNext = (gen) => {
     });
 };
 
-/** Called by api.js SSE handler on `tts_chunk` events. */
+/** Called by api.js SSE handler on `tts_chunk` events.
+ *
+ * The Audio element is built HERE (not when the chunk is popped to play),
+ * so the browser starts preloading/decoding while the previous chunk is
+ * still playing. By the time we hit play() the OGG is ready — eliminates
+ * the per-chunk Audio() startup gap that was stacking with the intentional
+ * pause_after_ms to make speech feel laggy on faster machines.
+ */
 export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, pause_after_ms, text }) => {
     if (!audio_b64) return;
     _ttsStreamSawChunk = true;
     const blob = _b64ToBlob(audio_b64, content_type);
-    _ttsStreamQueue.push({ blob, pause_after_ms: pause_after_ms || 0, index, text, boundary });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.preload = 'auto';   // hint browser to start decoding immediately
+    try { audio.load(); } catch {}  // no-arg load(): browser begins fetching/decoding
+    _ttsStreamQueue.push({
+        audio, url, blob,
+        pause_after_ms: pause_after_ms || 0,
+        index, text, boundary,
+    });
     if (!_ttsStreamActive) {
         _ttsStreamActive = true;
         _ttsStreamEnded = false;
@@ -330,6 +363,9 @@ export const ttsStreamSawChunk = () => _ttsStreamSawChunk;
 
 const _ttsStreamStop = () => {
     _ttsStreamGen += 1;       // any in-flight setTimeout / callbacks become no-ops
+    // Dispose preloaded audio elements in the queue too — they hold blob
+    // URLs and decoded buffers that should be released immediately.
+    for (const item of _ttsStreamQueue) _disposeItem(item);
     _ttsStreamQueue = [];
     _ttsStreamEnded = true;
     _ttsStreamActive = false;

@@ -106,7 +106,9 @@
     "TTS_ELEVENLABS_MODEL": "eleven_flash_v2_5",
     "TTS_ELEVENLABS_VOICE_ID": "",
     "KOKORO_CUDA_DEVICE": "",
-    "TTS_STREAMING_ENABLED": false
+    "TTS_STREAMING_ENABLED": false,
+    "TTS_STREAMING_MIN_CHARS": 15,
+    "TTS_STREAMING_MAX_CHARS": 200
   },
 
   "embedding": {

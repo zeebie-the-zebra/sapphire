@@ -244,6 +244,18 @@
     "short": "Timeout before trying fallback server (seconds)",
     "long": "How long to wait for primary TTS server before switching to fallback. 0.2 seconds (200ms) provides quick failover. Too low may not give primary server enough time. Too high causes noticeable delays when primary is down."
   },
+  "TTS_STREAMING_ENABLED": {
+    "short": "Stream speech in sentence-sized chunks (Kokoro only)",
+    "long": "When ON, Sapphire synthesizes and starts playing each sentence as soon as the LLM finishes it — speech starts ~1-2s after you press send instead of waiting for the whole reply. Falls back to whole-reply playback automatically for providers that don't support streaming (ElevenLabs, gTTS). Default OFF in 2.7.0 — opt-in while we shake out edge cases."
+  },
+  "TTS_STREAMING_MIN_CHARS": {
+    "short": "Minimum chars before emitting a chunk",
+    "long": "Smallest chunk size the streamer will emit at a sentence boundary. Below this, the chunker waits and merges with the next sentence. Lower values feel snappier but produce choppy speech on short replies. Sensible range: 5-100. Default 15."
+  },
+  "TTS_STREAMING_MAX_CHARS": {
+    "short": "Maximum chunk length before force-splitting",
+    "long": "Largest chunk size before the streamer force-splits on the last whitespace inside the window. Higher values produce smoother prose but delay first audio. Sensible range: 50-500. Default 200."
+  },
   "EMBEDDING_PROVIDER": {
     "short": "Where to run embedding inference",
     "long": "Local runs Nomic on your CPU (requires onnxruntime + transformers). API sends text to a remote Nomic server. Disable to use text-only search."

@@ -12,14 +12,27 @@ just orchestrates synth scheduling and event emission.
 import base64
 import concurrent.futures
 import logging
+import time
 import uuid
 from collections import deque
+from typing import Callable, Optional
 
 import config
 from core.hooks import hook_runner, HookEvent
 from core.tts.streaming import SpeechChunker
 
 logger = logging.getLogger(__name__)
+
+# How long flush_and_close waits per pending future before polling the
+# cancel_check. Short enough to feel snappy on user-stop, long enough
+# to not burn CPU when synth is the normal-case bottleneck.
+_FLUSH_POLL_TIMEOUT_S = 0.1
+# Hard ceiling per future — if synth genuinely stalls (kokoro hung), bail.
+_FLUSH_HARD_TIMEOUT_S = 30.0
+
+# Sentinel — distinct from None (which means "synth failed") so the drain
+# loop can tell "user stopped" from "synth crashed."
+_CANCELLED = object()
 
 
 class StreamingTTSPump:
@@ -47,11 +60,16 @@ class StreamingTTSPump:
             `total_chars`, `interrupted`, `stream_id`. Observational.
     """
 
-    def __init__(self, system):
+    def __init__(self, system, cancel_check: Optional[Callable[[], bool]] = None):
         self.system = system
         self.tts = getattr(system, "tts", None)
         self.provider = getattr(self.tts, "_provider", None) if self.tts else None
-        self.chunker = SpeechChunker()
+        # Chunker bounds — user-tunable via Settings → TTS. Sensible
+        # clamps so a typo in settings can't yield zero-size chunks or
+        # unbounded buffers.
+        min_chars = max(5, int(getattr(config, "TTS_STREAMING_MIN_CHARS", 15) or 15))
+        max_chars = max(min_chars + 5, int(getattr(config, "TTS_STREAMING_MAX_CHARS", 200) or 200))
+        self.chunker = SpeechChunker(max_chars=max_chars, min_chars=min_chars)
         self.pending: deque = deque()
         self.executor = None
         self._stream_started = False
@@ -62,6 +80,11 @@ class StreamingTTSPump:
         self._total_chars = 0
         # Plugin can disable the whole turn via tts_stream_start skip_tts.
         self._skip_turn = False
+        # External cancel signal (e.g. self.cancel_flag on the stream).
+        # flush_and_close() polls this so a Stop pressed AFTER the LLM is
+        # done but BEFORE all synth completes can short-circuit cleanly.
+        self._cancel_check = cancel_check
+        self._was_interrupted = False  # set when flush bails on cancel signal
 
     @property
     def enabled(self) -> bool:
@@ -102,27 +125,50 @@ class StreamingTTSPump:
         return out
 
     def flush_and_close(self) -> list:
-        """Flush + block-drain remaining synth + emit `tts_stream_end`."""
+        """Flush + block-drain remaining synth + emit `tts_stream_end`.
+
+        Polls `cancel_check` (if provided) between futures so a Stop
+        pressed during the drain (LLM done, synth still finishing) bails
+        cleanly — the pending in-flight thread will still complete its
+        HTTP call but we discard the result and fire the end hook with
+        interrupted=True. No more thread leaks than `cancel()` alone."""
         if not self._stream_started or self._closed:
             self._close()
             return []
         out: list = []
         for chunk in self.chunker.flush():
             self._submit(chunk)
-        # Block until each remaining future resolves, preserving order.
+        interrupted = False
+        # Block-drain remaining futures in submit order. Poll cancel
+        # between (and within) future waits.
         while self.pending:
+            if self._is_cancelled():
+                interrupted = True
+                break
             fut, meta = self.pending.popleft()
-            audio = self._result_or_none(fut, meta)
+            audio = self._await_with_cancel(fut, meta)
+            if audio is _CANCELLED:
+                interrupted = True
+                # Re-queue the future (it may still be running) so the
+                # final cancel() can mark it for shutdown.
+                self.pending.appendleft((fut, meta))
+                break
             event = self._build_chunk_event(audio, meta)
             if event:
                 out.append(event)
+        # Discard remaining futures on interrupt — executor.shutdown
+        # (wait=False) lets in-flight threads finish naturally.
+        if interrupted:
+            for fut, _meta in self.pending:
+                fut.cancel()
+            self.pending.clear()
         self._fire_hook(
             "tts_stream_end",
             metadata={
                 "stream_id": self._stream_id,
                 "chunk_count": self._chunk_count,
                 "total_chars": self._total_chars,
-                "interrupted": False,
+                "interrupted": interrupted,
                 "system": self.system,
             },
         )
@@ -130,10 +176,38 @@ class StreamingTTSPump:
             "type": "tts_stream_end",
             "stream_id": self._stream_id,
             "chunk_count": self._chunk_count,
-            "interrupted": False,
+            "interrupted": interrupted,
         })
+        self._was_interrupted = interrupted
         self._close()
         return out
+
+    def _is_cancelled(self) -> bool:
+        if self._cancel_check is None:
+            return False
+        try:
+            return bool(self._cancel_check())
+        except Exception:
+            return False
+
+    def _await_with_cancel(self, fut, meta):
+        """Wait for a future, polling cancel_check at short intervals.
+        Returns audio bytes, None on synth failure, or the _CANCELLED
+        sentinel if cancellation arrived mid-wait."""
+        deadline = time.monotonic() + _FLUSH_HARD_TIMEOUT_S
+        while True:
+            if self._is_cancelled():
+                return _CANCELLED
+            try:
+                return fut.result(timeout=_FLUSH_POLL_TIMEOUT_S)
+            except concurrent.futures.TimeoutError:
+                if time.monotonic() > deadline:
+                    logger.warning(f"[TTS-STREAM] Synth hard-timeout for chunk {meta.get('index')} — dropping")
+                    return None
+                continue
+            except Exception as e:
+                logger.warning(f"[TTS-STREAM] synth result failed (chunk {meta.get('index')}): {e!r}")
+                return None
 
     def cancel(self):
         """Drop in-flight synth; fire tts_stream_end(interrupted=True) so

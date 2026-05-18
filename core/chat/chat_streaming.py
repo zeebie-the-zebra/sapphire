@@ -72,8 +72,14 @@ class StreamingChat:
         # provider lacks supports_streaming. Single pump spans the whole
         # turn (across tool iterations); only the final-content iteration
         # actually feeds it text and closes it. Defined here (outside the
-        # main try) so the cleanup-finally can always reach it.
-        tts_pump = StreamingTTSPump(system=self.main_chat.system)
+        # main try) so the cleanup-finally can always reach it. The
+        # cancel_check lambda lets flush_and_close bail mid-drain when
+        # the user hits Stop AFTER the LLM is done but synth is still
+        # finishing (M7 stop coordination).
+        tts_pump = StreamingTTSPump(
+            system=self.main_chat.system,
+            cancel_check=lambda: self.cancel_flag,
+        )
 
         # Check if current prompt requires privacy mode
         try:

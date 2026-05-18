@@ -36,6 +36,23 @@ export default {
     render(ctx) {
         const cfg = _mergedConfig || tabConfig;
         let html = renderProviderTab(cfg, ctx);
+
+        // Streaming TTS section (v2.7.0). Streaming only kicks in when a
+        // capable provider is active (currently Kokoro); otherwise the
+        // setting is harmless — non-streaming providers fall back to the
+        // whole-blob path automatically.
+        // (Don't reuse `.settings-section` — it's `display:none` by default
+        // and only shown when `.active` is added; collided 2026-05-18.)
+        html += `
+            <details style="margin-top: 1rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm);" open>
+                <summary style="cursor: pointer; padding: 0.25rem 0;"><strong>Streaming (Kokoro)</strong></summary>
+                ${ctx.renderFields([
+                    'TTS_STREAMING_ENABLED',
+                    'TTS_STREAMING_MIN_CHARS',
+                    'TTS_STREAMING_MAX_CHARS'
+                ])}
+            </details>`;
+
         html += `
             <div class="settings-grid" style="margin-top: 1rem;">
                 <div class="setting-row full-width">

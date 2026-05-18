@@ -28,11 +28,16 @@ from typing import Iterable, Iterator, Optional, Tuple
 log = logging.getLogger(__name__)
 
 # Pause duration (milliseconds) the player honors after each boundary type.
+# Originally tuned for "natural prose pacing" (sentence=250 etc.) but with
+# browser Audio() element startup latency also stacking ~100-300ms per
+# chunk, it felt artificially gappy. Kokoro's synthesized audio already
+# has natural breath silence at sentence ends, so the player can re-trigger
+# almost immediately and the speech still sounds normal. Lowered 2026-05-18.
 PAUSE_AFTER_MS = {
-    "sentence":   250,   # . ! ?
-    "ellipsis":   500,   # ...
-    "secondary":  150,   # ; :
-    "paragraph":  600,   # \n\n
+    "sentence":   30,    # . ! ? — token of breathing room, not a full beat
+    "ellipsis":   150,   # ... — slightly longer than sentence
+    "secondary":  0,     # ; : — gapless
+    "paragraph":  200,   # \n\n — clear paragraph break
     "maxlen":     0,     # mid-thought split, no pause
     "end":        0,     # final flush at end of stream
 }

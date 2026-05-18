@@ -270,6 +270,28 @@ def test_tts_stream_end_hook_fires_on_cancel_with_interrupted_true(enable_stream
     assert seen[0]["interrupted"] is True
 
 
+def test_settings_chunk_bounds_reach_chunker(monkeypatch, enable_streaming):
+    """User-tunable min/max chars from settings get applied to the chunker."""
+    import config
+    monkeypatch.setattr(config, "TTS_STREAMING_MIN_CHARS", 50, raising=False)
+    monkeypatch.setattr(config, "TTS_STREAMING_MAX_CHARS", 300, raising=False)
+    pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
+    assert pump.chunker.min_chars == 50
+    assert pump.chunker.max_chars == 300
+    pump.cancel()
+
+
+def test_settings_clamps_protect_against_bad_input(monkeypatch, enable_streaming):
+    """Garbage settings (zero, negative, max < min) don't yield a broken chunker."""
+    import config
+    monkeypatch.setattr(config, "TTS_STREAMING_MIN_CHARS", 0, raising=False)
+    monkeypatch.setattr(config, "TTS_STREAMING_MAX_CHARS", -1, raising=False)
+    pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
+    assert pump.chunker.min_chars >= 5
+    assert pump.chunker.max_chars > pump.chunker.min_chars
+    pump.cancel()
+
+
 def test_stream_id_stable_across_hooks(enable_streaming, fresh_hooks):
     """A plugin can correlate the 4 hooks via stream_id within one turn."""
     ids = {}
@@ -282,3 +304,89 @@ def test_stream_id_stable_across_hooks(enable_streaming, fresh_hooks):
     pump.push("More.")
     pump.flush_and_close()
     assert ids["start"] == ids["text"] == ids["audio"] == ids["end"]
+
+
+# ---------------------------------------------------------------------------
+# M7 Stop coordination — cancel_check during flush_and_close
+# ---------------------------------------------------------------------------
+
+
+def test_flush_polls_cancel_check_and_bails_early(enable_streaming, fresh_hooks):
+    """User hits Stop AFTER LLM finishes but BEFORE all synth completes —
+    flush_and_close must detect the cancel and emit end(interrupted=True)
+    instead of blocking until every future resolves."""
+    cancel_flag = {"value": False}
+    fp = _FakeProvider(delay=0.4)  # slow synth so cancel can race in
+    pump = StreamingTTSPump(
+        system=_make_system(provider=fp),
+        cancel_check=lambda: cancel_flag["value"],
+    )
+    pump.push("First sentence here. ")
+    pump.push("Second sentence here. ")
+    pump.push("Third sentence here.")
+    # Trip cancel BEFORE flush — flush should bail immediately on first poll
+    cancel_flag["value"] = True
+    out = pump.flush_and_close()
+    end_events = [e for e in out if e["type"] == "tts_stream_end"]
+    assert len(end_events) == 1
+    assert end_events[0]["interrupted"] is True
+
+
+def test_flush_fires_end_hook_with_interrupted_true_on_user_stop(enable_streaming, fresh_hooks):
+    """Plugins listening to tts_stream_end must see interrupted=True so
+    they can finalize state properly (e.g. close a partial recording)."""
+    seen = []
+    fresh_hooks.register("tts_stream_end", lambda ev: seen.append(ev.metadata.copy()), plugin_name="t")
+    cancel_flag = {"value": False}
+    fp = _FakeProvider(delay=0.4)
+    pump = StreamingTTSPump(
+        system=_make_system(provider=fp),
+        cancel_check=lambda: cancel_flag["value"],
+    )
+    pump.push("First sentence. ")
+    pump.push("Second sentence here.")
+    cancel_flag["value"] = True
+    pump.flush_and_close()
+    assert len(seen) == 1
+    assert seen[0]["interrupted"] is True
+
+
+def test_flush_normal_completion_marks_not_interrupted(enable_streaming, fresh_hooks):
+    """Sanity: no cancel signal means interrupted=False in both the
+    SSE event and the hook payload."""
+    seen = []
+    fresh_hooks.register("tts_stream_end", lambda ev: seen.append(ev.metadata.copy()), plugin_name="t")
+    pump = StreamingTTSPump(
+        system=_make_system(provider=_FakeProvider()),
+        cancel_check=lambda: False,
+    )
+    pump.push("Hello there. ")
+    pump.push("More.")
+    out = pump.flush_and_close()
+    end_events = [e for e in out if e["type"] == "tts_stream_end"]
+    assert end_events[0]["interrupted"] is False
+    assert seen[0]["interrupted"] is False
+
+
+def test_cancel_check_exception_treated_as_false(enable_streaming):
+    """A misbehaving cancel_check (raises) must not crash the drain loop —
+    treat it as 'not cancelled' and continue."""
+    pump = StreamingTTSPump(
+        system=_make_system(provider=_FakeProvider()),
+        cancel_check=lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    pump.push("Hello there. ")
+    pump.push("More.")
+    out = pump.flush_and_close()
+    assert any(e["type"] == "tts_stream_end" for e in out)
+
+
+def test_cancel_method_still_works_after_flush(enable_streaming):
+    """The legacy cancel() path (called from finally) must remain a safe
+    no-op after flush_and_close has already closed the pump."""
+    pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
+    pump.push("Hello there. ")
+    pump.push("More.")
+    pump.flush_and_close()
+    # Second cancel/close — should not raise or fire end-hook again
+    pump.cancel()  # safe no-op
