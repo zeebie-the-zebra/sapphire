@@ -158,7 +158,7 @@ def migrate_stt_to_provider():
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         tmp.replace(settings_path)
-        logger.info(f"Migrated STT settings: enabled={was_enabled} engine={engine} → provider={stt['STT_PROVIDER']}")
+        logger.info(f"Migrated STT settings: enabled={was_enabled} engine={engine} -> provider={stt['STT_PROVIDER']}")
     except Exception as e:
         logger.error(f"STT settings migration failed: {e}")
 
@@ -212,6 +212,6 @@ def migrate_tts_to_provider():
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         tmp.replace(settings_path)
-        logger.info(f"Migrated TTS settings: enabled={was_enabled} → provider={tts['TTS_PROVIDER']}")
+        logger.info(f"Migrated TTS settings: enabled={was_enabled} -> provider={tts['TTS_PROVIDER']}")
     except Exception as e:
         logger.error(f"TTS settings migration failed: {e}")

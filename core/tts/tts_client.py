@@ -296,7 +296,7 @@ class TTSClient:
                 return False
             processed_text = tts_event.tts_text
 
-        logger.debug(f"[TTS] speak_sync: {len(text)} chars raw → {len(processed_text)} chars processed")
+        logger.debug(f"[TTS] speak_sync: {len(text)} chars raw -> {len(processed_text)} chars processed")
         self.stop()
         self.should_stop.clear()
 

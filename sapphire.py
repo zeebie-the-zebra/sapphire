@@ -881,7 +881,7 @@ def run():
         BLACK = '\033[30m'
         BOLD = '\033[1m'
         RESET = '\033[0m'
-        print(f"\n{CYAN_BG}{BLACK}{BOLD} ✨ SAPPHIRE IS NOW ACTIVE: {url} {RESET}\n")
+        print(f"\n{CYAN_BG}{BLACK}{BOLD} * SAPPHIRE IS NOW ACTIVE: {url} {RESET}\n")
 
         logger.info(f"Sapphire is running. Starting uvicorn server...")
 

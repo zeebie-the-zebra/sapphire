@@ -378,7 +378,7 @@ def _validate_plugin(workspace):
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(manifest, f, indent=2, ensure_ascii=False)
             os.replace(tmp_path, manifest_path)
-            logger.info(f"[claude-code] Auto-fixed manifest: tools string → list")
+            logger.info(f"[claude-code] Auto-fixed manifest: tools string -> list")
             results['manifest_auto_fixed'] = True
         except Exception:
             try:
@@ -694,7 +694,7 @@ def _resolve_claude_executable(env):
     path_env = env.get('PATH', '')
     resolved = shutil.which('claude', path=path_env)
     if resolved:
-        logger.info(f"[claude-code] Resolved claude → {resolved}")
+        logger.info(f"[claude-code] Resolved claude -> {resolved}")
         return resolved, None
 
     # Build a helpful diagnostic. Include the searched PATH (truncated),

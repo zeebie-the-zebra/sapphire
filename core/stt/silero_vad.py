@@ -282,7 +282,7 @@ def _ensure_model_downloaded() -> Path:
         return MODEL_CACHE_PATH
 
     MODEL_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    logger.info(f"[SILERO] Downloading {SILERO_VAD_URL} → {MODEL_CACHE_PATH}")
+    logger.info(f"[SILERO] Downloading {SILERO_VAD_URL} -> {MODEL_CACHE_PATH}")
     # Atomic download — write to .tmp then rename so a Ctrl-C mid-download
     # doesn't leave a half-file that the next run silently uses.
     tmp_path = MODEL_CACHE_PATH.with_suffix(".onnx.tmp")

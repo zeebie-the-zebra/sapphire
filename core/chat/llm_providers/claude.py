@@ -476,9 +476,9 @@ class ClaudeProvider(BaseProvider):
                         cache_write = getattr(event.usage, 'cache_creation_input_tokens', 0) or 0
                         if cache_read > 0 or cache_write > 0:
                             if cache_read > 0 and cache_write == 0:
-                                logger.info(f"[CACHE] ✓ HIT - {cache_read} tokens read from cache (90% savings)")
+                                logger.info(f"[CACHE] HIT - {cache_read} tokens read from cache (90% savings)")
                             elif cache_write > 0 and cache_read == 0:
-                                logger.info(f"[CACHE] ✗ MISS - {cache_write} tokens written to cache")
+                                logger.info(f"[CACHE] MISS - {cache_write} tokens written to cache")
                             else:
                                 logger.info(f"[CACHE] PARTIAL - {cache_read} read, {cache_write} written")
                             usage["cache_read_tokens"] = cache_read
@@ -899,9 +899,9 @@ class ClaudeProvider(BaseProvider):
             
             if cache_read > 0 or cache_write > 0:
                 if cache_read > 0 and cache_write == 0:
-                    logger.info(f"[CACHE] ✓ HIT - {cache_read} tokens read from cache (90% savings)")
+                    logger.info(f"[CACHE] HIT - {cache_read} tokens read from cache (90% savings)")
                 elif cache_write > 0 and cache_read == 0:
-                    logger.info(f"[CACHE] ✗ MISS - {cache_write} tokens written to cache")
+                    logger.info(f"[CACHE] MISS - {cache_write} tokens written to cache")
                 else:
                     logger.info(f"[CACHE] PARTIAL - {cache_read} read, {cache_write} written")
                 

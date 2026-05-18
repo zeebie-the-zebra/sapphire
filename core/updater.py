@@ -398,7 +398,7 @@ class Updater:
                     # refuse if upstream moves before the user clicks Update.
                     if self.update_available:
                         self._target_sha = self._fetch_remote_sha(br)
-                        logger.info(f"Update available: {self.current_version} → {self.latest_version}")
+                        logger.info(f"Update available: {self.current_version} -> {self.latest_version}")
                     else:
                         self._target_sha = None
                     break

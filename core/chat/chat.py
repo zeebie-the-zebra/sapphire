@@ -644,7 +644,7 @@ class LLMChat:
                     active_names = set(t['function']['name'] for t in enabled_tools) if enabled_tools else set()
                     unexpected = [t for t in called_tools if t not in active_names]
                     if unexpected:
-                        logger.warning(f"[TOOLS] ⚠️ LLM called tools NOT in active set: {unexpected}")
+                        logger.warning(f"[TOOLS] [!] LLM called tools NOT in active set: {unexpected}")
                     
                     logger.info(f"Processing {len(response_msg.tool_calls)} tool call(s) from LLM")
                     
@@ -708,7 +708,7 @@ class LLMChat:
                         # Check if this is in active tools (execute anyway - function_manager returns error)
                         active_names = set(t['function']['name'] for t in enabled_tools) if enabled_tools else set()
                         if text_tool_name not in active_names:
-                            logger.warning(f"[TOOLS] ⚠️ Text-based call for tool NOT in active set: {text_tool_name}")
+                            logger.warning(f"[TOOLS] [!] Text-based call for tool NOT in active set: {text_tool_name}")
                         
                         tool_call_count += 1
                         logger.info("Processing text-based function call")

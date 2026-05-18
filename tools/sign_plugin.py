@@ -121,7 +121,7 @@ def main():
             cur_mode = key_path.stat().st_mode & 0o777
             if cur_mode != 0o600:
                 os.chmod(key_path, 0o600)
-                print(f"  Tightened key perms: {oct(cur_mode)} → 0o600 on {key_path}", file=sys.stderr)
+                print(f"  Tightened key perms: {oct(cur_mode)} -> 0o600 on {key_path}", file=sys.stderr)
         except (OSError, PermissionError) as e:
             print(f"  Warning: could not chmod key file ({e})", file=sys.stderr)
     else:

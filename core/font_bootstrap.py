@@ -85,7 +85,7 @@ def _download(url: str, dest: Path, timeout: float = 20.0) -> bool:
         tmp.replace(dest)
         return True
     except Exception as e:
-        logger.warning(f"font_bootstrap: download failed {url} → {type(e).__name__}: {e}")
+        logger.warning(f"font_bootstrap: download failed {url} -> {type(e).__name__}: {e}")
         return False
 
 
@@ -136,6 +136,6 @@ def ensure_dashboard_fonts(user_dir: Path) -> dict[str, bool]:
             continue
         ok = _download(url, dest)
         if ok:
-            logger.info(f"font_bootstrap: downloaded {family} → {dest}")
+            logger.info(f"font_bootstrap: downloaded {family} -> {dest}")
         results[fname] = ok
     return results
