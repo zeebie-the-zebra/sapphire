@@ -1,3 +1,5 @@
+# 2.6.9 - Bug hunt and performance
+- reduced latency between TTS calls
 # 2.6.8 - TTS Streaming
 - TTS comes in in chunks
 - chunks go to kokorko (or similar)
