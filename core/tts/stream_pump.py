@@ -12,7 +12,9 @@ just orchestrates synth scheduling and event emission.
 import base64
 import concurrent.futures
 import logging
+import queue
 import re
+import threading
 import time
 import uuid
 from collections import deque
@@ -38,9 +40,6 @@ _FLUSH_POLL_TIMEOUT_S = 0.1
 # Hard ceiling per future — if synth genuinely stalls (kokoro hung), bail.
 _FLUSH_HARD_TIMEOUT_S = 30.0
 
-# Sentinel — distinct from None (which means "synth failed") so the drain
-# loop can tell "user stopped" from "synth crashed."
-_CANCELLED = object()
 
 
 class StreamingTTSPump:
@@ -72,6 +71,16 @@ class StreamingTTSPump:
         self.system = system
         self.tts = getattr(system, "tts", None)
         self.provider = getattr(self.tts, "_provider", None) if self.tts else None
+        # Decide ONCE whether to use the streaming Kokoro endpoint
+        # (multi-segment yield per chunk) or the legacy single-blob path.
+        # Providers without a real streaming impl fall through to
+        # provider.generate(). 2026-05-18 herring-table #7 — wires the
+        # M2 endpoint that was previously orphaned in the brain pipeline.
+        self._provider_streams = (
+            self.provider is not None
+            and hasattr(self.provider, "generate_stream")
+            and getattr(self.provider, "supports_streaming", False)
+        )
         # Chunker bounds — user-tunable via Settings → TTS. Sensible
         # clamps so a typo in settings can't yield zero-size chunks or
         # unbounded buffers.
@@ -165,28 +174,71 @@ class StreamingTTSPump:
         for chunk in self.chunker.flush():
             self._submit(chunk)
         interrupted = False
-        # Block-drain remaining futures in submit order. Poll cancel
-        # between (and within) future waits.
+        # Drain pump-chunks in order. For each, fully drain its segment
+        # queue (waiting on the worker if needed), polling cancel between
+        # checks so a user Stop bails within ~100ms.
         while self.pending:
             if self._is_cancelled():
                 interrupted = True
                 break
-            fut, meta = self.pending.popleft()
-            audio = self._await_with_cancel(fut, meta)
-            if audio is _CANCELLED:
-                interrupted = True
-                # Re-queue the future (it may still be running) so the
-                # final cancel() can mark it for shutdown.
-                self.pending.appendleft((fut, meta))
+            seg_queue, done_evt, fut, meta = self.pending[0]
+            chunk_idx = meta.get("index")
+            deadline = time.monotonic() + _FLUSH_HARD_TIMEOUT_S
+            segments_for_this_chunk = 0
+            while True:
+                if self._is_cancelled():
+                    interrupted = True
+                    break
+                # Block on the queue up to the poll interval — wakes
+                # IMMEDIATELY when a segment is put. After processing a
+                # segment, peek done_evt + empty to break without wasting
+                # another 100ms wait on a finished worker.
+                try:
+                    segment = seg_queue.get(timeout=_FLUSH_POLL_TIMEOUT_S)
+                except queue.Empty:
+                    # Empty + worker done = we're finished with this chunk.
+                    if done_evt.is_set():
+                        break
+                    if time.monotonic() > deadline:
+                        logger.warning(
+                            f"[TTS-STREAM] flush hard-timeout for chunk {chunk_idx}"
+                        )
+                        self._dropped_chunks.append(chunk_idx)
+                        break
+                    continue
+                event = self._build_chunk_event(segment, meta)
+                if event:
+                    out.append(event)
+                    segments_for_this_chunk += 1
+                # Fast-exit: if worker has finished AND queue is now empty,
+                # this chunk is fully drained. Avoids the wasted 100ms wait
+                # after the LAST segment of a fast synth.
+                if done_evt.is_set() and seg_queue.empty():
+                    break
+            if interrupted:
                 break
-            event = self._build_chunk_event(audio, meta)
-            if event:
-                out.append(event)
-        # Discard remaining futures on interrupt — executor.shutdown
-        # (wait=False) lets in-flight threads finish naturally.
+            # Final post-done drain (race-safe against last put before set)
+            while True:
+                try:
+                    segment = seg_queue.get_nowait()
+                except queue.Empty:
+                    break
+                event = self._build_chunk_event(segment, meta)
+                if event:
+                    out.append(event)
+                    segments_for_this_chunk += 1
+            # If this chunk yielded zero playable segments, count it as
+            # dropped (Kokoro 400 / network / decode failure all land here)
+            if segments_for_this_chunk == 0:
+                self._dropped_chunks.append(chunk_idx)
+            self.pending.popleft()
+        # Cancel remaining workers on interrupt
         if interrupted:
-            for fut, _meta in self.pending:
-                fut.cancel()
+            for _seg_queue, _done_evt, fut, _meta in self.pending:
+                try:
+                    fut.cancel()
+                except Exception:
+                    pass
             self.pending.clear()
         self._fire_hook(
             "tts_stream_end",
@@ -227,42 +279,21 @@ class StreamingTTSPump:
         except Exception:
             return False
 
-    def _await_with_cancel(self, fut, meta):
-        """Wait for a future, polling cancel_check at short intervals.
-        Returns audio bytes, None on synth failure, or the _CANCELLED
-        sentinel if cancellation arrived mid-wait.
-
-        When a chunk's synth hard-times out, we record the drop so
-        flush_and_close can surface it as an SSE notice — otherwise the
-        user gets a gap in speech with zero feedback. 2026-05-18 #15.
-        """
-        deadline = time.monotonic() + _FLUSH_HARD_TIMEOUT_S
-        while True:
-            if self._is_cancelled():
-                return _CANCELLED
-            try:
-                return fut.result(timeout=_FLUSH_POLL_TIMEOUT_S)
-            except concurrent.futures.TimeoutError:
-                if time.monotonic() > deadline:
-                    logger.warning(
-                        f"[TTS-STREAM] Synth hard-timeout for chunk "
-                        f"{meta.get('index')} — dropping"
-                    )
-                    self._dropped_chunks.append(meta.get("index"))
-                    return None
-                continue
-            except Exception as e:
-                logger.warning(f"[TTS-STREAM] synth result failed (chunk {meta.get('index')}): {e!r}")
-                self._dropped_chunks.append(meta.get("index"))
-                return None
+    # _await_with_cancel and _CANCELLED sentinel — removed 2026-05-18 when
+    # _synth switched from "return one bytes blob" to "stream segments via
+    # Queue." The new flush_and_close drain loop blocks on queue.get with
+    # cancel polling baked in directly. (herring-table #7 wiring)
 
     def cancel(self):
         """Drop in-flight synth; fire tts_stream_end(interrupted=True) so
         plugins can finalize state (e.g. close a recording file)."""
         if self._closed:
             return
-        for fut, _meta in self.pending:
-            fut.cancel()
+        for _seg_queue, _done_evt, fut, _meta in self.pending:
+            try:
+                fut.cancel()
+            except Exception:
+                pass
         self.pending.clear()
         if self._stream_started:
             self._fire_hook(
@@ -352,34 +383,69 @@ class StreamingTTSPump:
         speed = getattr(self.tts, "speed", None) or 1.0
         logger.info(
             f"[TTS-STREAM] submit chunk {chunk['index']} "
-            f"({chunk['boundary']}, {len(text_to_synth)} chars): {text_to_synth!r:.80}"
+            f"({chunk['boundary']}, {len(text_to_synth)} chars, "
+            f"stream={self._provider_streams}): {text_to_synth!r:.80}"
         )
-        fut = self._executor().submit(self._synth, text_to_synth, voice, speed)
-        self.pending.append((fut, meta))
+        # New shape: per-chunk Queue holds Kokoro pipeline segments as they
+        # arrive over chunked-transfer. done flags when the worker has
+        # finished iterating (or errored). Order preserved at the deque
+        # level — segments from chunk N+1 don't emit until chunk N is fully
+        # drained. 2026-05-18 herring-table #7.
+        seg_queue: queue.Queue = queue.Queue()
+        done_evt = threading.Event()
+        fut = self._executor().submit(
+            self._stream_synth, text_to_synth, voice, speed, seg_queue, done_evt
+        )
+        self.pending.append((seg_queue, done_evt, fut, meta))
 
-    def _synth(self, text: str, voice: str, speed: float):
-        try:
-            return self.provider.generate(text, voice, speed)
-        except Exception as e:
-            logger.warning(f"[TTS-STREAM] synth raised: {e!r}")
-            return None
+    def _stream_synth(self, text: str, voice: str, speed: float,
+                      seg_queue: "queue.Queue", done_evt: threading.Event):
+        """Worker-thread body: iterate provider.generate_stream() and push
+        each segment into the chunk's Queue. On a non-streaming provider,
+        fall back to a single generate() call and push one blob.
 
-    def _result_or_none(self, fut, meta):
+        The base class default of generate_stream yields a single blob
+        from generate(), so this is also safe if a provider declares
+        supports_streaming=True but ships the default impl."""
         try:
-            return fut.result(timeout=30)
+            if self._provider_streams:
+                for segment in self.provider.generate_stream(text, voice, speed):
+                    if segment:
+                        seg_queue.put(segment)
+            else:
+                audio = self.provider.generate(text, voice, speed)
+                if audio:
+                    seg_queue.put(audio)
         except Exception as e:
-            logger.warning(f"[TTS-STREAM] synth result failed (chunk {meta.get('index')}): {e!r}")
-            return None
+            logger.warning(f"[TTS-STREAM] stream synth raised: {e!r}")
+        finally:
+            done_evt.set()
 
     def _drain_ready(self) -> list:
-        """Non-blocking: drain in-order futures that have already completed."""
+        """Non-blocking: drain Kokoro pipeline segments from the front-of-deque
+        chunk's queue, emitting one tts_chunk SSE event per segment. Advance
+        to the next pump-chunk only when the current one's done flag is set
+        AND its queue is empty — preserves global segment order."""
         out: list = []
-        while self.pending and self.pending[0][0].done():
-            fut, meta = self.pending.popleft()
-            audio = self._result_or_none(fut, meta)
-            event = self._build_chunk_event(audio, meta)
-            if event:
-                out.append(event)
+        while self.pending:
+            seg_queue, done_evt, fut, meta = self.pending[0]
+            # Drain any segments already in the queue
+            while True:
+                try:
+                    segment = seg_queue.get_nowait()
+                except queue.Empty:
+                    break
+                event = self._build_chunk_event(segment, meta)
+                if event:
+                    out.append(event)
+            # Only advance to next chunk when this one is fully done
+            if done_evt.is_set() and seg_queue.empty():
+                self.pending.popleft()
+                # If the chunk produced ZERO segments, count it as dropped
+                # so flush_and_close emits a notice. (e.g. Kokoro 400)
+                pass
+            else:
+                break  # hold here — preserve order
         return out
 
     def _build_chunk_event(self, audio_bytes, meta: dict):

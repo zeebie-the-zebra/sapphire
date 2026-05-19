@@ -466,6 +466,90 @@ def test_plugin_None_tts_text_uses_original(enable_streaming, fresh_hooks):
     assert any("Hello" in call[0] for call in fp.calls), fp.calls
 
 
+class _StreamingFakeProvider:
+    """Like _FakeProvider but with a real generate_stream that yields
+    multiple segments per chunk — exercises the new pump wiring (herring #7)."""
+    audio_content_type = "audio/ogg"
+    supports_streaming = True
+
+    def __init__(self, segments_per_chunk=3, segment_bytes=b"OGGS_FAKE_SEGMENT"):
+        self.segments_per_chunk = segments_per_chunk
+        self.segment_bytes = segment_bytes
+        self.calls = []
+
+    def generate(self, text, voice, speed):
+        # Should NOT be called when supports_streaming is True
+        raise AssertionError("generate() should not be called when streaming")
+
+    def generate_stream(self, text, voice, speed):
+        self.calls.append((text, voice, speed))
+        for i in range(self.segments_per_chunk):
+            yield self.segment_bytes + bytes([i])
+
+
+def test_streaming_provider_emits_one_event_per_segment(enable_streaming):
+    """When provider.supports_streaming=True, the pump should emit one
+    tts_chunk SSE event per yielded segment — that's the M2 latency win
+    we wired up 2026-05-18 (herring #7). Before this wiring, all segments
+    were collected into one blob and one event was emitted per chunk.
+
+    Note: push() can emit segments inline (when worker finished by the
+    time the next push runs) — test collects events from ALL three
+    method calls so we don't miss inline drains."""
+    fp = _StreamingFakeProvider(segments_per_chunk=4)
+    pump = StreamingTTSPump(system=_make_system(provider=fp))
+    out = []
+    out.extend(pump.push("Hello there. "))
+    out.extend(pump.push("More text here."))
+    out.extend(pump.flush_and_close())
+    chunks = [e for e in out if e["type"] == "tts_chunk"]
+    # 2 pump-chunks × 4 segments each = 8 events
+    assert len(chunks) == 8, f"expected 8 segment events, got {len(chunks)}: {[c['index'] for c in chunks]}"
+    # First 4 should be index 0 (from first pump-chunk), next 4 index 1
+    indices = [c["index"] for c in chunks]
+    assert indices == [0, 0, 0, 0, 1, 1, 1, 1], f"order/index wrong: {indices}"
+    # The legacy generate() must NOT have been called
+    assert len(fp.calls) == 2  # one generate_stream call per pump-chunk
+
+
+def test_streaming_provider_preserves_order_with_concurrent_workers(enable_streaming):
+    """With 2 executor workers, the FIRST pump-chunk's segments must emit
+    before the SECOND pump-chunk's even if the second's worker finishes
+    first (faster synth). Order is preserved at the deque level."""
+    import time as _time
+
+    class _OrderedProvider:
+        audio_content_type = "audio/ogg"
+        supports_streaming = True
+        def __init__(self):
+            self.calls = []
+        def generate(self, *a, **kw):
+            raise AssertionError("should not call generate")
+        def generate_stream(self, text, voice, speed):
+            self.calls.append(text)
+            # Text-keyed delay so "first" pump-chunk is slow regardless
+            # of which executor worker picks up which future.
+            if "First" in text:
+                _time.sleep(0.15)
+            label = text.split()[0]  # 'First.' or 'Second'
+            for i in range(2):
+                yield f"{label}_seg_{i}".encode()
+
+    op = _OrderedProvider()
+    pump = StreamingTTSPump(system=_make_system(provider=op))
+    pump.push("First chunk. ")
+    pump.push("Second chunk text.")
+    out = pump.flush_and_close()
+    chunks = [e for e in out if e["type"] == "tts_chunk"]
+    decoded = [base64.b64decode(c["audio_b64"]).decode() for c in chunks]
+    # First pump-chunk's segments (despite slower synth) emit BEFORE
+    # second's. The deque holds the order; workers don't.
+    assert decoded == [
+        "First_seg_0", "First_seg_1",
+        "Second_seg_0", "Second_seg_1",
+    ], f"order broken: {decoded}"
+
+
 def test_skip_tts_at_stream_start_fires_end_hook_for_plugin_cleanup(enable_streaming, fresh_hooks):
     """When a plugin cancels the whole turn via tts_stream_start skip_tts,
     tts_stream_end MUST still fire (with interrupted=True) so plugins that
