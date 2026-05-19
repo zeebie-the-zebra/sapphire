@@ -390,3 +390,99 @@ def test_cancel_method_still_works_after_flush(enable_streaming):
     pump.flush_and_close()
     # Second cancel/close — should not raise or fire end-hook again
     pump.cancel()  # safe no-op
+
+
+# ---------------------------------------------------------------------------
+# Plugin-contract guard (herring-table #4 #8 #12)
+# ---------------------------------------------------------------------------
+
+
+def test_plugin_non_string_tts_text_does_not_crash_turn(enable_streaming, fresh_hooks):
+    """A buggy plugin that sets ev.tts_text to a non-string (list/dict/int)
+    must NOT crash the LLM turn — pump uses original text and logs warning."""
+    fp = _FakeProvider()
+    def bad_handler(ev):
+        ev.tts_text = ["accidentally", "a", "list"]
+    fresh_hooks.register("tts_chunk_text", bad_handler, plugin_name="buggy")
+    pump = StreamingTTSPump(system=_make_system(provider=fp))
+    # No exception should escape push() or flush_and_close()
+    pump.push("Hello there. ")
+    pump.push("More text here.")
+    out = pump.flush_and_close()
+    # Synth was called with ORIGINAL text (not the bad list), so chunks emitted
+    chunks = [e for e in out if e["type"] == "tts_chunk"]
+    assert chunks, "expected chunks despite buggy plugin"
+    # First call should have used the original text, not the list
+    assert any("Hello" in call[0] for call in fp.calls), fp.calls
+
+
+def test_plugin_empty_string_tts_text_skips_chunk_not_clobbers_to_original(enable_streaming, fresh_hooks):
+    """Plugin setting ev.tts_text = '' means 'mute this chunk', NOT 'use
+    original'. Content-moderation plugins rely on this contract."""
+    fp = _FakeProvider()
+    def mute(ev):
+        if ev.metadata.get("chunk_index") == 0:
+            ev.tts_text = ""
+    fresh_hooks.register("tts_chunk_text", mute, plugin_name="muter")
+    pump = StreamingTTSPump(system=_make_system(provider=fp))
+    pump.push("First sentence here. ")
+    pump.push("Second sentence here. ")
+    pump.push("Third.")
+    pump.flush_and_close()
+    # First chunk MUST NOT have been synthesized — its text was muted to ""
+    synth_texts = [call[0] for call in fp.calls]
+    assert not any("First sentence" in t for t in synth_texts), (
+        f"plugin muted first chunk but original text was synthesized anyway: {synth_texts}"
+    )
+
+
+def test_plugin_whitespace_tts_text_also_skips_chunk(enable_streaming, fresh_hooks):
+    """Whitespace-only counts as 'mute', not 'use original'."""
+    fp = _FakeProvider()
+    def whitespace(ev):
+        ev.tts_text = "   \t\n  "
+    fresh_hooks.register("tts_chunk_text", whitespace, plugin_name="wsp")
+    pump = StreamingTTSPump(system=_make_system(provider=fp))
+    pump.push("Anything. ")
+    pump.push("More text here.")
+    pump.flush_and_close()
+    # No synth should have happened at all — every chunk was whitespace-muted
+    assert fp.calls == [], f"whitespace-muted chunks were synthesized: {fp.calls}"
+
+
+def test_plugin_None_tts_text_uses_original(enable_streaming, fresh_hooks):
+    """ev.tts_text=None (plugin didn't touch it) means 'use original text'."""
+    fp = _FakeProvider()
+    def noop(ev):
+        # Don't touch tts_text; HookEvent initializes it from the kwarg passed
+        # by _fire_hook, but None at the field-default level means "untouched"
+        pass
+    fresh_hooks.register("tts_chunk_text", noop, plugin_name="noop")
+    pump = StreamingTTSPump(system=_make_system(provider=fp))
+    pump.push("Hello there. ")
+    pump.push("More.")
+    pump.flush_and_close()
+    # Synth should have used original chunk text
+    assert any("Hello" in call[0] for call in fp.calls), fp.calls
+
+
+def test_skip_tts_at_stream_start_fires_end_hook_for_plugin_cleanup(enable_streaming, fresh_hooks):
+    """When a plugin cancels the whole turn via tts_stream_start skip_tts,
+    tts_stream_end MUST still fire (with interrupted=True) so plugins that
+    opened state in start can finalize — otherwise state leaks across turns."""
+    starts = []
+    ends = []
+    fresh_hooks.register("tts_stream_start", lambda ev: (starts.append(ev.metadata.copy()), setattr(ev, "skip_tts", True)), plugin_name="cancel")
+    fresh_hooks.register("tts_stream_end", lambda ev: ends.append(ev.metadata.copy()), plugin_name="t")
+    pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
+    out = pump.push("Hello there. ")
+    out += pump.flush_and_close()
+    # No SSE events emitted (plugin cancelled the whole turn)
+    assert out == []
+    # Start hook fired exactly once
+    assert len(starts) == 1
+    # End hook ALSO fired with interrupted=True — closing the contract
+    assert len(ends) == 1, f"expected end hook to fire on skip-turn cancel, got {ends}"
+    assert ends[0]["interrupted"] is True
+    assert ends[0]["chunk_count"] == 0
+    assert starts[0]["stream_id"] == ends[0]["stream_id"]

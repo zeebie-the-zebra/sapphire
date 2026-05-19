@@ -122,6 +122,20 @@ class StreamingTTSPump:
             )
             if ev and ev.skip_tts:
                 logger.info(f"[TTS-STREAM] Plugin cancelled stream {self._stream_id} via tts_stream_start")
+                # Fire tts_stream_end so plugins that opened state on start
+                # (recording file, captions banner, etc.) can finalize. Without
+                # this, plugin state across skip-turn cancels accumulates and
+                # leaks. 2026-05-18 herring-table #12.
+                self._fire_hook(
+                    "tts_stream_end",
+                    metadata={
+                        "stream_id": self._stream_id,
+                        "chunk_count": 0,
+                        "total_chars": 0,
+                        "interrupted": True,
+                        "system": self.system,
+                    },
+                )
                 self._skip_turn = True
                 self._closed = True
                 return []
@@ -262,11 +276,35 @@ class StreamingTTSPump:
                 "system": self.system,
             },
         )
-        # Pull text back out — may have been mutated.
-        text_to_synth = (ev.tts_text if ev else chunk["text"]) or chunk["text"]
         if ev and ev.skip_tts:
             logger.debug(f"[TTS-STREAM] Plugin skipped chunk {chunk['index']} via tts_chunk_text")
             return
+        # Plugin contract for tts_text:
+        #   None         → plugin didn't set it (or no plugin) → use original
+        #   ""/whitespace → plugin meant to mute this chunk → skip synth
+        #   non-string   → plugin bug; log + use original (don't crash whole turn)
+        #   string       → use the plugin's mutation
+        # Old `or chunk["text"]` clobber silently restored original on empty
+        # (defeating content-mod plugins) and crashed with TypeError on
+        # non-string (killing the LLM turn). 2026-05-18 herring-table #4 #8.
+        plugin_text = ev.tts_text if ev else None
+        if plugin_text is None:
+            text_to_synth = chunk["text"]
+        elif not isinstance(plugin_text, str):
+            logger.warning(
+                f"[TTS-STREAM] Plugin returned non-string tts_text "
+                f"({type(plugin_text).__name__}) for chunk {chunk['index']}; "
+                f"using original text"
+            )
+            text_to_synth = chunk["text"]
+        elif not plugin_text.strip():
+            logger.info(
+                f"[TTS-STREAM] Plugin emptied chunk {chunk['index']} text — "
+                f"skipping synth"
+            )
+            return
+        else:
+            text_to_synth = plugin_text
         # Skip chunks that Kokoro will reject (no a-zA-Z0-9 = empty after
         # its whitelist filter = HTTP 400). Common case: chunks that are
         # pure emoji, unicode-only, or all-punctuation. We strip in
