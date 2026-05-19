@@ -5,6 +5,20 @@ import logging
 import shutil
 from logging.handlers import TimedRotatingFileHandler
 
+# Reconfigure stdout/stderr to utf-8 with errors='replace' BEFORE any handler
+# is attached. Without this, Windows cmd.exe defaults to cp1252 — a single
+# em-dash / smart quote / emoji in any log line raises UnicodeEncodeError
+# inside logging.emit() and crashes the chat turn or worker thread. With
+# errors='replace', unmappable chars become '?' instead of crashing. Modern
+# Win10/11 cmd (chcp 65001) renders the utf-8 correctly; older cmd shows
+# mojibake but stays alive. Confirmed Win-cp1252 crash 2026-05-18 (Krem).
+# Defensive: a captured / redirected stdout may not be a TextIOWrapper.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        pass
+
 # Dump Python traceback on SIGSEGV/SIGFPE/SIGABRT to stderr
 faulthandler.enable()
 
@@ -73,12 +87,18 @@ def _init_avatars():
 
 _init_avatars()  
 
-# Configure file handler with daily rotation
+# Configure file handler with daily rotation.
+# encoding='utf-8' is mandatory — without it, TimedRotatingFileHandler opens
+# the logfile in the system default (cp1252 on Windows). Any unicode char
+# (em-dash, smart quote, emoji) in a log record raises UnicodeEncodeError
+# inside emit(), which logging.handleError() swallows but the message is
+# lost. Companion fix to the stdout reconfigure above.
 file_handler = TimedRotatingFileHandler(
     'user/logs/sapphire.log',
     when='midnight',
     interval=1,
-    backupCount=30
+    backupCount=30,
+    encoding='utf-8',
 )
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 

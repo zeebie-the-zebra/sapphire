@@ -1,3 +1,11 @@
+# 2.6.8 - TTS Streaming
+- TTS comes in in chunks
+- chunks go to kokorko (or similar)
+- kokoro reads while LLM is still streaming in
+# 2.6.7 - Hooks for plugins
+- Plugin hooks for tts chunk-stream
+# 2.6.6 - TTS streaming
+- Chunks in back end
 # 2.6.5 - Silero VAD
 - Vastly improved VAD
 - Wakeword speech cuts off at right times now
