@@ -225,13 +225,19 @@ def test_workspace_status_reaps_dead_procs(client, mock_system, monkeypatch):
 
 # ─── _detect_run_command priority ────────────────────────────────────────────
 
+def _expected_py_prefix():
+    """sys.executable quoted iff the path contains spaces — matches agents.py."""
+    import sys as _sys
+    return f'"{_sys.executable}"' if ' ' in _sys.executable else _sys.executable
+
+
 def test_detect_run_command_prefers_main_py(tmp_path):
     from core.routes.agents import _detect_run_command
     (tmp_path / 'main.py').write_text('')
     (tmp_path / 'app.py').write_text('')
     (tmp_path / 'server.py').write_text('')
     cmd = _detect_run_command(str(tmp_path))
-    assert cmd == 'python main.py'
+    assert cmd == f'{_expected_py_prefix()} main.py'
 
 
 def test_detect_run_command_falls_through_to_app_py(tmp_path):
@@ -239,14 +245,14 @@ def test_detect_run_command_falls_through_to_app_py(tmp_path):
     (tmp_path / 'app.py').write_text('')
     (tmp_path / 'server.py').write_text('')
     cmd = _detect_run_command(str(tmp_path))
-    assert cmd == 'python app.py'
+    assert cmd == f'{_expected_py_prefix()} app.py'
 
 
 def test_detect_run_command_single_py_file(tmp_path):
     from core.routes.agents import _detect_run_command
     (tmp_path / 'weird_name.py').write_text('')
     cmd = _detect_run_command(str(tmp_path))
-    assert cmd == 'python weird_name.py'
+    assert cmd == f'{_expected_py_prefix()} weird_name.py'
 
 
 def test_detect_run_command_html_returns_none(tmp_path):

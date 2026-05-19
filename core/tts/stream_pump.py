@@ -93,6 +93,10 @@ class StreamingTTSPump:
         # done but BEFORE all synth completes can short-circuit cleanly.
         self._cancel_check = cancel_check
         self._was_interrupted = False  # set when flush bails on cancel signal
+        # Indexes of chunks that dropped on synth failure / hard-timeout.
+        # flush_and_close emits a single SSE `notice` if any present, so
+        # the user sees "lost audio for N chunk(s)" instead of silent gap.
+        self._dropped_chunks: list = []
 
     @property
     def enabled(self) -> bool:
@@ -194,6 +198,17 @@ class StreamingTTSPump:
                 "system": self.system,
             },
         )
+        # Surface drops as a notice — single SSE message regardless of how
+        # many chunks fell. Avoids spamming the toast lane for a flaky run.
+        if self._dropped_chunks and not interrupted:
+            out.append({
+                "type": "notice",
+                "severity": "warning",
+                "message": (
+                    f"{len(self._dropped_chunks)} TTS chunk(s) lost — "
+                    f"speech may have gaps. Check Kokoro server health."
+                ),
+            })
         out.append({
             "type": "tts_stream_end",
             "stream_id": self._stream_id,
@@ -215,7 +230,12 @@ class StreamingTTSPump:
     def _await_with_cancel(self, fut, meta):
         """Wait for a future, polling cancel_check at short intervals.
         Returns audio bytes, None on synth failure, or the _CANCELLED
-        sentinel if cancellation arrived mid-wait."""
+        sentinel if cancellation arrived mid-wait.
+
+        When a chunk's synth hard-times out, we record the drop so
+        flush_and_close can surface it as an SSE notice — otherwise the
+        user gets a gap in speech with zero feedback. 2026-05-18 #15.
+        """
         deadline = time.monotonic() + _FLUSH_HARD_TIMEOUT_S
         while True:
             if self._is_cancelled():
@@ -224,11 +244,16 @@ class StreamingTTSPump:
                 return fut.result(timeout=_FLUSH_POLL_TIMEOUT_S)
             except concurrent.futures.TimeoutError:
                 if time.monotonic() > deadline:
-                    logger.warning(f"[TTS-STREAM] Synth hard-timeout for chunk {meta.get('index')} — dropping")
+                    logger.warning(
+                        f"[TTS-STREAM] Synth hard-timeout for chunk "
+                        f"{meta.get('index')} — dropping"
+                    )
+                    self._dropped_chunks.append(meta.get("index"))
                     return None
                 continue
             except Exception as e:
                 logger.warning(f"[TTS-STREAM] synth result failed (chunk {meta.get('index')}): {e!r}")
+                self._dropped_chunks.append(meta.get("index"))
                 return None
 
     def cancel(self):
@@ -417,5 +442,9 @@ class StreamingTTSPump:
             return
         self._closed = True
         if self.executor is not None:
-            self.executor.shutdown(wait=False)
+            # cancel_futures=True (Py 3.9+) prevents queued-but-not-started
+            # futures from running on shutdown — reduces socket leaks in
+            # CLOSE_WAIT on Windows after many stop-mid-stream cycles.
+            # 2026-05-18 herring-table #16.
+            self.executor.shutdown(wait=False, cancel_futures=True)
             self.executor = None

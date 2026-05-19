@@ -190,19 +190,28 @@ def _detect_run_command(workspace):
     if (ws / 'index.html').exists():
         return None  # HTML projects use the link, not subprocess
 
-    # Python entry points in priority order
+    # Python entry points in priority order. Use sys.executable instead of
+    # bare 'python' — on Windows, bare `python` may be the Microsoft Store
+    # stub, a py launcher alias, or simply not on PATH (only `python.exe`
+    # in a specific venv is). sys.executable is always the interpreter
+    # currently running Sapphire — same Python, same venv, same deps.
+    # Quote the path because Windows installer paths often contain spaces
+    # (C:\Program Files\..., C:\Users\Name With Spaces\...).
+    # 2026-05-18 herring-table #23.
+    py_exe = f'"{sys.executable}"' if ' ' in sys.executable else sys.executable
+
     for name in ['main.py', 'app.py', 'server.py', 'run.py', 'game.py']:
         if (ws / name).exists():
-            return f'python {name}'
+            return f'{py_exe} {name}'
 
     # Single .py file
     py_files = [f.name for f in ws.iterdir() if f.suffix == '.py' and f.is_file()]
     if len(py_files) == 1:
-        return f'python {py_files[0]}'
+        return f'{py_exe} {py_files[0]}'
 
     # Look for the biggest .py file (likely the main one)
     if py_files:
         biggest = max(py_files, key=lambda f: (ws / f).stat().st_size)
-        return f'python {biggest}'
+        return f'{py_exe} {biggest}'
 
     return None

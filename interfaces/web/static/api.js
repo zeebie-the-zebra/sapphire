@@ -228,7 +228,9 @@ export const streamChatContinue = async (text, prefill, onChunk, onComplete, onE
             if (done) return gotContent ? onComplete(false) : onError(new Error("No content"));
             
             buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
+            // split(/\r?\n/) handles both LF (uvicorn default) and CRLF
+            // (some Win-side proxies normalize). Herring-table #17.
+            const lines = buffer.split(/\r?\n/);
             buffer = lines.pop();
             
             for (const line of lines) {
@@ -352,7 +354,9 @@ export const streamChat = async (text, onChunk, onComplete, onError, signal = nu
             if (done) return gotContent ? onComplete(false) : onError(new Error("No content"));
             
             buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
+            // split(/\r?\n/) handles both LF (uvicorn default) and CRLF
+            // (some Win-side proxies normalize). Herring-table #17.
+            const lines = buffer.split(/\r?\n/);
             buffer = lines.pop();
             
             for (const line of lines) {

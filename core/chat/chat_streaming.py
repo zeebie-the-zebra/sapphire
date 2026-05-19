@@ -862,6 +862,17 @@ class StreamingChat:
             self.main_chat.session_manager.add_assistant_final(
                 f"[Connection error: {e}]"
             )
+            # Synthetic tts_stream_end so the frontend's audio queue can
+            # finalize even though we're aborting before flush_and_close.
+            # Without this, isStreaming stays true / mute pill orphaned
+            # until the next stream. 2026-05-18 herring-table #10.
+            if tts_pump._stream_started and not tts_pump._closed:
+                yield {
+                    "type": "tts_stream_end",
+                    "stream_id": tts_pump._stream_id,
+                    "chunk_count": tts_pump._chunk_count,
+                    "interrupted": True,
+                }
             self._cleanup_stream()
             raise
         except Exception as e:
@@ -871,6 +882,13 @@ class StreamingChat:
             self.main_chat.session_manager.add_assistant_final(
                 f"[Error: {type(e).__name__}: {e}]"
             )
+            if tts_pump._stream_started and not tts_pump._closed:
+                yield {
+                    "type": "tts_stream_end",
+                    "stream_id": tts_pump._stream_id,
+                    "chunk_count": tts_pump._chunk_count,
+                    "interrupted": True,
+                }
             self._cleanup_stream()
             raise
         

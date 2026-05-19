@@ -161,10 +161,16 @@ def chunkify_for_speech(
 def _make_chunk(text: str, boundary: str, index: int) -> dict:
     # Collapse whitespace inside the chunk for clean TTS input
     text = re.sub(r"\s+", " ", text).strip()
+    # Clamp pause to [0, 2000ms]. A misbehaving plugin's `tts_chunk_text`
+    # hook can't add a custom pause (that's metadata-only) but a future
+    # custom-boundary type could yield a bogus value and freeze playback.
+    # Belt-and-suspenders. 2026-05-18 herring-table #13.
+    pause = PAUSE_AFTER_MS.get(boundary, 0)
+    pause = max(0, min(2000, int(pause)))
     return {
         "text": text,
         "boundary": boundary,
-        "pause_after_ms": PAUSE_AFTER_MS.get(boundary, 0),
+        "pause_after_ms": pause,
         "index": index,
     }
 
@@ -291,8 +297,16 @@ def _find_split(buf: str, max_chars: int, min_chars: int) -> Optional[Tuple[str,
     # 5. Max-char fallback: split on the last whitespace inside the window.
     if len(buf) >= max_chars:
         cut = buf.rfind(" ", min_chars, max_chars)
-        if cut < 0:
-            cut = max_chars
-        return buf[:cut], "maxlen", buf[cut:].lstrip()
+        if cut >= 0:
+            return buf[:cut], "maxlen", buf[cut:].lstrip()
+        # No whitespace inside the window — text is unspaced (long URL,
+        # chemical formula, base64 blob). Hold the buffer until it exceeds
+        # 2× max_chars; only THEN cut mid-character as last resort. This
+        # avoids slicing a 250-char URL into ugly "https://very-long-url-tha"
+        # fragments when the rest of the URL would arrive in the next token.
+        # 2026-05-18 herring-table #14.
+        if len(buf) >= max_chars * 2:
+            return buf[:max_chars], "maxlen", buf[max_chars:].lstrip()
+        # else: wait for more tokens or for the upstream flush.
 
     return None

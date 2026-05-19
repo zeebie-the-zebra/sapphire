@@ -259,7 +259,10 @@ export const playTextStreaming = async (text) => {
             const { done, value } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
+            // split(/\r?\n/) handles both LF (uvicorn default) and CRLF
+            // (some Windows-side proxies / middleware normalize to CRLF).
+            // 2026-05-18 herring-table #17.
+            const lines = buffer.split(/\r?\n/);
             buffer = lines.pop();
             for (const line of lines) {
                 if (!line.startsWith('data: ')) continue;
@@ -319,8 +322,14 @@ const _b64ToBlob = (b64, contentType) => {
 
 const _disposeItem = (item) => {
     if (!item) return;
+    // Defer URL revocation by 1s — Win Chrome's media stack can still hold
+    // a reference to the blob URL briefly after the audio element fires
+    // onended. Immediate revoke caused sporadic "Failed to load resource"
+    // warnings and (under memory pressure) chunks cut off ~50ms early.
+    // 2026-05-18 herring-table #20. MDN recommendation for short-lived blob URLs.
     if (item.url) {
-        try { URL.revokeObjectURL(item.url); } catch {}
+        const u = item.url;
+        setTimeout(() => { try { URL.revokeObjectURL(u); } catch {} }, 1000);
         item.url = null;
     }
     if (item.audio) {
@@ -395,12 +404,24 @@ const _ttsStreamPlayNext = (gen) => {
  */
 export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, pause_after_ms, text }) => {
     if (!audio_b64) return;
+    // Decode + Audio() build can throw on bad base64 or unsupported codec.
+    // Build the blob/URL/audio element BEFORE setting sawChunk — otherwise
+    // a malformed first chunk crashes the decode, sawChunk stays true, and
+    // send-handlers skips the legacy fallback → total silent failure with
+    // no audible output. 2026-05-18 herring-table #9.
+    let blob, url, audio;
+    try {
+        blob = _b64ToBlob(audio_b64, content_type);
+        url = URL.createObjectURL(blob);
+        audio = new Audio(url);
+        audio.preload = 'auto';   // hint browser to start decoding immediately
+        try { audio.load(); } catch {}  // no-arg load(): browser begins fetching/decoding
+    } catch (e) {
+        console.warn('[TTS-STREAM] chunk decode failed, skipping', { index, err: e?.message });
+        if (url) { try { URL.revokeObjectURL(url); } catch {} }
+        return;  // sawChunk NOT set — legacy fallback can still fire
+    }
     _ttsStreamSawChunk = true;
-    const blob = _b64ToBlob(audio_b64, content_type);
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.preload = 'auto';   // hint browser to start decoding immediately
-    try { audio.load(); } catch {}  // no-arg load(): browser begins fetching/decoding
     _ttsStreamQueue.push({
         audio, url, blob,
         pause_after_ms: pause_after_ms || 0,
@@ -426,11 +447,16 @@ export const startTtsStream = () => {
 /** Called by api.js SSE handler on `tts_stream_end`. */
 export const endTtsStream = () => {
     _ttsStreamEnded = true;
-    // If the player drained the queue before end arrived, nothing's playing
-    // and we need to finalize cleanup here.
-    if (_ttsStreamActive && _ttsStreamQueue.length === 0 && !_ttsStreamPlayer) {
+    // Unconditional cleanup of streaming-state flags. The old version only
+    // cleaned up if `_ttsStreamActive` was true, but a stream that emitted
+    // zero successful chunks (e.g. all synth failed, or plugin muted all)
+    // never set _ttsStreamActive, so the "speaking" indicators stayed
+    // dirty until the next stream. Cleanup is idempotent — safe to run
+    // even when the player is still draining. 2026-05-18 herring-table #11.
+    if (_ttsStreamQueue.length === 0 && !_ttsStreamPlayer) {
         _ttsStreamActive = false;
         isStreaming = false;
+        _ttsStreamCleanupCurrent();
     }
 };
 
