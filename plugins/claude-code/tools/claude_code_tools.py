@@ -513,7 +513,9 @@ import json
 import re
 import subprocess
 
-_SAPPHIRE_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
+# .absolute() not .resolve() — .resolve() follows symlinks/junctions,
+# misroots SAPPHIRE_ROOT on Windows dev installs. herring #24.
+_SAPPHIRE_ROOT = str(Path(__file__).absolute().parent.parent.parent.parent)
 
 _HAS_NAME_FLAG_CACHE = None
 _HAS_NAME_FLAG_CACHE_TIME = 0
@@ -531,7 +533,10 @@ def _claude_supports_name():
         env = _clean_env()
         resolved, _err = _resolve_claude_executable(env)
         cmd = [resolved or 'claude', '--help']
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=5, env=env)
+        out = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=5, env=env,
+            encoding='utf-8', errors='replace',
+        )
         _HAS_NAME_FLAG_CACHE = '--name' in out.stdout
     except Exception as e:
         logger.debug(f"[claude-code] _claude_supports_name probe failed: {e}")
@@ -892,6 +897,7 @@ def _run_claude(args, workspace, timeout_minutes=30, worker=None):
             cwd=workspace, env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL, text=True,
+            encoding='utf-8', errors='replace',
         )
         if not _IS_WINDOWS:
             popen_kwargs['start_new_session'] = True

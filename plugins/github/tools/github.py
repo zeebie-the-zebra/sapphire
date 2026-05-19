@@ -413,8 +413,12 @@ def _file_push_directory(args, username, pat):
     # plugin signing private key would also be exfiltrated, letting the
     # attacker forge signed malicious plugin updates. 2026-05-14.
     try:
-        project_root = Path(__file__).resolve().parents[3]
-        user_dir = (project_root / 'user').resolve()
+        # .absolute() instead of .resolve() — .resolve() follows symlinks,
+        # which breaks SAPPHIRE_ROOT walkup when the plugin is loaded via
+        # a junction/symlink (common on Windows dev installs).
+        # Memory: symlinked_plugins_resolve_trap.md. herring #24.
+        project_root = Path(__file__).absolute().parents[3]
+        user_dir = (project_root / 'user').absolute()
         if not local.is_relative_to(project_root):
             return (
                 f"local_path must be inside the Sapphire project root, not {local}",

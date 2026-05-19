@@ -319,7 +319,9 @@ def _install(slug, plugin_settings=None):
             # Check if already installed
             from core.plugin_loader import plugin_loader
             # __file__ = plugins/sapphire-store/tools/store_tools.py → 4 parents up to project root
-            PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+            # .absolute() not .resolve() — symlinked plugin dirs would
+            # resolve to the wrong root. herring #24.
+            PROJECT_ROOT = Path(__file__).absolute().parent.parent.parent.parent
             USER_PLUGINS_DIR = PROJECT_ROOT / "user" / "plugins"
             dest = USER_PLUGINS_DIR / plugin_name
 

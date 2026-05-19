@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "files": {
     "plugin.json": "sha256:71afe263af9b8fe2e3287be76061604dc6fb353876fc67615455ad1c3bbf66c9",
-    "tools/claude_code_tools.py": "sha256:71574c9cd8a8e8abc442ed0f92261ee56d45083ea7aca36348329f55e55131c2"
+    "tools/claude_code_tools.py": "sha256:4b59d2243c0f1634b54246c800c876c0ccf852c5a95314276793a0182538965f"
   },
-  "signature": "kP5PtyXyELUeCYrD7W/49GRrj3XKI8H+Rh33mTnkVa/92gvN+S6nOvl0m5WCFLxhXEVIFoPx94Na9YCatTKABQ=="
+  "signature": "XAG8vWIIStJtGw7G7aoGjJI2YzpgksN/FYbY7EYXeGUYL6VvhXeGLDR5Bo97LylX5zrIoalTd8k26cQ8IWTOBA=="
 }

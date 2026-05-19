@@ -21,7 +21,7 @@
         "label": "Custom status commands",
         "default": "",
         "rows": 6,
-        "placeholder": "CPU temp ::: /usr/bin/sensors | grep Package\nGPU ::: nvidia-smi --query-gpu=name,temperature.gpu --format=csv,noheader\n# disabled-line-starts-with-hash\nUptime ::: uptime",
+        "placeholder": "Linux examples:\nCPU temp ::: /usr/bin/sensors | grep Package\nGPU ::: nvidia-smi --query-gpu=name,temperature.gpu --format=csv,noheader\nUptime ::: uptime\n# Windows examples:\nGPU ::: nvidia-smi --query-gpu=name,temperature.gpu --format=csv,noheader\nUptime ::: powershell -c \"(Get-Uptime).ToString()\"\n# Lines starting with # are skipped",
         "help": "One per line: LABEL ::: COMMAND. Output is shown to the AI when it calls get_self_info. Pipes/redirects work (shell=True) — to FILTER lines, pipe through grep (e.g. ` | grep Package`), not just `| Package`. 5s timeout, 500-char output cap, sudo refused. Lines starting with # are skipped."
       }
     ],

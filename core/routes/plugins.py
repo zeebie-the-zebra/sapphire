@@ -1072,6 +1072,7 @@ async def install_plugin_deps(plugin_name: str, _=Depends(require_login)):
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", *missing],
             capture_output=True, text=True, timeout=120,
+            encoding='utf-8', errors='replace',
         )
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="pip install timed out (120s)")
@@ -1984,7 +1985,10 @@ async def test_ssh_connection(request: Request, _=Depends(require_login)):
     ssh_cmd.append('echo ok')
 
     try:
-        result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ssh_cmd, capture_output=True, text=True, timeout=10,
+            encoding='utf-8', errors='replace',
+        )
         if result.returncode == 0:
             return {"success": True}
         return {"success": False, "error": result.stderr.strip() or f"Exit code {result.returncode}"}

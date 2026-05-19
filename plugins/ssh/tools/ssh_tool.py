@@ -216,6 +216,7 @@ def _run_remote(server, command, timeout):
             capture_output=True,
             text=True,
             timeout=timeout,
+            encoding='utf-8', errors='replace',
         )
         return _format_output(server['name'], host, command, result)
 

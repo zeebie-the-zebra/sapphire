@@ -41,7 +41,8 @@ def kill_process_on_port(port: int) -> bool:
         try:
             result = subprocess.run(
                 ['netstat', '-ano', '-p', 'TCP'],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=5,
+                encoding='utf-8', errors='replace',
             )
             for line in result.stdout.splitlines():
                 if f':{port}' in line and 'LISTENING' in line:
@@ -60,7 +61,8 @@ def kill_process_on_port(port: int) -> bool:
             ['fuser', f'{port}/tcp'],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
+            encoding='utf-8', errors='replace',
         )
         if result.returncode == 0 and result.stdout.strip():
             pids = result.stdout.strip().split()
@@ -80,7 +82,8 @@ def kill_process_on_port(port: int) -> bool:
                 ['lsof', '-ti', f':{port}'],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                encoding='utf-8', errors='replace',
             )
             if result.returncode == 0 and result.stdout.strip():
                 for pid in result.stdout.strip().split('\n'):

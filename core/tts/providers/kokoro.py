@@ -1,7 +1,7 @@
 """Kokoro TTS provider — local HTTP server on port 5012."""
 import logging
 import time
-from typing import Iterator, Optional
+from typing import Iterator, List, Optional, Tuple
 
 import requests
 import config
@@ -9,6 +9,56 @@ import config
 from .base import BaseTTSProvider
 
 logger = logging.getLogger(__name__)
+
+
+def _split_complete_oggs(buf: bytes) -> Tuple[List[bytes], bytes]:
+    """Split a buffer of streamed OGG bytes at FILE boundaries.
+
+    Returns (complete_files, remaining). complete_files is zero or more
+    independently-decodable OGG files in order. remaining is partial-page
+    bytes that should be prepended to the next chunk.
+
+    Why this exists: Kokoro's chunked-transfer endpoint emits one OGG per
+    pipeline segment. But `requests.iter_content(chunk_size=None)` yields
+    bytes in whatever shape the socket layer delivered — on Windows
+    loopback (and to a lesser degree Linux), multiple OGGs can coalesce
+    into one yield. Browser `<audio>` and `sf.read(BytesIO)` decode only
+    the FIRST OGG of a concatenated blob, silently dropping the rest.
+    This splitter detects file ends via the EOS flag (bit 2 of byte 5 in
+    each OGG page header) and yields each file separately. 2026-05-18
+    herring-table #3.
+    """
+    files: List[bytes] = []
+    pos = 0
+    file_start = 0
+    n = len(buf)
+    while pos < n:
+        idx = buf.find(b"OggS", pos)
+        if idx < 0:
+            break
+        # Need at least 27 bytes for the fixed page header
+        if idx + 27 > n:
+            break
+        # OGG version byte must be 0 — skip stray "OggS" in payload
+        if buf[idx + 4] != 0:
+            pos = idx + 1
+            continue
+        header_type = buf[idx + 5]
+        num_segments = buf[idx + 26]
+        seg_table_end = idx + 27 + num_segments
+        if seg_table_end > n:
+            break  # partial segment_table
+        page_data_len = sum(buf[idx + 27:seg_table_end])
+        page_end = seg_table_end + page_data_len
+        if page_end > n:
+            break  # partial page data
+        # Complete page. Bit 2 of header_type_flag = end-of-stream → file ends here.
+        if header_type & 0x04:
+            files.append(bytes(buf[file_start:page_end]))
+            file_start = page_end
+        pos = page_end
+    remaining = bytes(buf[file_start:])
+    return files, remaining
 
 
 class KokoroTTSProvider(BaseTTSProvider):
@@ -96,12 +146,29 @@ class KokoroTTSProvider(BaseTTSProvider):
                 return
 
             # iter_content with chunk_size=None yields whatever the HTTP
-            # client received per chunked-transfer frame. Each yield is
-            # one or more complete OGG files (multiple may coalesce at the
-            # TCP layer for small payloads on localhost).
+            # client received per chunked-transfer frame. A yield can be:
+            #   - one complete OGG (the happy case on Linux loopback)
+            #   - partial OGG (split across yields under TCP fragmentation)
+            #   - multiple concatenated OGGs (Win loopback Nagle coalesces)
+            # Buffer + split-by-EOS-page so each yield from THIS function
+            # is exactly one independently-decodable OGG file. Otherwise
+            # the browser's <audio> element decodes only the first of a
+            # concatenated blob and silently drops trailing audio.
+            # 2026-05-18 herring-table #3.
+            buffer = bytearray()
             for chunk in response.iter_content(chunk_size=None):
-                if chunk:
-                    yield chunk
+                if not chunk:
+                    continue
+                buffer.extend(chunk)
+                complete, remaining = _split_complete_oggs(bytes(buffer))
+                for ogg in complete:
+                    yield ogg
+                buffer = bytearray(remaining)
+            # Any final non-EOS-terminated remainder (shouldn't normally
+            # happen, but if it does we yield it as best-effort).
+            if buffer:
+                logger.debug(f"[Kokoro] stream ended with {len(buffer)} bytes of un-EOS'd OGG data")
+                yield bytes(buffer)
         except Exception as e:
             logger.warning(f"Kokoro /tts/stream failed: {e!r} — falling back to non-streaming")
             audio = self.generate(text, voice, speed, **kwargs)

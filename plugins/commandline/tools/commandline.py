@@ -110,6 +110,7 @@ def _run_local(command, timeout, max_output=None):
         result = subprocess.run(
             command, capture_output=True, text=True,
             timeout=timeout, shell=True,
+            encoding='utf-8', errors='replace',
         )
 
         output = result.stdout

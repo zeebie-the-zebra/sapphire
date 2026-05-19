@@ -543,12 +543,41 @@ class TTSClient:
                 # Open OutputStream lazily on first decodable chunk so we
                 # know the sample rate. Single stream across all chunks =
                 # no gaps between sentences.
+                # WASAPI on Win can refuse the first chunk's native rate
+                # if the device endpoint is configured to a different rate
+                # (Sound Control Panel) or in exclusive mode. Fall back to
+                # the boot-validated self.output_rate and resample subsequent
+                # chunks instead of silently failing the whole turn.
+                # 2026-05-18 herring-table #19.
                 if output_stream is None:
-                    output_stream = sd.OutputStream(
-                        samplerate=samplerate, device=self.output_device,
-                        channels=1, dtype='float32',
-                    )
-                    output_stream.start()
+                    try:
+                        output_stream = sd.OutputStream(
+                            samplerate=samplerate, device=self.output_device,
+                            channels=1, dtype='float32',
+                        )
+                        output_stream.start()
+                    except sd.PortAudioError as pa_err:
+                        logger.warning(
+                            f"[TTS-stream] OutputStream open failed at {samplerate}Hz "
+                            f"({pa_err}); falling back to {self.output_rate}Hz"
+                        )
+                        try:
+                            output_stream = sd.OutputStream(
+                                samplerate=self.output_rate, device=self.output_device,
+                                channels=1, dtype='float32',
+                            )
+                            output_stream.start()
+                            # Resample THIS chunk now; subsequent chunks at this
+                            # samplerate will hit the same resample branch above.
+                            audio_data = self._resample(audio_data, samplerate, self.output_rate)
+                            samplerate = self.output_rate
+                        except Exception as fallback_err:
+                            logger.error(
+                                f"[TTS-stream] Fallback OutputStream open also failed: "
+                                f"{fallback_err}; aborting streaming playback"
+                            )
+                            stopped_early = True
+                            break
                     with self.lock:
                         if self.should_stop.is_set() or _stale():
                             stopped_early = True

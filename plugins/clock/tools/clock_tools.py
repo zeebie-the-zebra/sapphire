@@ -193,7 +193,10 @@ def _play_ping():
         # Snapshot current volume
         prev_vol = None
         if os.path.isfile(amixer):
-            r = subprocess.run([amixer, 'get', 'Master'], capture_output=True, text=True, timeout=2)
+            r = subprocess.run(
+                [amixer, 'get', 'Master'], capture_output=True, text=True, timeout=2,
+                encoding='utf-8', errors='replace',
+            )
             m = re.search(r'(\d+)%', r.stdout or '')
             prev_vol = int(m.group(1)) if m else None
             subprocess.run([amixer, '-q', 'set', 'Master', '40%'], timeout=2,

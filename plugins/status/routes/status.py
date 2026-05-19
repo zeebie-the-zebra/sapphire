@@ -233,7 +233,8 @@ def _run_custom_commands(commands_text: str, max_per_output: int = 500, timeout_
         try:
             r = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True,
-                timeout=timeout_s, errors='replace',
+                timeout=timeout_s,
+                encoding='utf-8', errors='replace',
             )
             out = (r.stdout or "") + (r.stderr or "")
             out = out.strip()

@@ -270,12 +270,12 @@ export const playTextStreaming = async (text) => {
                 try { data = JSON.parse(line.slice(6)); } catch { continue; }
                 if (data.error) throw new Error(data.error);
                 if (data.type === 'tts_stream_start') {
-                    startTtsStream();
+                    startTtsStream(data);
                 } else if (data.type === 'tts_chunk') {
                     enqueueTtsChunk(data);
                     sawChunk = true;
                 } else if (data.type === 'tts_stream_end') {
-                    endTtsStream();
+                    endTtsStream(data);
                 }
             }
         }
@@ -311,6 +311,12 @@ let _ttsStreamPlayer = null;
 let _ttsStreamUrl = null;
 let _ttsStreamEnded = false; // server sent tts_stream_end (no more chunks coming)
 let _ttsStreamSawChunk = false; // any chunk arrived this turn? signals send-handlers to skip legacy audioFn
+// Brain stamps every streaming-TTS payload with a unique stream_id (UUID).
+// Frontend tracks the CURRENT id and drops events tagged with anything
+// else — handles the "regenerate while playing" / "replay while chat
+// streaming" overlap that otherwise causes audio bleed across turns.
+// New stream with different id preempts the old one. 2026-05-18 herring #5.
+let _currentStreamId = null;
 
 const _b64ToBlob = (b64, contentType) => {
     const bin = atob(b64);
@@ -402,8 +408,15 @@ const _ttsStreamPlayNext = (gen) => {
  * the per-chunk Audio() startup gap that was stacking with the intentional
  * pause_after_ms to make speech feel laggy on faster machines.
  */
-export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, pause_after_ms, text }) => {
+export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, pause_after_ms, text, stream_id }) => {
     if (!audio_b64) return;
+    // Drop chunks tagged with a stream we've already preempted. Without
+    // this, an in-flight chunk from a cancelled chat/replay can bleed
+    // into the new stream's playback. herring #5.
+    if (stream_id && _currentStreamId && stream_id !== _currentStreamId) {
+        console.warn('[TTS-STREAM] dropping stale chunk from preempted stream', stream_id);
+        return;
+    }
     // Decode + Audio() build can throw on bad base64 or unsupported codec.
     // Build the blob/URL/audio element BEFORE setting sawChunk — otherwise
     // a malformed first chunk crashes the decode, sawChunk stays true, and
@@ -435,8 +448,19 @@ export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, paus
     }
 };
 
-/** Called by api.js SSE handler on `tts_stream_start`. */
-export const startTtsStream = () => {
+/** Called by api.js SSE handler on `tts_stream_start`.
+ * Accepts the brain's payload so we can read stream_id and preempt any
+ * still-playing stream from a previous turn. herring #5. */
+export const startTtsStream = (data = {}) => {
+    const newId = data.stream_id || null;
+    if (_currentStreamId && newId && newId !== _currentStreamId &&
+        (_ttsStreamActive || _ttsStreamQueue.length > 0 || _ttsStreamPlayer)) {
+        // A NEW stream is starting while a different one is still active.
+        // Preempt: tear down old playback so the new turn doesn't audio-bleed.
+        console.log('[TTS-STREAM] new stream', newId, 'preempting', _currentStreamId);
+        _ttsStreamStop();
+    }
+    _currentStreamId = newId;
     _ttsStreamGen += 1;
     _ttsStreamQueue = [];
     _ttsStreamEnded = false;
@@ -445,7 +469,12 @@ export const startTtsStream = () => {
 };
 
 /** Called by api.js SSE handler on `tts_stream_end`. */
-export const endTtsStream = () => {
+export const endTtsStream = (data = {}) => {
+    // Late end-event from a stream we've already preempted: no-op (the
+    // preempting startTtsStream already tore down its state). herring #5.
+    if (data.stream_id && _currentStreamId && data.stream_id !== _currentStreamId) {
+        return;
+    }
     _ttsStreamEnded = true;
     // Unconditional cleanup of streaming-state flags. The old version only
     // cleaned up if `_ttsStreamActive` was true, but a stream that emitted
@@ -473,13 +502,14 @@ const _ttsStreamStop = () => {
     _ttsStreamEnded = true;
     _ttsStreamActive = false;
     _ttsStreamSawChunk = false;
+    _currentStreamId = null;  // herring #5 — no stream is current after stop
     _ttsStreamCleanupCurrent();
 };
 
 // Subscribe to SSE-relayed streaming-TTS events at module load.
-busOn('tts_stream_start', () => startTtsStream());
+busOn('tts_stream_start', (data) => startTtsStream(data || {}));
 busOn('tts_stream_chunk', (data) => enqueueTtsChunk(data || {}));
-busOn('tts_stream_end', () => endTtsStream());
+busOn('tts_stream_end', (data) => endTtsStream(data || {}));
 
 /**
  * Encode PCM samples as WAV file

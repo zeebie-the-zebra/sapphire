@@ -2,6 +2,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 import faulthandler
 import json
+import socket
 import time
 import os
 import sys
@@ -334,6 +335,15 @@ class TTSHandler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('X-Accel-Buffering', 'no')   # disable nginx buffering if proxied
         self.end_headers()
+        # Disable Nagle on this socket — without TCP_NODELAY, Windows winsock
+        # (and to a lesser extent Linux loopback) batches small chunked-transfer
+        # frames waiting for ACKs. That negates the streaming latency win: each
+        # OGG segment sits in the send buffer until the next is queued.
+        # 2026-05-18 herring-table #6.
+        try:
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception as _e:
+            logger.debug(f"TCP_NODELAY set failed (non-fatal): {_e!r}")
 
         segments_emitted = 0
         first_chunk_ms = None
