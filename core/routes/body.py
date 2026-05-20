@@ -55,6 +55,16 @@ async def handle_body_wake(
     _verify_brain_auth(authorization)
     logger.info(f"[body/wake] from {x_body_name!r}, content-type={audio.content_type}")
 
+    # Stick the most-recently-woken body name onto `system` so the body
+    # plugin's `_resolve_body` picks the right destination on any later
+    # body_speak/body_ring/body_health call that DOESN'T explicitly name
+    # one. Reset on brain restart — fresh boot falls back to the
+    # `default_body_name` plugin setting. 2026-05-19 multi-body fix.
+    try:
+        system.last_used_body = x_body_name
+    except Exception:
+        pass
+
     audio_bytes = await audio.read()
     if not audio_bytes:
         raise HTTPException(400, "empty audio upload")
