@@ -349,16 +349,44 @@ class TTSHandler(BaseHTTPRequestHandler):
         first_chunk_ms = None
         generation_start = time.time()
 
-        # Dispatch socket writes on a separate thread so a slow client can't
-        # hold the pipeline_lock during network I/O. Inference happens under
-        # the lock (kokoro's pipeline state can't be parallelized); bytes are
-        # queued to the writer which drains independently. Other inference
-        # requests can proceed as soon as THIS request's kokoro work finishes,
-        # regardless of how slow the client is to receive. 2026-05-20.
+        # Three-stage pipeline: generate → encode → send.
+        # Only inference (generate) holds pipeline_lock. Encoding (OGG/Opus)
+        # and socket I/O run on their own threads outside the lock, so the
+        # next sentence can start inference while this one's segments are
+        # still being encoded and sent. Both libsndfile and PyTorch release
+        # the GIL during C-level work, so the stages run concurrently on
+        # separate cores. 2026-05-20.
         import threading as _t
         import queue as _q
+        encode_queue: "_q.Queue" = _q.Queue()
         write_queue: "_q.Queue" = _q.Queue()
         writer_err = {'exc': None}
+
+        def _encoder():
+            """Encode raw numpy segments to OGG/Opus, feed to writer."""
+            try:
+                while True:
+                    item = encode_queue.get()
+                    if item is None:
+                        write_queue.put(b"0\r\n\r\n")
+                        write_queue.put(None)
+                        return
+                    audio = item
+                    buf = io.BytesIO()
+                    sf.write(buf, audio, AUDIO_SAMPLE_RATE,
+                             format='OGG', subtype='OPUS')
+                    ogg_bytes = buf.getvalue()
+                    del audio, buf
+                    frame_header = f"{len(ogg_bytes):x}\r\n".encode('ascii')
+                    write_queue.put(frame_header + ogg_bytes + b"\r\n")
+            except Exception as e:
+                writer_err['exc'] = writer_err['exc'] or e
+                # Still terminate the writer so it doesn't hang
+                try:
+                    write_queue.put(b"0\r\n\r\n")
+                    write_queue.put(None)
+                except Exception:
+                    pass
 
         def _writer():
             try:
@@ -374,44 +402,33 @@ class TTSHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 writer_err['exc'] = e
 
+        encoder_thread = _t.Thread(target=_encoder, daemon=True, name="tts-stream-encoder")
         writer_thread = _t.Thread(target=_writer, daemon=True, name="tts-stream-writer")
+        encoder_thread.start()
         writer_thread.start()
 
         try:
             with pipeline_lock:
                 generator = pipeline(text_to_speak, voice=voice, speed=speed)
                 for _, _, seg in generator:
-                    # If writer already failed (client gone), bail early —
+                    # If downstream already failed (client gone), bail early —
                     # no point finishing inference for a dead socket.
                     if writer_err['exc'] is not None:
                         break
-                    # Copy + free underlying tensor memory (same hazard as /tts path)
-                    audio = np.copy(seg)
-                    # Encode this segment to a standalone OGG/Opus blob in RAM
-                    buf = io.BytesIO()
-                    sf.write(buf, audio, AUDIO_SAMPLE_RATE,
-                             format='OGG', subtype='OPUS')
-                    ogg_bytes = buf.getvalue()
-                    del audio, buf
-
-                    # One HTTP chunked frame: "<hex-len>\r\n<bytes>\r\n"
-                    frame_header = f"{len(ogg_bytes):x}\r\n".encode('ascii')
-                    write_queue.put(frame_header + ogg_bytes + b"\r\n")
+                    # Copy to decouple from tensor memory, hand off to encoder.
+                    encode_queue.put(np.copy(seg))
 
                     if first_chunk_ms is None:
-                        # Measures inference time to first segment queued.
-                        # Wire latency is the writer's problem now.
                         first_chunk_ms = int((time.time() - generation_start) * 1000)
                     segments_emitted += 1
                 del generator
-            # Lock released here — other inferences can proceed even if
-            # writer is still draining to a slow client.
+            # Lock released — next sentence can start inference while
+            # encoder + writer finish this one's segments.
 
-            # Terminating zero-length chunk + writer sentinel
-            write_queue.put(b"0\r\n\r\n")
-            write_queue.put(None)
-            # Bounded wait so a wedged client can't pin this request handler
-            # forever. 60s matches kokoro's HTTP timeout elsewhere.
+            # Signal encoder that inference is done
+            encode_queue.put(None)
+            # Bounded wait so a wedged client can't pin this handler forever.
+            encoder_thread.join(timeout=60)
             writer_thread.join(timeout=60)
             if writer_err['exc'] is not None:
                 raise writer_err['exc']
