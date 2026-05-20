@@ -5,9 +5,12 @@
 # brain's own wakeword detector), and sends the response back through the
 # body_speak tool so TTS plays on the Pi's BT speaker.
 #
-# Auth: bearer token if SAPPH_BODY_BRAIN_TOKEN is set (Pi-side env var
-# SAPPH_BRAIN_TOKEN must match). If unset, LAN-trust mode — no auth.
-# Suitable for closed LAN; harden when this leaves the house.
+# Endpoint visibility + auth are both driven by the body plugin's settings
+# (user/webui/plugins/body.json) — not env vars. When the plugin is not
+# loaded, all endpoints return 404 (invisible to non-body installs).
+# When loaded, auth is determined by the plugin's `lan_auto_accept` and
+# `brain_token` settings; defaults fail closed with a 503 pointing the
+# user back to the Settings UI. 2026-05-20.
 
 import asyncio
 import json
@@ -24,18 +27,57 @@ from core.api_fastapi import get_system
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Optional shared bearer for Pi → brain auth. Set in environment if you
-# want the endpoint locked down; leave unset for open-LAN.
-_BRAIN_AUTH_TOKEN = os.environ.get("SAPPH_BODY_BRAIN_TOKEN", "").strip()
+
+def _is_body_plugin_loaded() -> bool:
+    """Cheap check — is the body plugin currently active?
+    Hot-disable via Settings → Plugins removes endpoints on the next request."""
+    try:
+        from core.plugin_loader import plugin_loader
+        return "body" in plugin_loader.get_loaded_plugins()
+    except Exception:
+        return False
+
+
+def _require_body_plugin():
+    """Make all body endpoints 404 when the body plugin isn't loaded —
+    a fresh-install user who never enables body sees no body surface at all."""
+    if not _is_body_plugin_loaded():
+        raise HTTPException(404)
+
+
+def _body_settings() -> dict:
+    """Read live body plugin settings. Re-read each call so the Settings UI
+    takes effect without a brain restart (matches RECOVERY.md lesson #10)."""
+    try:
+        from core.plugin_loader import plugin_loader
+        return plugin_loader.get_plugin_settings("body") or {}
+    except Exception:
+        return {}
 
 
 def _verify_brain_auth(authorization: Optional[str]):
-    """Token check if SAPPH_BODY_BRAIN_TOKEN is set. No-op otherwise."""
-    if not _BRAIN_AUTH_TOKEN:
+    """Settings-driven auth gate:
+      - `lan_auto_accept` True  → no auth required (LAN trust)
+      - `brain_token` set       → require Authorization: Bearer <brain_token>
+      - neither                 → 503, server intentionally not configured
+    503 (not 401) when neither is set — distinguishes "configure me" from
+    "you sent wrong creds." User-fixable via Settings → Plugins → Body."""
+    settings = _body_settings()
+
+    if settings.get("lan_auto_accept"):
         return
+
+    brain_token = (settings.get("brain_token") or "").strip()
+    if not brain_token:
+        raise HTTPException(
+            503,
+            "body plugin auth not configured — enable lan_auto_accept "
+            "OR set brain_token in body plugin settings",
+        )
+
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "missing bearer token")
-    if authorization.split(" ", 1)[1].strip() != _BRAIN_AUTH_TOKEN:
+    if authorization.split(" ", 1)[1].strip() != brain_token:
         raise HTTPException(401, "invalid bearer token")
 
 
@@ -52,6 +94,7 @@ async def handle_body_wake(
       3. sends the response back via body_speak tool → TTS on Pi BT speaker
     Returns JSON status. The Pi logs the response but doesn't act on it
     further — the body_speak side-effect is the actual user-facing reply."""
+    _require_body_plugin()
     _verify_brain_auth(authorization)
     logger.info(f"[body/wake] from {x_body_name!r}, content-type={audio.content_type}")
 
@@ -122,7 +165,11 @@ async def handle_body_wake(
 
 @router.get("/api/body/health")
 async def body_health(_system=Depends(get_system)):
-    """Lightweight liveness probe for body → brain reachability."""
+    """Lightweight liveness probe for body → brain reachability.
+    Plugin-gated (404 when body plugin disabled) but intentionally
+    NOT auth-gated — the Pi probes this before it knows whether auth
+    is configured, and the response carries no info beyond 'I exist'."""
+    _require_body_plugin()
     return {"ok": True}
 
 
@@ -174,6 +221,7 @@ async def body_events_stream(
 
     Body is expected to subscribe once on boot and hold the connection.
     Auto-reconnect logic lives on the body side."""
+    _require_body_plugin()
     _verify_brain_auth(authorization)
     logger.info("[body/events] subscriber connected")
 
