@@ -364,6 +364,11 @@ const _ttsStreamPlayNext = (gen) => {
             _ttsStreamActive = false;
             _ttsStreamCleanupCurrent();
             isStreaming = false;
+        } else {
+            // Slow CPU: queue drained before next chunk arrived. Null the
+            // player so enqueueTtsChunk can detect idle state and restart
+            // playback when new audio arrives. 2026-05-20.
+            _ttsStreamCleanupCurrent();
         }
         return;
     }
@@ -444,6 +449,11 @@ export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, paus
         _ttsStreamActive = true;
         _ttsStreamEnded = false;
         isStreaming = true;
+        _ttsStreamPlayNext(_ttsStreamGen);
+    } else if (!_ttsStreamPlayer) {
+        // Consumer stalled on empty queue (slow CPU / Kokoro couldn't keep
+        // up) — _ttsStreamPlayNext nulled the player when it found nothing
+        // to play. Wake it back up now that new audio has arrived. 2026-05-20.
         _ttsStreamPlayNext(_ttsStreamGen);
     }
 };

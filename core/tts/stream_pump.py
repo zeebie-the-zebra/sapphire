@@ -163,8 +163,13 @@ class StreamingTTSPump:
         out.extend(self._drain_ready())
         return out
 
-    def flush_and_close(self) -> list:
+    def flush_and_close(self):
         """Flush + block-drain remaining synth + emit `tts_stream_end`.
+
+        Yields events incrementally as segments complete — on slow CPUs,
+        this lets the browser start playing sentence 2 while sentence 3 is
+        still synthesizing, instead of hoarding all events until every
+        chunk finishes. 2026-05-20.
 
         Polls `cancel_check` (if provided) between futures so a Stop
         pressed during the drain (LLM done, synth still finishing) bails
@@ -173,8 +178,7 @@ class StreamingTTSPump:
         interrupted=True. No more thread leaks than `cancel()` alone."""
         if not self._stream_started or self._closed:
             self._close()
-            return []
-        out: list = []
+            return
         for chunk in self.chunker.flush():
             self._submit(chunk)
         interrupted = False
@@ -212,7 +216,7 @@ class StreamingTTSPump:
                     continue
                 event = self._build_chunk_event(segment, meta)
                 if event:
-                    out.append(event)
+                    yield event
                     segments_for_this_chunk += 1
                 # Fast-exit: if worker has finished AND queue is now empty,
                 # this chunk is fully drained. Avoids the wasted 100ms wait
@@ -229,7 +233,7 @@ class StreamingTTSPump:
                     break
                 event = self._build_chunk_event(segment, meta)
                 if event:
-                    out.append(event)
+                    yield event
                     segments_for_this_chunk += 1
             # If this chunk yielded zero playable segments, count it as
             # dropped (Kokoro 400 / network / decode failure all land here)
@@ -257,23 +261,22 @@ class StreamingTTSPump:
         # Surface drops as a notice — single SSE message regardless of how
         # many chunks fell. Avoids spamming the toast lane for a flaky run.
         if self._dropped_chunks and not interrupted:
-            out.append({
+            yield {
                 "type": "notice",
                 "severity": "warning",
                 "message": (
                     f"{len(self._dropped_chunks)} TTS chunk(s) lost — "
                     f"speech may have gaps. Check Kokoro server health."
                 ),
-            })
-        out.append({
+            }
+        yield {
             "type": "tts_stream_end",
             "stream_id": self._stream_id,
             "chunk_count": self._chunk_count,
             "interrupted": interrupted,
-        })
+        }
         self._was_interrupted = interrupted
         self._close()
-        return out
 
     def _is_cancelled(self) -> bool:
         if self._cancel_check is None:
