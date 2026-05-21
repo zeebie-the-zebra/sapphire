@@ -3,6 +3,71 @@ import { resetAllSettings, resetPrompts, mergeUpdates, resetChatDefaults } from 
 import * as ui from '../../ui.js';
 import { updateScene } from '../../features/scene.js';
 
+// \u2500\u2500\u2500 API Tokens helpers (kept local; small surface, no need to break out) \u2500\u2500\u2500
+
+async function listApiTokens() {
+    const res = await fetch('/api/system/api-tokens', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()).tokens || [];
+}
+
+async function createApiToken(name) {
+    const res = await fetch('/api/system/api-tokens', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        throw new Error(err.detail || `HTTP ${res.status}`);
+    }
+    return await res.json();
+}
+
+async function revokeApiToken(id) {
+    const res = await fetch(`/api/system/api-tokens/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'same-origin'
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+function _escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+    }[c]));
+}
+
+function _fmtDate(iso) {
+    if (!iso) return '\u2014';
+    try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+async function _renderTokenList(listEl) {
+    try {
+        const tokens = await listApiTokens();
+        if (tokens.length === 0) {
+            listEl.innerHTML = '<p class="text-muted" style="font-size:var(--font-xs);margin:0">No tokens yet. Add one above to authorize an external integration.</p>';
+            return;
+        }
+        listEl.innerHTML = tokens.map(t => `
+            <div class="api-token-row" data-id="${_escapeHtml(t.id)}"
+                 style="display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:6px;background:var(--surface)">
+                <div style="flex:1;min-width:0">
+                    <div style="font-weight:600;font-size:var(--font-sm)">${_escapeHtml(t.name)}</div>
+                    <div class="text-muted" style="font-size:var(--font-xs);font-family:var(--mono,monospace)">
+                        sk_\u2026${_escapeHtml(t.last4)} \u00B7 created ${_fmtDate(t.created_at)} \u00B7 last used ${_fmtDate(t.last_used_at)}
+                    </div>
+                </div>
+                <button class="btn-sm danger" data-revoke-id="${_escapeHtml(t.id)}">Revoke</button>
+            </div>
+        `).join('');
+    } catch (e) {
+        listEl.innerHTML = `<p class="text-muted" style="color:var(--err)">Failed to load tokens: ${_escapeHtml(e.message)}</p>`;
+    }
+}
+
 export default {
     id: 'system',
     name: 'System',
@@ -20,6 +85,35 @@ export default {
                 <h4 style="margin:0 0 10px;font-size:var(--font-sm)">Tools</h4>
                 <button class="btn-primary" id="sys-setup-wizard">Run Setup Wizard</button>
                 <p class="text-muted" style="font-size:var(--font-xs);margin:4px 0 0">Configure LLM, audio, voice, and identity settings step by step.</p>
+            </div>
+
+            <div class="api-tokens" style="margin:20px 0;padding:16px;border:1px solid var(--border);border-radius:var(--radius)">
+                <h4 style="margin:0 0 8px;font-size:var(--font-sm)">API Keys</h4>
+                <p class="text-muted" style="font-size:var(--font-xs);margin:0 0 12px">
+                    Named bearer tokens for external integrations (mods, scripts, automation).
+                    Tokens are shown ONCE at creation \u2014 save it then.
+                    Independent of your login password. Revocable per-token.
+                </p>
+
+                <div style="display:flex;gap:8px;margin-bottom:12px">
+                    <input id="apitok-new-name" type="text" placeholder="Token name (e.g. valheim-mod)"
+                           maxlength="64"
+                           style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font-size:var(--font-sm)" />
+                    <button class="btn-primary" id="apitok-add">+ Add</button>
+                </div>
+
+                <div id="apitok-reveal" style="display:none;margin-bottom:12px;padding:12px;border:1px solid var(--warn,#d97706);border-radius:var(--radius);background:rgba(217,119,6,0.08)">
+                    <div style="font-weight:600;font-size:var(--font-sm);color:var(--warn,#d97706);margin-bottom:6px">
+                        \u26A0 Save this now \u2014 it will NOT be shown again.
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <code id="apitok-reveal-value" style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);font-family:var(--mono,monospace);font-size:var(--font-xs);word-break:break-all;user-select:all"></code>
+                        <button class="btn-sm" id="apitok-copy">Copy</button>
+                    </div>
+                    <button class="btn-sm" id="apitok-dismiss" style="margin-top:8px">I saved it \u2014 dismiss</button>
+                </div>
+
+                <div id="apitok-list">Loading\u2026</div>
             </div>
 
             <div class="danger-zone">
@@ -50,6 +144,72 @@ export default {
                 window.sapphireSetupWizard.open(true);
             } else {
                 ui.showToast('Setup wizard plugin not loaded', 'error');
+            }
+        });
+
+        // ─── API Keys section ───────────────────────────────────────────
+        const listEl = el.querySelector('#apitok-list');
+        const nameInput = el.querySelector('#apitok-new-name');
+        const addBtn = el.querySelector('#apitok-add');
+        const revealBox = el.querySelector('#apitok-reveal');
+        const revealValue = el.querySelector('#apitok-reveal-value');
+
+        // Initial load
+        if (listEl) _renderTokenList(listEl);
+
+        // Create
+        addBtn?.addEventListener('click', async () => {
+            const name = (nameInput?.value || '').trim();
+            if (!name) {
+                ui.showToast('Enter a token name first', 'error');
+                return;
+            }
+            try {
+                const created = await createApiToken(name);
+                // Reveal the full token ONCE
+                revealValue.textContent = created.token;
+                revealBox.style.display = 'block';
+                nameInput.value = '';
+                await _renderTokenList(listEl);
+                ui.showToast('Token created — copy and save it now', 'success');
+            } catch (e) {
+                ui.showToast(`Create failed: ${e.message}`, 'error');
+            }
+        });
+        nameInput?.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') { ev.preventDefault(); addBtn?.click(); }
+        });
+
+        // Copy revealed token
+        el.querySelector('#apitok-copy')?.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(revealValue.textContent || '');
+                ui.showToast('Copied to clipboard', 'success');
+            } catch {
+                ui.showToast('Copy failed — select + Ctrl-C manually', 'error');
+            }
+        });
+
+        // Dismiss the reveal box (the user confirms they saved it)
+        el.querySelector('#apitok-dismiss')?.addEventListener('click', () => {
+            revealValue.textContent = '';
+            revealBox.style.display = 'none';
+        });
+
+        // Revoke (event-delegated since rows are re-rendered on changes)
+        listEl?.addEventListener('click', async (ev) => {
+            const btn = ev.target.closest('[data-revoke-id]');
+            if (!btn) return;
+            const id = btn.getAttribute('data-revoke-id');
+            const row = btn.closest('.api-token-row');
+            const name = row?.querySelector('div[style*="font-weight"]')?.textContent || 'this token';
+            if (!confirm(`Revoke "${name}"? Any integration using this token will stop working.`)) return;
+            try {
+                await revokeApiToken(id);
+                await _renderTokenList(listEl);
+                ui.showToast(`Revoked ${name}`, 'success');
+            } catch (e) {
+                ui.showToast(`Revoke failed: ${e.message}`, 'error');
             }
         });
 

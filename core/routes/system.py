@@ -843,3 +843,54 @@ async def dashboard_component_status(_=Depends(require_login)):
         'ww':  _wakeword_status(),
         'emb': _embedding_status(),
     }
+
+
+# =============================================================================
+# API TOKENS — named bearer tokens for external integrations
+# =============================================================================
+# Added 2026-05-21. Lets admins mint per-integration tokens (Valheim mod,
+# scripts, etc.) instead of sharing the bcrypt password hash as an API key.
+# Full token value is returned ONCE at creation; subsequent reads show only
+# the name + last4. See core/api_tokens.py for the manager.
+
+
+@router.get("/api/system/api-tokens")
+async def list_api_tokens(_=Depends(require_login)):
+    """List API tokens (safe — full token values are MASKED, only last4 shown)."""
+    from core.api_tokens import api_tokens
+    return {"tokens": api_tokens.list_safe()}
+
+
+@router.post("/api/system/api-tokens")
+async def create_api_token(request: Request, _=Depends(require_login)):
+    """Mint a new API token. Returns the FULL token in the response body —
+    this is the ONLY moment it's exposed. The frontend must show-and-copy
+    it to the user; subsequent list_safe() calls only return last4."""
+    from core.api_tokens import api_tokens
+    data = await request.json()
+    name = (data.get('name') or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Token name required")
+    try:
+        entry = api_tokens.create(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    # Return the full token + metadata. Frontend MUST show-once.
+    return {
+        "id": entry["id"],
+        "name": entry["name"],
+        "token": entry["token"],            # <-- one-time reveal
+        "created_at": entry["created_at"],
+        "last_used_at": entry["last_used_at"],
+    }
+
+
+@router.delete("/api/system/api-tokens/{token_id}")
+async def revoke_api_token(token_id: str, _=Depends(require_login)):
+    """Revoke a token by ID."""
+    from core.api_tokens import api_tokens
+    if api_tokens.revoke(token_id):
+        return {"status": "revoked"}
+    raise HTTPException(status_code=404, detail="Token not found")

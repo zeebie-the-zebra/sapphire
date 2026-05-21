@@ -57,17 +57,39 @@ def validate_csrf(request: Request, token: Optional[str] = None) -> bool:
 
 
 async def require_login(request: Request):
-    """Dependency that requires login. Raises HTTPException if not logged in."""
+    """Dependency that requires login. Raises HTTPException if not logged in.
+
+    Three accepted auth paths, tried in order:
+      1. Session cookie         — browser users (request.session.logged_in)
+      2. Authorization: Bearer  — external integrations (named API tokens; 2026-05-21)
+      3. X-API-Key              — internal tools / legacy callers (bcrypt password hash)
+    """
     from core.setup import is_setup_complete, get_password_hash
 
     if not is_setup_complete():
         raise HTTPException(status_code=307, headers={"Location": "/setup"})
 
-    # Session auth (browser users)
+    # 1. Session auth (browser users)
     if request.session.get('logged_in'):
         return True
 
-    # API key auth (internal/tool calls from same process, e.g. meta.py)
+    # 2. Bearer token (named API token; for external integrations like the
+    #    Valheim mod, scripts, etc.). Tokens minted via Settings > System >
+    #    API Keys. Match is constant-time across all tokens; on success the
+    #    token's last_used_at is updated and persisted (best-effort).
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        candidate = auth_header.split(' ', 1)[1].strip()
+        if candidate:
+            try:
+                from core.api_tokens import api_tokens
+                if api_tokens.verify(candidate) is not None:
+                    return True
+            except Exception as e:
+                # Don't let an api_tokens fault block auth-by-other-means
+                logger.warning(f"api_tokens.verify raised: {e!r}")
+
+    # 3. X-API-Key auth (internal/tool calls, e.g. meta.py) — bcrypt password hash
     api_key = request.headers.get('X-API-Key')
     if api_key:
         stored_hash = get_password_hash()
