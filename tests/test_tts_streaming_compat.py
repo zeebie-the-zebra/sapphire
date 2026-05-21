@@ -110,7 +110,7 @@ def test_pump_inert_for_legacy_provider_no_hooks_fire(streaming_on, fresh_hooks)
     assert pump.enabled is False
     pump.push("Hello there. ")
     pump.push("More.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     assert out == []
     assert seen == []  # zero hook fires
 
@@ -130,7 +130,7 @@ def test_pump_inert_when_setting_off_even_with_capable_provider(monkeypatch, fre
     assert pump.enabled is False
     pump.push("Hello there. ")
     pump.push("More.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     assert out == []
     assert seen == []
 
@@ -142,7 +142,7 @@ def test_pump_inert_when_tts_globally_off(monkeypatch, fresh_hooks):
     pump = StreamingTTSPump(system=_system_with(_StreamCapable()))
     assert pump.enabled is False
     assert pump.push("Hi. ") == []
-    assert pump.flush_and_close() == []
+    assert list(pump.flush_and_close()) == []
 
 
 # ---------------------------------------------------------------------------

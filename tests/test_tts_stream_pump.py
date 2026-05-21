@@ -60,7 +60,7 @@ def test_disabled_when_streaming_setting_off(monkeypatch):
     pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
     assert pump.enabled is False
     assert pump.push("Hello. World. ") == []
-    assert pump.flush_and_close() == []
+    assert list(pump.flush_and_close()) == []
 
 
 def test_disabled_when_no_provider(enable_streaming):
@@ -90,7 +90,7 @@ def test_complete_sentence_produces_audio_event(enable_streaming):
     # Push enough to satisfy sentence boundary (period + space + capital)
     pump.push("Hello there. ")
     pump.push("More text here.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     # Expect at least one tts_chunk and a final tts_stream_end
     types = [e["type"] for e in out]
     assert "tts_stream_end" in types
@@ -110,7 +110,7 @@ def test_synth_failure_swallowed_no_event(enable_streaming):
     pump = StreamingTTSPump(system=_make_system(provider=fp))
     pump.push("Hello there. ")
     pump.push("More.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     chunks = [e for e in out if e["type"] == "tts_chunk"]
     assert chunks == []  # all synths failed
     assert any(e["type"] == "tts_stream_end" for e in out)
@@ -127,7 +127,7 @@ def test_cancel_no_more_events(enable_streaming):
     # Subsequent push should be no-op
     assert pump.push("more") == []
     # flush_and_close after cancel is no-op
-    assert pump.flush_and_close() == []
+    assert list(pump.flush_and_close()) == []
 
 
 def test_push_with_no_text_no_events(enable_streaming):
@@ -139,7 +139,7 @@ def test_push_with_no_text_no_events(enable_streaming):
 def test_flush_emits_end_only_when_started(enable_streaming):
     pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
     # No push happened
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     assert out == []  # no stream_start means no stream_end either
 
 
@@ -179,7 +179,7 @@ def test_tts_stream_start_skip_disables_turn(enable_streaming, fresh_hooks):
     pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
     out = pump.push("Hello there. ")
     out += pump.push("More text here.")
-    out += pump.flush_and_close()
+    out += list(pump.flush_and_close())
     # Skip means no events emitted at all (not even stream_start in output)
     assert out == []
 
@@ -192,7 +192,7 @@ def test_tts_chunk_text_hook_can_mutate(enable_streaming, fresh_hooks):
     pump = StreamingTTSPump(system=_make_system(provider=fp))
     pump.push("Hello there. ")
     pump.push("More text.")
-    pump.flush_and_close()
+    list(pump.flush_and_close())
     # Provider should have been called with uppercased text
     assert any(call[0].startswith("HELLO") for call in fp.calls), fp.calls
 
@@ -207,7 +207,7 @@ def test_tts_chunk_text_skip_drops_chunk(enable_streaming, fresh_hooks):
     pump.push("First sentence here. ")
     pump.push("Second sentence here. ")
     pump.push("Third.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     # First chunk was skipped — provider was NOT called for it
     chunk_texts = [c[0] for c in fp.calls]
     assert not any("First sentence" in t for t in chunk_texts)
@@ -225,7 +225,7 @@ def test_tts_chunk_audio_hook_can_replace_bytes(enable_streaming, fresh_hooks):
     pump = StreamingTTSPump(system=_make_system(provider=fp))
     pump.push("Hello there. ")
     pump.push("More.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     chunks = [e for e in out if e["type"] == "tts_chunk"]
     assert chunks
     assert base64.b64decode(chunks[0]["audio_b64"]) == b"REPLACED"
@@ -241,7 +241,7 @@ def test_tts_chunk_audio_hook_can_drop(enable_streaming, fresh_hooks):
     pump = StreamingTTSPump(system=_make_system(provider=fp))
     pump.push("Hello there. ")
     pump.push("More.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     chunks = [e for e in out if e["type"] == "tts_chunk"]
     assert chunks == []  # all chunks muted
 
@@ -252,7 +252,7 @@ def test_tts_stream_end_hook_observes_completion(enable_streaming, fresh_hooks):
     pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
     pump.push("Hello there. ")
     pump.push("More.")
-    pump.flush_and_close()
+    list(pump.flush_and_close())
     assert len(seen) == 1
     assert seen[0]["interrupted"] is False
     assert seen[0]["chunk_count"] >= 1
@@ -302,7 +302,7 @@ def test_stream_id_stable_across_hooks(enable_streaming, fresh_hooks):
     pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
     pump.push("Hello there. ")
     pump.push("More.")
-    pump.flush_and_close()
+    list(pump.flush_and_close())
     assert ids["start"] == ids["text"] == ids["audio"] == ids["end"]
 
 
@@ -326,7 +326,7 @@ def test_flush_polls_cancel_check_and_bails_early(enable_streaming, fresh_hooks)
     pump.push("Third sentence here.")
     # Trip cancel BEFORE flush — flush should bail immediately on first poll
     cancel_flag["value"] = True
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     end_events = [e for e in out if e["type"] == "tts_stream_end"]
     assert len(end_events) == 1
     assert end_events[0]["interrupted"] is True
@@ -346,7 +346,7 @@ def test_flush_fires_end_hook_with_interrupted_true_on_user_stop(enable_streamin
     pump.push("First sentence. ")
     pump.push("Second sentence here.")
     cancel_flag["value"] = True
-    pump.flush_and_close()
+    list(pump.flush_and_close())
     assert len(seen) == 1
     assert seen[0]["interrupted"] is True
 
@@ -362,7 +362,7 @@ def test_flush_normal_completion_marks_not_interrupted(enable_streaming, fresh_h
     )
     pump.push("Hello there. ")
     pump.push("More.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     end_events = [e for e in out if e["type"] == "tts_stream_end"]
     assert end_events[0]["interrupted"] is False
     assert seen[0]["interrupted"] is False
@@ -377,7 +377,7 @@ def test_cancel_check_exception_treated_as_false(enable_streaming):
     )
     pump.push("Hello there. ")
     pump.push("More.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     assert any(e["type"] == "tts_stream_end" for e in out)
 
 
@@ -387,7 +387,7 @@ def test_cancel_method_still_works_after_flush(enable_streaming):
     pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
     pump.push("Hello there. ")
     pump.push("More.")
-    pump.flush_and_close()
+    list(pump.flush_and_close())
     # Second cancel/close — should not raise or fire end-hook again
     pump.cancel()  # safe no-op
 
@@ -408,7 +408,7 @@ def test_plugin_non_string_tts_text_does_not_crash_turn(enable_streaming, fresh_
     # No exception should escape push() or flush_and_close()
     pump.push("Hello there. ")
     pump.push("More text here.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     # Synth was called with ORIGINAL text (not the bad list), so chunks emitted
     chunks = [e for e in out if e["type"] == "tts_chunk"]
     assert chunks, "expected chunks despite buggy plugin"
@@ -428,7 +428,7 @@ def test_plugin_empty_string_tts_text_skips_chunk_not_clobbers_to_original(enabl
     pump.push("First sentence here. ")
     pump.push("Second sentence here. ")
     pump.push("Third.")
-    pump.flush_and_close()
+    list(pump.flush_and_close())
     # First chunk MUST NOT have been synthesized — its text was muted to ""
     synth_texts = [call[0] for call in fp.calls]
     assert not any("First sentence" in t for t in synth_texts), (
@@ -445,7 +445,7 @@ def test_plugin_whitespace_tts_text_also_skips_chunk(enable_streaming, fresh_hoo
     pump = StreamingTTSPump(system=_make_system(provider=fp))
     pump.push("Anything. ")
     pump.push("More text here.")
-    pump.flush_and_close()
+    list(pump.flush_and_close())
     # No synth should have happened at all — every chunk was whitespace-muted
     assert fp.calls == [], f"whitespace-muted chunks were synthesized: {fp.calls}"
 
@@ -461,7 +461,7 @@ def test_plugin_None_tts_text_uses_original(enable_streaming, fresh_hooks):
     pump = StreamingTTSPump(system=_make_system(provider=fp))
     pump.push("Hello there. ")
     pump.push("More.")
-    pump.flush_and_close()
+    list(pump.flush_and_close())
     # Synth should have used original chunk text
     assert any("Hello" in call[0] for call in fp.calls), fp.calls
 
@@ -501,7 +501,7 @@ def test_streaming_provider_emits_one_event_per_segment(enable_streaming):
     out = []
     out.extend(pump.push("Hello there. "))
     out.extend(pump.push("More text here."))
-    out.extend(pump.flush_and_close())
+    out.extend(list(pump.flush_and_close()))
     chunks = [e for e in out if e["type"] == "tts_chunk"]
     # 2 pump-chunks × 4 segments each = 8 events
     assert len(chunks) == 8, f"expected 8 segment events, got {len(chunks)}: {[c['index'] for c in chunks]}"
@@ -539,7 +539,7 @@ def test_streaming_provider_preserves_order_with_concurrent_workers(enable_strea
     pump = StreamingTTSPump(system=_make_system(provider=op))
     pump.push("First chunk. ")
     pump.push("Second chunk text.")
-    out = pump.flush_and_close()
+    out = list(pump.flush_and_close())
     chunks = [e for e in out if e["type"] == "tts_chunk"]
     decoded = [base64.b64decode(c["audio_b64"]).decode() for c in chunks]
     # First pump-chunk's segments (despite slower synth) emit BEFORE
@@ -560,7 +560,7 @@ def test_skip_tts_at_stream_start_fires_end_hook_for_plugin_cleanup(enable_strea
     fresh_hooks.register("tts_stream_end", lambda ev: ends.append(ev.metadata.copy()), plugin_name="t")
     pump = StreamingTTSPump(system=_make_system(provider=_FakeProvider()))
     out = pump.push("Hello there. ")
-    out += pump.flush_and_close()
+    out += list(pump.flush_and_close())
     # No SSE events emitted (plugin cancelled the whole turn)
     assert out == []
     # Start hook fired exactly once
