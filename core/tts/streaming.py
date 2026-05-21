@@ -34,10 +34,16 @@ log = logging.getLogger(__name__)
 # has natural breath silence at sentence ends, so the player can re-trigger
 # almost immediately and the speech still sounds normal. Lowered 2026-05-18.
 PAUSE_AFTER_MS = {
-    "sentence":   30,    # . ! ? — token of breathing room, not a full beat
-    "ellipsis":   150,   # ... — slightly longer than sentence
+    "sentence":   0,     # . ! ? — browser's natural play() startup (~20-50ms)
+                         # already provides breathing room on fast hardware.
+                         # Was 30ms — dropped 2026-05-21 because the 30ms stacked
+                         # on top of HTML5 Audio element startup, producing an
+                         # audible ~100ms gap on fast hardware where the
+                         # natural pause alone is enough.
+    "ellipsis":   150,   # ... — slightly longer than sentence (kept; rare boundary)
     "secondary":  0,     # ; : — gapless
-    "paragraph":  200,   # \n\n — clear paragraph break
+    "paragraph":  80,    # \n\n — clear paragraph break (was 200; dropped 2026-05-21,
+                         # same rationale as sentence — natural startup adds latency)
     "maxlen":     0,     # mid-thought split, no pause
     "end":        0,     # final flush at end of stream
 }
