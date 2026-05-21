@@ -93,16 +93,44 @@ async def handle_tts_speak(request: Request, _=Depends(require_login), system=De
         return {"status": "success", "message": "Playback started."}
     elif output_mode == 'file':
         audio_data = await asyncio.to_thread(system.tts.generate_audio_data, text)
-        if audio_data:
+        if not audio_data:
+            raise HTTPException(status_code=503, detail="TTS generation failed")
+
+        # Optional re-encoding for downstream consumers that can't decode the
+        # provider's native format. Added 2026-05-21 — Unity / FMOD can't
+        # decode Ogg-Opus (only Ogg-Vorbis), and the Valheim mod needs MP3
+        # or WAV for `UnityWebRequestMultimedia.GetAudioClip`. We transcode
+        # via ffmpeg subprocess (cheap; ~50-100ms per request).
+        out_format = (data.get('format') or '').lower().strip()
+        if out_format in ('mp3', 'wav'):
+            import subprocess
+            content_type = 'audio/mpeg' if out_format == 'mp3' else 'audio/wav'
+            ext = out_format
+            ffmpeg_codec = ['-codec:a', 'libmp3lame', '-b:a', '128k'] if out_format == 'mp3' else ['-codec:a', 'pcm_s16le']
+            try:
+                proc = await asyncio.to_thread(
+                    subprocess.run,
+                    ['ffmpeg', '-loglevel', 'error', '-y', '-i', 'pipe:0', '-f', out_format, *ffmpeg_codec, 'pipe:1'],
+                    input=audio_data, capture_output=True, timeout=15,
+                )
+                if proc.returncode != 0:
+                    err = (proc.stderr or b'').decode(errors='replace')[:300]
+                    logger.error(f"ffmpeg transcode to {out_format} failed: {err}")
+                    raise HTTPException(status_code=503, detail=f"ffmpeg transcode failed: {err}")
+                audio_data = proc.stdout
+            except subprocess.TimeoutExpired:
+                raise HTTPException(status_code=504, detail="ffmpeg transcode timeout")
+            except FileNotFoundError:
+                raise HTTPException(status_code=503, detail="ffmpeg not available on server")
+        else:
             content_type = getattr(system.tts, 'audio_content_type', 'audio/ogg')
             ext = 'mp3' if 'mpeg' in content_type else 'ogg'
-            return StreamingResponse(
-                io.BytesIO(audio_data),
-                media_type=content_type,
-                headers={'Content-Disposition': f'attachment; filename="output.{ext}"'}
-            )
-        else:
-            raise HTTPException(status_code=503, detail="TTS generation failed")
+
+        return StreamingResponse(
+            io.BytesIO(audio_data),
+            media_type=content_type,
+            headers={'Content-Disposition': f'attachment; filename="output.{ext}"'}
+        )
     else:
         raise HTTPException(status_code=400, detail="Invalid output_mode")
 
