@@ -431,6 +431,22 @@ class OpenAICompatProvider(BaseProvider):
 
             clean.append(clean_msg)
 
+        # Qwen /no_think — opt-in. If provider config has
+        # `disable_thinking_qwen: true`, append the /no_think token to the
+        # final user message. Qwen 3 models honor it natively (chat template
+        # skips the thinking stage entirely). Non-Qwen models ignore the
+        # token, so this is safe to leave on for any LM Studio provider
+        # config that's serving Qwen. Off by default — users must opt in
+        # by setting the flag in their provider's advanced settings, which
+        # protects everyone else's setups.
+        if self.config.get('disable_thinking_qwen', False):
+            for i in range(len(clean) - 1, -1, -1):
+                m = clean[i]
+                if m.get('role') == 'user' and isinstance(m.get('content'), str):
+                    if not m['content'].rstrip().endswith('/no_think'):
+                        m['content'] = m['content'].rstrip() + ' /no_think'
+                    break
+
         return clean
     
     def chat_completion(
@@ -497,14 +513,34 @@ class OpenAICompatProvider(BaseProvider):
             # reduces the rejection surface with strict OpenAI-compat providers.
             # (Matches the Anthropic provider, which also never sets tool_choice.)
 
+        # Qwen disable-thinking via chat_template_kwargs. LM Studio (and
+        # vLLM) forward this to the model's chat template; Qwen 3 then
+        # skips the thinking stage entirely. Opt-in via provider config.
+        self._inject_qwen_no_think(request_kwargs)
+
         # Wrap in retry for rate limiting
         response = retry_on_rate_limit(
             self._client.chat.completions.create,
             **request_kwargs
         )
-        
+
         return self._parse_response(response)
-    
+
+    def _inject_qwen_no_think(self, kwargs: dict) -> None:
+        """If provider config opts in, set chat_template_kwargs.enable_thinking=false.
+
+        Belt-and-suspenders with the /no_think suffix in _sanitize_messages:
+        some Qwen 3 variants honor the suffix, others need the template
+        kwarg. Setting both costs nothing for providers that ignore them.
+        """
+        if not self.config.get('disable_thinking_qwen', False):
+            return
+        existing = kwargs.get('extra_body') or {}
+        ctk = dict(existing.get('chat_template_kwargs') or {})
+        ctk['enable_thinking'] = False
+        existing['chat_template_kwargs'] = ctk
+        kwargs['extra_body'] = existing
+
     def chat_completion_stream(
         self,
         messages: List[Dict[str, Any]],
@@ -559,6 +595,9 @@ class OpenAICompatProvider(BaseProvider):
             # default when tools are present, so setting it is redundant. Omitting it
             # reduces the rejection surface with strict OpenAI-compat providers.
             # (Matches the Anthropic provider, which also never sets tool_choice.)
+
+        # Qwen disable-thinking — apply for streaming path too.
+        self._inject_qwen_no_think(request_kwargs)
 
         logger.info(f"[OPENAI-COMPAT] Request params: model={request_kwargs.get('model')}, tools={len(request_kwargs.get('tools', []))}")
 

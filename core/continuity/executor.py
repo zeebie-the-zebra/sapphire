@@ -8,11 +8,25 @@ import copy
 import json
 import logging
 import threading
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Dict, Any
 from core.event_bus import publish, Events
 
 logger = logging.getLogger(__name__)
+
+
+# Module-level ContextVar holding the parsed event_data dict that triggered
+# the currently-running daemon/webhook task. Plugins (especially their
+# tools) can read this to route results back to the originating request
+# without the LLM having to carry routing IDs as tool arguments.
+#
+# Set INSIDE the task's thread (via _run_foreground/_run_background) so
+# ContextVars resolve correctly — ContextVars don't propagate across the
+# fresh threading.Thread the scheduler spawns per task.
+#
+# Empty dict default keeps `.get("anything")` safe in non-event contexts.
+current_event_data: ContextVar[dict] = ContextVar("current_event_data", default={})
 
 
 class ContinuityExecutor:
@@ -184,6 +198,20 @@ class ContinuityExecutor:
                             if keyword == "discord" and obj.get("channel_id"):
                                 task["_discord_reply_channel_id"] = obj["channel_id"]
                             break
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+            # Generic plugin context propagation. Set the current event_data
+            # in a ContextVar that plugin tools can read without the LLM
+            # carrying routing IDs as arguments. Works in this thread + any
+            # downstream call frame in the same task; ContextVars don't
+            # propagate across new threads, but the task runs in this thread
+            # so anything ExecutionContext.run does (LLM, tool calls) sees
+            # the set value.
+            try:
+                event_obj = json.loads(event_data) if isinstance(event_data, str) else (event_data or {})
+                if isinstance(event_obj, dict):
+                    current_event_data.set(event_obj)
             except (json.JSONDecodeError, TypeError):
                 pass
 
