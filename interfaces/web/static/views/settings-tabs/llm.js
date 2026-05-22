@@ -134,7 +134,7 @@ export default {
 
                     let value = e.target.value;
                     if (field === 'timeout') value = parseFloat(value) || 5;
-                    if (['use_as_fallback', 'thinking_enabled', 'cache_enabled'].includes(field)) value = e.target.checked;
+                    if (['use_as_fallback', 'thinking_enabled', 'cache_enabled', 'disable_thinking_qwen'].includes(field)) value = e.target.checked;
                     if (field === 'thinking_budget') value = parseInt(value) || 10000;
                     await updateProvider(key, { [field]: value });
                     showToast('Provider settings saved', 'success', 2000);
@@ -486,9 +486,18 @@ function _showEditWizard(el, key, config, ctx) {
                         <label>Max Tokens</label>
                         <input type="number" id="edit-maxtok" value="${config.generation_params?.max_tokens ?? 4096}" step="1" min="1" style="width:80px">
                     </div>
-                    <div class="field-row">
+                    <div class="field-row" style="margin-bottom:6px">
                         <label>Top P</label>
                         <input type="number" id="edit-topp" value="${config.generation_params?.top_p ?? 0.9}" step="0.05" min="0" max="1" style="width:80px">
+                    </div>
+                    <div class="field-row" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+                        <label class="checkbox-inline">
+                            <input type="checkbox" id="edit-no-think" ${config.disable_thinking_qwen ? 'checked' : ''}>
+                            <span>Disable Qwen thinking (/no_think)</span>
+                        </label>
+                    </div>
+                    <div class="text-muted" style="font-size:0.8em;margin-left:24px;margin-top:2px">
+                        For Qwen 3 models — sends chat_template_kwargs.enable_thinking=false. Other models ignore it.
                     </div>
                 </div>
             </details>
@@ -543,6 +552,10 @@ function _showEditWizard(el, key, config, ctx) {
         if (!isNaN(temp)) updates.generation_params.temperature = temp;
         if (!isNaN(maxTok)) updates.generation_params.max_tokens = maxTok;
         if (!isNaN(topP)) updates.generation_params.top_p = topP;
+
+        // Qwen no-think toggle — passes through to openai_compat as a
+        // provider-level config flag (chat_template_kwargs.enable_thinking).
+        updates.disable_thinking_qwen = wizard.querySelector('#edit-no-think')?.checked || false;
 
         try {
             await updateProvider(key, updates);
