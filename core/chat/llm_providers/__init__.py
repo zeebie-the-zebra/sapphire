@@ -215,6 +215,10 @@ class ProviderRegistry(_BaseRegistry):
             # Config hints from presets
             'session_affinity': config.get('session_affinity', False),
             'strip_penalties': config.get('strip_penalties', False),
+            # Qwen no-think (LM Studio / OpenAI-compat) — read by openai_compat
+            # to inject chat_template_kwargs.enable_thinking=false + /no_think
+            # token on the last user message. Opt-in per-provider.
+            'disable_thinking_qwen': config.get('disable_thinking_qwen', False),
         }
 
         try:

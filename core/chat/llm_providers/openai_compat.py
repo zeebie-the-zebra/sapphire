@@ -540,6 +540,7 @@ class OpenAICompatProvider(BaseProvider):
         ctk['enable_thinking'] = False
         existing['chat_template_kwargs'] = ctk
         kwargs['extra_body'] = existing
+        logger.info(f"[OPENAI-COMPAT] disable_thinking_qwen ACTIVE → {self.model} (extra_body.chat_template_kwargs.enable_thinking=false)")
 
     def chat_completion_stream(
         self,
