@@ -115,8 +115,8 @@ function renderDashboard(el, d) {
                 <div class="status-card">
                     <div class="status-card-title">Services</div>
                     <div class="status-service-list">
-                        <div class="status-svc-row">${dot(svc.tts?.enabled)} TTS: ${esc(svc.tts?.provider || 'off')}${svc.tts?.voice ? ' (' + esc(svc.tts.voice) + ')' : ''}</div>
-                        <div class="status-svc-row">${dot(svc.stt?.enabled)} STT: ${esc(svc.stt?.provider || 'off')}</div>
+                        <div class="status-svc-row">${dot(svc.tts?.enabled)} TTS: ${esc(svc.tts?.provider || 'off')}${svc.tts?.voice ? ' (' + esc(svc.tts.voice) + ')' : ''}${_devTag(svc.tts)}</div>
+                        <div class="status-svc-row">${dot(svc.stt?.enabled)} STT: ${esc(svc.stt?.provider || 'off')}${_devTag(svc.stt)}</div>
                         <div class="status-svc-row">${dot(svc.wakeword?.enabled)} Wakeword${svc.wakeword?.model ? ': ' + esc(svc.wakeword.model) : ''}</div>
                         <div class="status-svc-row">${dot(svc.embeddings?.enabled)} Embeddings: ${esc(svc.embeddings?.provider || 'off')}</div>
                         <div class="status-svc-row">${dot(svc.socks?.enabled)} SOCKS Proxy${svc.socks?.enabled ? (svc.socks.has_credentials ? ' (creds set)' : ' (no creds)') : ''}</div>
@@ -571,6 +571,23 @@ function renderDashboard(el, d) {
 
 function esc(s) { return String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function dot(on) { return `<span class="status-dot ${on ? 'on' : 'off'}"></span>`; }
+
+// Render a "[GPU]" or "[CPU]" tag for a service. Shows actual runtime device
+// when available; falls back to configured value with a "?" if we couldn't
+// query the runtime. Warns when configured != actual (fallback happened).
+function _devTag(svc) {
+    if (!svc || !svc.enabled) return '';
+    const actual = svc.device_actual;
+    const cfg = svc.device_configured;
+    if (!actual && !cfg) return '';
+    const shown = actual || cfg;
+    const label = shown === 'cuda' ? 'GPU' : (shown === 'cpu' ? 'CPU' : shown.toUpperCase());
+    const tooltip = !actual
+        ? `configured: ${cfg} (couldn't query runtime)`
+        : (cfg && actual !== cfg ? `configured: ${cfg} — actually running on ${actual} (fell back)` : `running on ${actual}`);
+    const warn = actual && cfg && actual !== cfg ? ' ⚠' : '';
+    return ` <span class="status-dev-tag" title="${esc(tooltip)}" style="opacity:0.7;font-size:0.85em">[${label}${warn}]</span>`;
+}
 function field(label, value) {
     return `<div class="status-field"><span class="status-field-label">${esc(label)}</span><span class="status-field-value">${esc(value)}</span></div>`;
 }

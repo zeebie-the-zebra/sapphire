@@ -256,6 +256,7 @@ class TTSHandler(BaseHTTPRequestHandler):
         _json_response(self, {
             'status': 'ok',
             'model': 'loaded',
+            'device': _kokoro_device,
             'requests': request_count,
             'memory_gb': round(mem_gb, 2),
             'memory_limit_gb': MAX_MEMORY_GB,

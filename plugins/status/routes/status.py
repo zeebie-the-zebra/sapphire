@@ -337,15 +337,50 @@ def get_full_status_sync():
         except Exception:
             pass
 
+        # Detect actual runtime devices for TTS + STT. Shows the truth
+        # (post-fallback) when KOKORO_DEVICE=cuda fell back to cpu, or
+        # FASTER_WHISPER_DEVICE=cuda fell back to cpu. The CONFIG value
+        # may say cuda even when reality is cpu.
+        tts_device_configured = (getattr(config, 'KOKORO_DEVICE', 'cuda') or 'cuda').strip().lower()
+        tts_device_actual = None
+        try:
+            # Ping the Kokoro subprocess /health endpoint — its 'device'
+            # field is the post-fallback truth.
+            import urllib.request as _ur
+            import json as _json
+            tts_port = getattr(config, 'TTS_SERVER_PORT', 5012)
+            with _ur.urlopen(f"http://127.0.0.1:{tts_port}/health", timeout=0.5) as r:
+                tts_device_actual = _json.loads(r.read()).get('device')
+        except Exception:
+            pass
+
+        stt_device_configured = (getattr(config, 'FASTER_WHISPER_DEVICE', 'cuda') or 'cuda').strip().lower()
+        stt_device_actual = None
+        try:
+            # WhisperModel.model.device is the post-init device. Faster-whisper
+            # stores the underlying ctranslate2 model; its .device attr is the
+            # cleanest source of truth.
+            stt_obj = getattr(system, 'stt', None)
+            wm = getattr(stt_obj, 'model', None) if stt_obj else None
+            if wm is not None:
+                # ctranslate2 model exposes .device as a string ('cuda' or 'cpu')
+                stt_device_actual = getattr(wm, 'device', None) or getattr(getattr(wm, 'model', None), 'device', None)
+        except Exception:
+            pass
+
         services = {
             "tts": {
                 "provider": tts_provider,
                 "enabled": bool(tts_provider and tts_provider != 'none'),
                 "voice": getattr(system.tts, '_voice', '') if hasattr(system, 'tts') else '',
+                "device_configured": tts_device_configured,
+                "device_actual": tts_device_actual,  # None = couldn't query
             },
             "stt": {
                 "provider": stt_provider,
                 "enabled": bool(stt_provider and stt_provider != 'none'),
+                "device_configured": stt_device_configured,
+                "device_actual": stt_device_actual,  # None = couldn't query
             },
             "wakeword": {
                 "enabled": wakeword_on,
