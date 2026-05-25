@@ -15,8 +15,9 @@ const tabConfig = {
         },
         kokoro: {
             label: 'Local (Kokoro)',
-            essentialKeys: [],
+            essentialKeys: ['KOKORO_DEVICE'],
             advancedKeys: [
+                'KOKORO_CUDA_DEVICE',
                 'TTS_SERVER_HOST', 'TTS_SERVER_PORT',
                 'TTS_PRIMARY_SERVER', 'TTS_FALLBACK_SERVER', 'TTS_FALLBACK_TIMEOUT'
             ]

@@ -105,6 +105,7 @@
     "TTS_ELEVENLABS_API_KEY": "",
     "TTS_ELEVENLABS_MODEL": "eleven_flash_v2_5",
     "TTS_ELEVENLABS_VOICE_ID": "",
+    "KOKORO_DEVICE": "cuda",
     "KOKORO_CUDA_DEVICE": "",
     "TTS_STREAMING_ENABLED": false,
     "TTS_STREAMING_MIN_CHARS": 15,

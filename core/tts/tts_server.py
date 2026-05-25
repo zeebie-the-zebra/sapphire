@@ -103,8 +103,26 @@ logger.info(f"Torch threads: intra={_torch.get_num_threads()}, "
             f"inter={_torch.get_num_interop_threads()}")
 
 # --- Model Setup ---
-logger.info("Loading Kokoro model...")
-pipeline = KPipeline(lang_code='a')
+# Device selection: KOKORO_DEVICE setting ('cuda' or 'cpu'). Default cuda.
+# CPU mode frees ~1-2GB VRAM for other models (Whisper, embeddings).
+# CUDA mode is much faster but requires a CUDA-capable GPU + working driver.
+try:
+    import config as _cfg
+    _kokoro_device = (getattr(_cfg, 'KOKORO_DEVICE', 'cuda') or 'cuda').strip().lower()
+except Exception:
+    _kokoro_device = 'cuda'
+if _kokoro_device not in ('cuda', 'cpu'):
+    logger.warning(f"KOKORO_DEVICE='{_kokoro_device}' unrecognized — falling back to cuda")
+    _kokoro_device = 'cuda'
+
+logger.info(f"Loading Kokoro model on device='{_kokoro_device}'...")
+try:
+    pipeline = KPipeline(lang_code='a', device=_kokoro_device)
+except TypeError:
+    # Older kokoro versions don't accept device= kwarg — fall back to
+    # auto-detect (which respects CUDA_VISIBLE_DEVICES env if set by parent).
+    logger.warning("KPipeline doesn't accept device kwarg — using library default")
+    pipeline = KPipeline(lang_code='a')
 logger.info(f"Model loaded successfully! Using temp dir: {TEMP_DIR}")
 os.makedirs(TEMP_DIR, exist_ok=True)
 

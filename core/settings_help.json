@@ -224,6 +224,14 @@
     "short": "ElevenLabs voice ID",
     "long": "The voice to use for ElevenLabs TTS. Select from your available voices or paste a voice ID directly. Leave empty to use the default voice."
   },
+  "KOKORO_DEVICE": {
+    "short": "Compute device for Kokoro TTS",
+    "long": "Which hardware Kokoro uses for synthesis. 'cuda' uses NVIDIA GPU (much faster, adds ~1-2GB VRAM). 'cpu' uses processor (slower, frees VRAM for other models). Requires Sapphire restart to take effect."
+  },
+  "KOKORO_CUDA_DEVICE": {
+    "short": "GPU index for Kokoro (multi-GPU)",
+    "long": "Which NVIDIA GPU index Kokoro uses. Leave empty for default (GPU 0). For multi-GPU setups where Whisper and Kokoro should use different GPUs to avoid CUDA-context races at startup. Example: FASTER_WHISPER_CUDA_DEVICE=0 + KOKORO_CUDA_DEVICE=1. Only meaningful when KOKORO_DEVICE=cuda."
+  },
   "TTS_SERVER_HOST": {
     "short": "TTS server bind address",
     "long": "Network interface for the Kokoro TTS server to bind to. Use '0.0.0.0' to accept connections from any interface (required for remote access), or '127.0.0.1' for local-only. Requires restart."
