@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="csrf-token" content="mjolnir-test">
+  <title>Mjolnir TTS Streaming Test Page</title>
+  <style>
+    body { font-family: monospace; padding: 1rem; }
+    #status { color: #888; }
+  </style>
+</head>
+<body>
+  <!-- Stub DOM elements that audio.js's deps (ui.js etc.) look up at module
+       load. Returning null from getElementById is fine in JS but downstream
+       code may dereference these without nullchecks — give them real nodes. -->
+  <div id="chat-container"></div>
+  <div id="chatbg-overlay"></div>
+  <div id="status-line"></div>
+  <div id="messages-area"></div>
+  <input id="user-input" />
+  <button id="send-btn"></button>
+
+  <div id="status">Mjolnir test page — waiting for scenario...</div>
+
+  <!-- Audio observer (mock or real-wrap) is injected by the runner via
+       Playwright's add_init_script BEFORE this document loads. By the time
+       audio.js's module runs, window.Audio has been replaced/wrapped. -->
+
+  <!-- Bring the real audio.js (with its real imports) into the page. -->
+  <script type="module" src="/interfaces/web/static/audio.js"></script>
+
+  <!-- Expose event-bus dispatch + key audio.js helpers to the page context
+       so Playwright can drive scenarios via page.evaluate. -->
+  <script type="module">
+    import { dispatch } from '/interfaces/web/static/core/event-bus.js';
+    import * as audio from '/interfaces/web/static/audio.js';
+    window._busDispatch = dispatch;
+    window._audio = audio;
+    window._mjolnirReady = true;
+    document.getElementById('status').textContent = 'Mjolnir test page ready.';
+  </script>
+</body>
+</html>

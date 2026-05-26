@@ -276,6 +276,20 @@ export const playTextStreaming = async (text) => {
                     sawChunk = true;
                 } else if (data.type === 'tts_stream_end') {
                     endTtsStream(data);
+                } else if (data.type === 'notice') {
+                    // Dropped-chunks notice from the brain pump. Route
+                    // through the same 'chat_notice' bus event that chat-
+                    // streaming uses — chat.js already subscribes and
+                    // renders these as toasts. Without this branch, the
+                    // notice silently disappears and the user gets text +
+                    // no audio + no warning (the original no-audio class).
+                    // 2026-05-26 — closing the frontend half of the user
+                    // report. Brain emits the notice correctly; we just
+                    // weren't relaying it from the replay SSE path.
+                    dispatch('chat_notice', {
+                        message: data.message || '',
+                        severity: data.severity || 'warning',
+                    });
                 }
             }
         }
