@@ -341,17 +341,23 @@ const _disposeItem = (item) => {
     if (item.audio) {
         item.audio.onended = null;
         item.audio.onerror = null;
-        // Was `item.audio.src = ''` — that's a Chromium "new load request"
-        // that rejects pending play() promises on the SAME element with
-        // AbortError. On Brave/Linux (and certain Shields/PipeWire timing
-        // configurations) the prior chunk's play() promise can still be
-        // settling when _disposeItem runs synchronously from the next
-        // chunk's onended → _ttsStreamPlayNext → _ttsStreamCleanupCurrent
-        // chain — aborting every chunk and producing the no-audio symptom.
-        // Dropping `src = ''` here: nulling item.audio + GC handles the
-        // resource release; the blob URL revoke is already deferred 1s
-        // above, so the load slot can complete its current cycle cleanly.
-        // 2026-05-26 user-report scouting party finding.
+        // GATED ABORT: only stop the element if its play() has actually
+        // resolved (audio truly playing). Why:
+        //   - If play() resolved → audio is in the media stack and will keep
+        //     playing even after JS drops the reference (browsers hold media
+        //     alive while playing). We MUST stop it explicitly or the user
+        //     hears chunks stacking up (10× overlap on slower systems).
+        //   - If play() still pending → calling pause() or src='' would
+        //     reject the pending promise with AbortError, cascading the
+        //     no-audio bug on Brave/Linux + Shields/PipeWire timing jitter.
+        // The `_playStarted` flag is set in the .then() of play() below.
+        // GC handles never-started elements when their .catch eventually
+        // fires (or when they GC naturally if .catch is already detached).
+        // 2026-05-26 — fix for user report of overlapping chunk playback (10x stacking).
+        if (item.audio._playStarted) {
+            try { item.audio.pause(); } catch {}
+            item.audio.src = '';
+        }
         item.audio = null;
     }
 };
@@ -407,7 +413,18 @@ const _ttsStreamPlayNext = (gen) => {
         // Don't surface to user — keep draining queue
         _ttsStreamPlayNext(gen);
     };
-    _ttsStreamPlayer.play().catch(err => {
+    // Track when play() actually resolves (= audio truly playing) so
+    // _disposeItem can safely abort it later without rejecting a pending
+    // promise. Modern browsers always return a Promise from play(); the
+    // optional-chain guards the rare legacy case where it returns undefined.
+    // Single chained .then(onFulfilled).catch(onRejected) — keeps both
+    // resolution paths on one promise chain so a play() rejection doesn't
+    // produce an "Uncaught (in promise)" via the .then branch.
+    _ttsStreamPlayer.play()?.then(() => {
+        // item.audio may already be nulled (e.g. stop() ran before play
+        // settled); guard before flagging.
+        if (item.audio) item.audio._playStarted = true;
+    }).catch(err => {
         if (err?.message?.includes('autoplay')) {
             // Autoplay-blocked. Recoverable on next user gesture; stay quiet.
         } else if (err?.name === 'AbortError') {
