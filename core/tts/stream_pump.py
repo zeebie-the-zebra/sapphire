@@ -210,7 +210,11 @@ class StreamingTTSPump:
             seg_queue, done_evt, fut, meta = self.pending[0]
             chunk_idx = meta.get("index")
             deadline = time.monotonic() + _FLUSH_HARD_TIMEOUT_S
-            segments_for_this_chunk = 0
+            # Cumulative counter on meta — picks up any segments already
+            # emitted by _drain_ready for this same chunk during prior
+            # push() calls. Without this, flush_and_close would log only
+            # its own slice of the total. 2026-05-26.
+            meta.setdefault("segments_emitted", 0)
             while True:
                 if self._is_cancelled():
                     interrupted = True
@@ -235,7 +239,7 @@ class StreamingTTSPump:
                 event = self._build_chunk_event(segment, meta)
                 if event:
                     yield event
-                    segments_for_this_chunk += 1
+                    meta["segments_emitted"] += 1
                 # Fast-exit: if worker has finished AND queue is now empty,
                 # this chunk is fully drained. Avoids the wasted 100ms wait
                 # after the LAST segment of a fast synth.
@@ -252,17 +256,18 @@ class StreamingTTSPump:
                 event = self._build_chunk_event(segment, meta)
                 if event:
                     yield event
-                    segments_for_this_chunk += 1
+                    meta["segments_emitted"] += 1
             # If this chunk yielded zero playable segments, count it as
             # dropped (Kokoro 400 / network / decode failure all land here)
-            if segments_for_this_chunk == 0:
+            total = meta["segments_emitted"]
+            if total == 0:
                 self._dropped_chunks.append(chunk_idx)
                 logger.warning(
                     f"[TTS-STREAM] chunk {chunk_idx} dropped: zero playable segments emitted"
                 )
             else:
                 logger.info(
-                    f"[TTS-STREAM] chunk {chunk_idx} emitted {segments_for_this_chunk} segment(s)"
+                    f"[TTS-STREAM] chunk {chunk_idx} emitted {total} segment(s)"
                 )
             self.pending.popleft()
         # Cancel remaining workers on interrupt
@@ -482,7 +487,13 @@ class StreamingTTSPump:
         out: list = []
         while self.pending:
             seg_queue, done_evt, fut, meta = self.pending[0]
-            segments_emitted = 0
+            # Cumulative counter on meta — survives across push() calls.
+            # A chunk whose segments arrive split across multiple push()
+            # invocations would otherwise reset the count between calls
+            # and undercount (or, if all segments arrived in a PRIOR call
+            # and the worker finishes between calls, falsely account a
+            # successfully-emitted chunk as dropped). 2026-05-26.
+            meta.setdefault("segments_emitted", 0)
             # Drain any segments already in the queue
             while True:
                 try:
@@ -492,7 +503,7 @@ class StreamingTTSPump:
                 event = self._build_chunk_event(segment, meta)
                 if event:
                     out.append(event)
-                    segments_emitted += 1
+                    meta["segments_emitted"] += 1
             # Only advance to next chunk when this one is fully done
             if done_evt.is_set() and seg_queue.empty():
                 # Mirror flush_and_close drop accounting: a chunk that
@@ -501,14 +512,15 @@ class StreamingTTSPump:
                 # end-of-stream notice surfaces it. Was a `pass` no-op until
                 # 2026-05-20 — mid-stream drops were silently invisible.
                 idx = meta.get("index")
-                if segments_emitted == 0:
+                total = meta["segments_emitted"]
+                if total == 0:
                     self._dropped_chunks.append(idx)
                     logger.warning(
                         f"[TTS-STREAM] chunk {idx} dropped: zero playable segments emitted"
                     )
                 else:
                     logger.info(
-                        f"[TTS-STREAM] chunk {idx} emitted {segments_emitted} segment(s)"
+                        f"[TTS-STREAM] chunk {idx} emitted {total} segment(s)"
                     )
                 self.pending.popleft()
             else:
