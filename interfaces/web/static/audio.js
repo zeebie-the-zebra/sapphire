@@ -398,7 +398,16 @@ const _ttsStreamPlayNext = (gen) => {
         _ttsStreamPlayNext(gen);
     };
     _ttsStreamPlayer.play().catch(err => {
-        if (!err?.message?.includes('autoplay') && !err?.name?.includes('AbortError')) {
+        if (err?.message?.includes('autoplay')) {
+            // Autoplay-blocked. Recoverable on next user gesture; stay quiet.
+        } else if (err?.name === 'AbortError') {
+            // AbortError = play() interrupted by load/src change/removal.
+            // Was previously suppressed entirely — that masked the no-audio
+            // bug class for cases where every chunk's play() aborts. Surface
+            // as info (not warn — happens during legitimate stop/preempt too)
+            // so future repros are diagnosable from DevTools alone. 2026-05-26.
+            console.info('[TTS-STREAM] play() aborted for chunk', item.index, '—', err.message);
+        } else {
             console.warn('[TTS-STREAM] play() rejected:', err);
         }
         _ttsStreamPlayNext(gen);
@@ -433,7 +442,11 @@ export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, paus
         url = URL.createObjectURL(blob);
         audio = new Audio(url);
         audio.preload = 'auto';   // hint browser to start decoding immediately
-        try { audio.load(); } catch {}  // no-arg load(): browser begins fetching/decoding
+        // `new Audio(url)` already starts loading; explicit `.load()` after
+        // construction can be interpreted by Chromium (incl. Brave) as a
+        // load-restart, leaving subsequent .play() in a state that rejects
+        // with "AbortError: interrupted by new load request" in some
+        // environments. Dropped 2026-05-26 user-report scouting party.
     } catch (e) {
         console.warn('[TTS-STREAM] chunk decode failed, skipping', { index, err: e?.message });
         if (url) { try { URL.revokeObjectURL(url); } catch {} }
