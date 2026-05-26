@@ -11,11 +11,17 @@ import pytest
 from core.tts.streaming import SpeechChunker, chunkify_for_speech, PAUSE_AFTER_MS
 
 
-def _collect(tokens, min_chars=3, **kw):
+def _collect(tokens, min_chars=3, split_mode="sentence", **kw):
     """Run chunkify and collect into a list. Default min_chars=3 here so
     short test strings actually exercise split logic — production default
-    is 15 (which is verified separately in min-char guard tests)."""
-    return list(chunkify_for_speech(iter(tokens), min_chars=min_chars, **kw))
+    is 15 (verified separately in min-char guard tests).
+
+    Defaults to split_mode='sentence' because the tests in this file
+    target the chunker's sentence-detection logic (Dr./3:45/ellipsis/etc.).
+    Production default is 'paragraph' via TTS_STREAMING_SPLIT_MODE setting;
+    paragraph-mode behavior is covered separately in stream_pump tests."""
+    return list(chunkify_for_speech(iter(tokens), min_chars=min_chars,
+                                    split_mode=split_mode, **kw))
 
 
 # ─── Sentence detection — basic cases ─────────────────────────────────────────
@@ -336,8 +342,9 @@ def test_chunk_shape():
 # ─── SpeechChunker push/flush API (used by chat_streaming for live LLM) ──────
 
 def test_chunker_push_then_flush():
-    """Push-based API: same chunks as the generator function."""
-    chunker = SpeechChunker(min_chars=3)
+    """Push-based API: same chunks as the generator function. Sentence mode
+    because we're testing sentence-boundary splitting specifically."""
+    chunker = SpeechChunker(min_chars=3, split_mode="sentence")
     out = []
     for tok in ["Hello", " there", ". Next", " up."]:
         out.extend(chunker.push(tok))
@@ -348,8 +355,8 @@ def test_chunker_push_then_flush():
 def test_chunker_yields_during_push_not_just_flush():
     """When a sentence boundary fully resolves mid-stream (i.e. the next
     capital arrives so the lookahead succeeds), push() returns the chunk
-    immediately rather than waiting for flush()."""
-    chunker = SpeechChunker(min_chars=3)
+    immediately rather than waiting for flush(). Sentence mode."""
+    chunker = SpeechChunker(min_chars=3, split_mode="sentence")
     out_during = []
     out_during.extend(chunker.push("Hello there. "))  # lookahead missing
     out_during.extend(chunker.push("More text here."))  # 'M' satisfies lookahead

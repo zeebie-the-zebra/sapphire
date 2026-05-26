@@ -197,7 +197,13 @@ def test_tts_chunk_text_hook_can_mutate(enable_streaming, fresh_hooks):
     assert any(call[0].startswith("HELLO") for call in fp.calls), fp.calls
 
 
-def test_tts_chunk_text_skip_drops_chunk(enable_streaming, fresh_hooks):
+def test_tts_chunk_text_skip_drops_chunk(enable_streaming, fresh_hooks, monkeypatch):
+    """Per-chunk selective skip via tts_chunk_text hook. Requires multiple
+    distinct pump-chunks, which the paragraph-mode default collapses into
+    one. Force sentence mode so each `pump.push("Foo. ")` yields its own
+    chunk and we can selectively skip chunk 0."""
+    import config
+    monkeypatch.setattr(config, "TTS_STREAMING_SPLIT_MODE", "sentence", raising=False)
     fp = _FakeProvider()
     def drop_first(ev):
         if ev.metadata.get("chunk_index") == 0:
@@ -487,7 +493,7 @@ class _StreamingFakeProvider:
             yield self.segment_bytes + bytes([i])
 
 
-def test_streaming_provider_emits_one_event_per_segment(enable_streaming):
+def test_streaming_provider_emits_one_event_per_segment(enable_streaming, monkeypatch):
     """When provider.supports_streaming=True, the pump should emit one
     tts_chunk SSE event per yielded segment — that's the M2 latency win
     we wired up 2026-05-18 (herring #7). Before this wiring, all segments
@@ -495,7 +501,12 @@ def test_streaming_provider_emits_one_event_per_segment(enable_streaming):
 
     Note: push() can emit segments inline (when worker finished by the
     time the next push runs) — test collects events from ALL three
-    method calls so we don't miss inline drains."""
+    method calls so we don't miss inline drains.
+
+    Forces sentence mode so each `pump.push("Foo. ")` becomes its own
+    chunk (paragraph mode collapses them all into one)."""
+    import config
+    monkeypatch.setattr(config, "TTS_STREAMING_SPLIT_MODE", "sentence", raising=False)
     fp = _StreamingFakeProvider(segments_per_chunk=4)
     pump = StreamingTTSPump(system=_make_system(provider=fp))
     out = []
@@ -512,10 +523,15 @@ def test_streaming_provider_emits_one_event_per_segment(enable_streaming):
     assert len(fp.calls) == 2  # one generate_stream call per pump-chunk
 
 
-def test_streaming_provider_preserves_order_with_concurrent_workers(enable_streaming):
+def test_streaming_provider_preserves_order_with_concurrent_workers(enable_streaming, monkeypatch):
     """With 2 executor workers, the FIRST pump-chunk's segments must emit
     before the SECOND pump-chunk's even if the second's worker finishes
-    first (faster synth). Order is preserved at the deque level."""
+    first (faster synth). Order is preserved at the deque level.
+
+    Forces sentence mode so two push() calls produce two separate chunks
+    that the executor can race in parallel."""
+    import config
+    monkeypatch.setattr(config, "TTS_STREAMING_SPLIT_MODE", "sentence", raising=False)
     import time as _time
 
     class _OrderedProvider:
@@ -570,3 +586,275 @@ def test_skip_tts_at_stream_start_fires_end_hook_for_plugin_cleanup(enable_strea
     assert ends[0]["interrupted"] is True
     assert ends[0]["chunk_count"] == 0
     assert starts[0]["stream_id"] == ends[0]["stream_id"]
+
+
+# ─── Meta-dict cumulative counter (cross-push regression) ─────────────────────
+# Fix: segments_emitted moved from local var in _drain_ready / flush_and_close
+# to meta dict (persists across push() invocations). Before the fix, a chunk
+# whose segment was drained in push N and whose worker finished between N and
+# N+1 would be falsely accounted as dropped because the local counter reset
+# between calls. Notice would fire saying chunks were lost when none were.
+
+def test_meta_segments_emitted_persists_across_drain_calls(enable_streaming):
+    """Drain chunk 0's segment in push #1 while worker still pending.
+    Between pushes, worker finishes. Push #2 must not flag chunk 0 as
+    dropped just because its local segments_emitted is 0 on this call.
+
+    Uses Event-based synchronization on both yield-completed and continue
+    signals so the test doesn't depend on timing."""
+    import threading
+
+    yielded = threading.Event()
+    continue_ = threading.Event()
+
+    class _ControlledProvider:
+        audio_content_type = "audio/ogg"
+        supports_streaming = True
+        def generate(self, *a, **kw):
+            raise AssertionError("streaming path expected")
+        def generate_stream(self, text, voice, speed):
+            yield b"OGGS_FIRST_SEG"
+            # Once consumer pulls the first segment + asks for next, we know
+            # the segment is in the queue. Signal here, then block until
+            # test releases us.
+            yielded.set()
+            continue_.wait(timeout=2.0)
+
+    pump = StreamingTTSPump(system=_make_system(provider=_ControlledProvider()))
+    # Push submits chunk AND runs its own _drain_ready internally — depending
+    # on worker scheduling, the segment may be drained by push itself or by
+    # our follow-up call. Test the END-STATE invariant: total drained = 1
+    # AND meta["segments_emitted"] reflects it cumulatively.
+    out_push = pump.push("This is a long enough chunk to emit.\n\n")
+
+    # Synchronize on worker yield (segment is either in queue or already drained)
+    assert yielded.wait(timeout=2.0), "worker never yielded segment"
+
+    # Second drain — catches anything push didn't already get
+    out_extra = pump._drain_ready()
+
+    # Combined: exactly one tts_chunk event emitted across both drain points
+    total_chunks = sum(1 for e in (out_push + out_extra) if e.get("type") == "tts_chunk")
+    assert total_chunks == 1, f"expected 1 segment drained total, got {total_chunks}"
+
+    # CRITICAL: meta dict carries cumulative count regardless of which
+    # _drain_ready call captured the segment. Pre-fix this would reset.
+    assert len(pump.pending) == 1
+    assert pump.pending[0][3]["segments_emitted"] == 1, \
+        f"meta counter not persisting cumulative count: {pump.pending[0][3]}"
+
+    # Release worker, wait for completion
+    continue_.set()
+    pump.pending[0][2].result(timeout=2.0)
+
+    # Final flush: meta count is 1; flush must NOT mark chunk dropped.
+    # Pre-fix: flush's local counter started at 0, saw queue empty + done,
+    # falsely accounted as dropped → notice fires.
+    out_final = list(pump.flush_and_close())
+    notices = [e for e in out_final if e.get("type") == "notice"]
+    assert notices == [], f"false drop notice (was the pre-fix bug): {notices}"
+    assert pump._dropped_chunks == [], f"false drop accounting: {pump._dropped_chunks}"
+
+
+# ─── Drop notice wording (UX regression) ──────────────────────────────────────
+# 2026-05-26: previous wording was "{N} TTS chunk(s) lost — speech may have
+# gaps. Check Kokoro server health." That blamed the server for what was
+# usually unsupported-text (CJK, emoji). New wording leads with the common
+# cause, ends with reassurance, and handles singular/plural properly.
+
+class _NoAudioStreamingProvider:
+    """Yields nothing — simulates Kokoro 400 on text it can't synthesize
+    (CJK, emoji-only, etc.)."""
+    audio_content_type = "audio/ogg"
+    supports_streaming = True
+    def generate(self, *a, **kw):
+        raise AssertionError("streaming path expected")
+    def generate_stream(self, text, voice, speed):
+        return
+        yield  # unreachable but makes this a generator
+
+
+def test_drop_notice_uses_voice_cant_render_framing(enable_streaming):
+    """Notice should reflect 'voice doesn't support these characters' not
+    'check server health'. Most common real cause is content, not server."""
+    pump = StreamingTTSPump(system=_make_system(provider=_NoAudioStreamingProvider()))
+    pump.push("Hello world.")
+    out = list(pump.flush_and_close())
+    notices = [e for e in out if e.get("type") == "notice"]
+    assert len(notices) == 1, f"expected one drop notice, got {notices}"
+    msg = notices[0]["message"]
+    # New phrasing
+    assert "couldn't be voiced" in msg, f"missing new framing: {msg}"
+    assert "Text is unaffected" in msg, f"missing reassurance: {msg}"
+    # Old alarming wording removed
+    assert "Check Kokoro server health" not in msg, f"old wording still present: {msg}"
+    assert "lost" not in msg, f"old 'lost' framing still present: {msg}"
+
+
+def test_drop_notice_singular_for_one_dropped(enable_streaming):
+    """1 → 'chunk' (singular), no 's'."""
+    pump = StreamingTTSPump(system=_make_system(provider=_NoAudioStreamingProvider()))
+    pump.push("Hello world.")
+    out = list(pump.flush_and_close())
+    notices = [e for e in out if e.get("type") == "notice"]
+    assert len(notices) == 1
+    msg = notices[0]["message"]
+    assert "1 TTS chunk " in msg, f"singular form wrong: {msg!r}"
+    assert "1 TTS chunks " not in msg, f"plural leaked in for n=1: {msg!r}"
+
+
+def test_drop_notice_plural_for_multiple_dropped(enable_streaming):
+    """2+ → 'chunks' (plural)."""
+    pump = StreamingTTSPump(system=_make_system(provider=_NoAudioStreamingProvider()))
+    # Two paragraphs → two pump-chunks, both drop
+    pump.push("Hello there.\n\nMore text here.")
+    out = list(pump.flush_and_close())
+    notices = [e for e in out if e.get("type") == "notice"]
+    assert len(notices) == 1
+    msg = notices[0]["message"]
+    assert "2 TTS chunks " in msg, f"plural form wrong: {msg!r}"
+
+
+# ─── New diagnostic log lines (visibility regression) ─────────────────────────
+# 2026-05-26: added synth-done, emitted, dropped, and end-of-stream-summary
+# log lines to close the diagnostic blind spot from the no-audio user report.
+# These let future debug sessions see exactly what happened per chunk.
+
+def test_new_diagnostic_log_lines_fire(enable_streaming, caplog):
+    """The four new [TTS-STREAM] line classes must all appear for a
+    normal multi-chunk stream: synth done, emitted, end-of-stream summary."""
+    caplog.set_level("INFO", logger="core.tts.stream_pump")
+    fp = _FakeProvider(audio_bytes=b"FAKE_OGG")
+    pump = StreamingTTSPump(system=_make_system(provider=fp))
+    pump.push("Hello there.\n\nMore text here.")
+    list(pump.flush_and_close())
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("synth done:" in m and "segments" in m for m in msgs), \
+        f"missing 'synth done' log: {msgs}"
+    assert any("emitted" in m and "segment" in m for m in msgs), \
+        f"missing 'emitted' log: {msgs}"
+    assert any("done:" in m and "chunks emitted" in m and "interrupted=False" in m
+               for m in msgs), f"missing end-of-stream summary: {msgs}"
+
+
+def test_zero_segments_logs_dropped_warning(enable_streaming, caplog):
+    """When kokoro returns zero segments, a WARNING-level 'chunk N dropped:
+    zero playable segments emitted' line must fire — not silent absence."""
+    caplog.set_level("INFO", logger="core.tts.stream_pump")
+    pump = StreamingTTSPump(system=_make_system(provider=_NoAudioStreamingProvider()))
+    pump.push("Hello world.")
+    list(pump.flush_and_close())
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("synth done: 0 segments" in m for m in msgs), \
+        f"missing zero-segments synth done: {msgs}"
+    assert any("dropped: zero playable segments" in m for m in msgs), \
+        f"missing dropped warning: {msgs}"
+
+
+# ─── Bonus edge cases — low-hanging fruit coverage ────────────────────────────
+
+def test_emoji_only_chunk_skipped_before_synth(enable_streaming, caplog):
+    """A chunk with no speakable characters (emoji-only) is skipped by the
+    `_HAS_SPEECH_RE` filter in _submit — never reaches Kokoro. This is the
+    pre-submit guard; distinct from the drop accounting path."""
+    caplog.set_level("INFO", logger="core.tts.stream_pump")
+    fp = _FakeProvider()
+    pump = StreamingTTSPump(system=_make_system(provider=fp))
+    # Emoji-only paragraph; Unicode-aware regex matches \w in any script,
+    # so we need genuinely punctuation/symbol-only content.
+    pump.push("😀 🎉 ✨ 🌊 🔥 🎵 ⭐ 🚀.\n\n")
+    out = list(pump.flush_and_close())
+    msgs = [r.getMessage() for r in caplog.records]
+    # The "no speakable chars" filter logged it
+    assert any("no speakable chars" in m for m in msgs), \
+        f"emoji chunk should hit pre-submit speakable filter: {msgs}"
+    # Provider was NOT called — the chunk got filtered before submit
+    assert fp.calls == [], f"provider called despite filter: {fp.calls}"
+
+
+def test_cjk_chunk_passes_filter_then_dropped_by_provider(enable_streaming):
+    """CJK (kokoro_means_heart_in_japanese) passes `_HAS_SPEECH_RE` (Unicode
+    letter chars match \\w) but Kokoro returns no audio — the chunk lands
+    in _dropped_chunks and the notice fires with the new friendly wording.
+
+    This is the exact scenario from the user report where Sapphire emitted
+    the 心 character and got an alarming 'Check Kokoro server health' toast."""
+    pump = StreamingTTSPump(system=_make_system(provider=_NoAudioStreamingProvider()))
+    # CJK text long enough to satisfy min_chars=15
+    pump.push("心 心 心 心 心 心 心 心.\n\n")
+    out = list(pump.flush_and_close())
+    notices = [e for e in out if e.get("type") == "notice"]
+    assert len(notices) == 1, f"expected drop notice for CJK: {notices}"
+    msg = notices[0]["message"]
+    assert "couldn't be voiced" in msg
+    assert "Text is unaffected" in msg
+
+
+def test_maxlen_boundary_triggers_for_long_text(enable_streaming, monkeypatch):
+    """When text exceeds max_chars without a natural boundary, chunker
+    force-splits at the last whitespace inside the window. No trailing
+    paragraph break in this test (that would short-circuit to a single
+    paragraph chunk before maxlen logic runs)."""
+    import config
+    # Lower max_chars so we don't need to push 200+ chars of text
+    monkeypatch.setattr(config, "TTS_STREAMING_MAX_CHARS", 50, raising=False)
+    monkeypatch.setattr(config, "TTS_STREAMING_MIN_CHARS", 15, raising=False)
+    fp = _FakeProvider()
+    pump = StreamingTTSPump(system=_make_system(provider=fp))
+    # Long run of words, no \n\n — chunker hits maxlen before any natural break
+    long_text = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima."
+    pump.push(long_text)
+    list(pump.flush_and_close())
+    # Provider should have been called at least twice (maxlen split + final flush)
+    assert len(fp.calls) >= 2, f"expected maxlen split, got {len(fp.calls)} calls: {fp.calls}"
+    # At least one call should have a "maxlen"-shaped chunk (no trailing punctuation)
+    chunk_texts = [c[0] for c in fp.calls]
+    assert any(not t.endswith(".") for t in chunk_texts), \
+        f"no mid-split chunk found: {chunk_texts}"
+
+
+def test_interrupted_stream_does_not_emit_drop_notice(enable_streaming):
+    """When the user cancels (interrupted=True), drop notices are suppressed
+    even if some chunks were in flight — they were intentionally killed,
+    not lost. Prevents misleading 'chunks couldn't be voiced' warning on Stop."""
+    cancelled = {"flag": False}
+    fp = _NoAudioStreamingProvider()
+    pump = StreamingTTSPump(
+        system=_make_system(provider=fp),
+        cancel_check=lambda: cancelled["flag"],
+    )
+    pump.push("Hello there.\n\nMore text here.")
+    cancelled["flag"] = True  # user pressed Stop
+    out = list(pump.flush_and_close())
+    notices = [e for e in out if e.get("type") == "notice"]
+    assert notices == [], f"drop notice fired on user cancel: {notices}"
+    # Should still see the end event with interrupted=True
+    ends = [e for e in out if e.get("type") == "tts_stream_end"]
+    assert ends and ends[0]["interrupted"] is True
+
+
+def test_multiple_drops_aggregate_into_one_notice(enable_streaming):
+    """N dropped chunks produce exactly ONE notice SSE event with count=N,
+    not N separate notices. Prevents toast spam on a flaky run."""
+    pump = StreamingTTSPump(system=_make_system(provider=_NoAudioStreamingProvider()))
+    # Three paragraphs → 3 chunks, all drop (provider yields nothing)
+    pump.push("First paragraph.\n\nSecond paragraph.\n\nThird paragraph here.")
+    out = list(pump.flush_and_close())
+    notices = [e for e in out if e.get("type") == "notice"]
+    assert len(notices) == 1, f"expected ONE aggregated notice, got {len(notices)}: {notices}"
+    assert "3 TTS chunks " in notices[0]["message"], \
+        f"count not aggregated correctly: {notices[0]['message']!r}"
+
+
+def test_end_of_stream_summary_log_includes_dropped_count(enable_streaming, caplog):
+    """The end-of-stream summary log line must include the dropped count
+    so future diagnostics can see partial-failure runs at a glance."""
+    caplog.set_level("INFO", logger="core.tts.stream_pump")
+    pump = StreamingTTSPump(system=_make_system(provider=_NoAudioStreamingProvider()))
+    pump.push("Hello there.\n\nMore text here.")
+    list(pump.flush_and_close())
+    msgs = [r.getMessage() for r in caplog.records]
+    end_summary = [m for m in msgs if "done:" in m and "chunks emitted" in m]
+    assert end_summary, f"missing end-of-stream summary: {msgs}"
+    assert "2 dropped" in end_summary[0], \
+        f"end summary doesn't include drop count: {end_summary[0]!r}"

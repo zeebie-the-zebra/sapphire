@@ -32,13 +32,19 @@ import pytest
 
 def _make_provider(base_url, model):
     """Construct an OpenAICompatProvider with the bare minimum config so
-    we can probe its detection helpers without hitting the network."""
+    we can probe its detection helpers without hitting the network.
+
+    Bypasses __init__ to skip the OpenAI client setup, then restores the
+    instance attributes that downstream code relies on. The empty `config`
+    dict is critical — _sanitize_messages reads `self.config.get(...)`
+    and would AttributeError without it."""
     from core.chat.llm_providers.openai_compat import OpenAICompatProvider
 
     with patch.object(OpenAICompatProvider, '__init__', lambda self, *a, **kw: None):
         p = OpenAICompatProvider()
     p.base_url = base_url
     p.model = model
+    p.config = {}  # required by _sanitize_messages → self.config.get(...)
     return p
 
 

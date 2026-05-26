@@ -324,9 +324,16 @@ def _apply_stage_prosody(text: str, style: str) -> str:
     # Strip any stray stars left over (unclosed mid-stream, double-wrapped, etc.)
     text = re.sub(r"\*+", "", text)
     # Collapse the comma/period doubling that substitution can produce
-    # (e.g. ", , " or ". . ") into a single marker.
-    text = re.sub(r"(,\s*){2,}", ", ", text)
-    text = re.sub(r"(\.\s*){2,}", ". ", text)
+    # (e.g. ", , " or ". . ") into a single marker. REQUIRE whitespace
+    # between repeated markers — otherwise this nukes ellipsis ("...")
+    # and run-on punctuation like "!!" that should be preserved. The
+    # substitution-induced doublings always have a space between them
+    # (stage markers are ", " or ". " with trailing space), so requiring
+    # \s+ between consecutive markers is safe.
+    # 2026-05-26 — fix for ellipsis being silently collapsed to "." which
+    # broke ellipsis-boundary detection in _find_split.
+    text = re.sub(r"(,\s+){2,}", ", ", text)
+    text = re.sub(r"(\.\s+){2,}", ". ", text)
     return text
 
 
