@@ -130,8 +130,16 @@ export const handleSend = async (input, btn, setProc, audioFn, refreshFn, abortC
                     await ui.finishStreaming();
                     // Note: finishStreaming already syncs with history - no refresh needed
 
+                    // Capture sawChunk NOW. `_ttsStreamSawChunk` is reset
+                    // when a NEW tts_stream_start arrives (audio.js startTtsStream),
+                    // so if the user clicks Replay or sends another message
+                    // within the 200ms window, fire-time check would falsely
+                    // see "no chunks for this turn" and fire the legacy
+                    // audioFn(prose) which calls stop(true) — killing the
+                    // newly-started stream. 2026-05-26 scout #2 secondary find.
+                    const sawChunks = audio.ttsStreamSawChunk();
                     setTimeout(() => {
-                        if (audio.ttsStreamSawChunk()) return;  // streaming TTS already played it
+                        if (sawChunks) return;  // streaming TTS already played it
                         if (audioFn) {
                             const el = document.querySelector('.message.assistant:last-child .message-content');
                             if (el) {
@@ -282,8 +290,16 @@ export const handleRegen = async (idx, setProc, audioFn, refreshFn, abortControl
                     await ui.finishStreaming();
                     // Note: finishStreaming already syncs with history - no refresh needed
 
+                    // Capture sawChunk NOW. `_ttsStreamSawChunk` is reset
+                    // when a NEW tts_stream_start arrives (audio.js startTtsStream),
+                    // so if the user clicks Replay or sends another message
+                    // within the 200ms window, fire-time check would falsely
+                    // see "no chunks for this turn" and fire the legacy
+                    // audioFn(prose) which calls stop(true) — killing the
+                    // newly-started stream. 2026-05-26 scout #2 secondary find.
+                    const sawChunks = audio.ttsStreamSawChunk();
                     setTimeout(() => {
-                        if (audio.ttsStreamSawChunk()) return;  // streaming TTS already played it
+                        if (sawChunks) return;  // streaming TTS already played it
                         if (audioFn) {
                             const el = document.querySelector('.message.assistant:last-child .message-content');
                             if (el) {
@@ -512,8 +528,16 @@ export const handleContinue = async (idx, setProc, audioFn, refreshFn, abortCont
                     await ui.finishStreaming();
                     // Note: finishStreaming already syncs with history - no refresh needed
 
+                    // Capture sawChunk NOW. `_ttsStreamSawChunk` is reset
+                    // when a NEW tts_stream_start arrives (audio.js startTtsStream),
+                    // so if the user clicks Replay or sends another message
+                    // within the 200ms window, fire-time check would falsely
+                    // see "no chunks for this turn" and fire the legacy
+                    // audioFn(prose) which calls stop(true) — killing the
+                    // newly-started stream. 2026-05-26 scout #2 secondary find.
+                    const sawChunks = audio.ttsStreamSawChunk();
                     setTimeout(() => {
-                        if (audio.ttsStreamSawChunk()) return;  // streaming TTS already played it
+                        if (sawChunks) return;  // streaming TTS already played it
                         if (audioFn) {
                             const el = document.querySelector('.message.assistant:last-child .message-content');
                             if (el) {

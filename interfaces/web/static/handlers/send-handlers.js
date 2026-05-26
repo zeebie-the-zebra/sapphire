@@ -105,8 +105,16 @@ export async function handleSend() {
                     // If brain-side streaming TTS already started during the
                     // stream, skip the legacy whole-blob fetch — chunks are
                     // already playing.
+                    // Capture sawChunk NOW. `_ttsStreamSawChunk` is reset
+                    // when a NEW tts_stream_start arrives (audio.js startTtsStream),
+                    // so if the user clicks Replay or sends another message
+                    // within the 200ms window, fire-time check would falsely
+                    // see "no chunks for this turn" and fire the legacy
+                    // audioFn(prose) which calls stop(true) — killing the
+                    // newly-started stream. 2026-05-26 scout #2 secondary find.
+                    const sawChunks = audio.ttsStreamSawChunk();
                     setTimeout(() => {
-                        if (audio.ttsStreamSawChunk()) return;
+                        if (sawChunks) return;
                         if (audioFn) {
                             const el = document.querySelector('.message.assistant:last-child .message-content');
                             if (el) {

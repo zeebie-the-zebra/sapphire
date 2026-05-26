@@ -341,7 +341,17 @@ const _disposeItem = (item) => {
     if (item.audio) {
         item.audio.onended = null;
         item.audio.onerror = null;
-        item.audio.src = '';
+        // Was `item.audio.src = ''` — that's a Chromium "new load request"
+        // that rejects pending play() promises on the SAME element with
+        // AbortError. On Brave/Linux (and certain Shields/PipeWire timing
+        // configurations) the prior chunk's play() promise can still be
+        // settling when _disposeItem runs synchronously from the next
+        // chunk's onended → _ttsStreamPlayNext → _ttsStreamCleanupCurrent
+        // chain — aborting every chunk and producing the no-audio symptom.
+        // Dropping `src = ''` here: nulling item.audio + GC handles the
+        // resource release; the blob URL revoke is already deferred 1s
+        // above, so the load slot can complete its current cycle cleanly.
+        // 2026-05-26 user-report scouting party finding.
         item.audio = null;
     }
 };
