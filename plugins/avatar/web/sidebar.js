@@ -38,27 +38,34 @@ const FALLBACK_IDLE_POOL = [
 const FALLBACK_CAMERA = { x: 0, y: 1.3, z: 4.4 };
 const FALLBACK_TARGET = { x: 0, y: 1.1, z: 0 };
 
-// Flat event → state-name map. The rail system being built next will split
-// this into AI-initiated vs user-initiated rails; for now every event just
-// crossfades to its mapped state and the existing oneshot machinery returns
-// to idle when a transient clip finishes. Error events (LLM/TTS/STT) now
-// route to toasts instead of the avatar — dropped from this map intentionally.
-const TRANSITIONS = {
+// Event → state-name map, split by which rail the event writes.
+//   `null` value means "clear that rail" (the picker then falls to whatever's
+//   below it, e.g. rail 5 variety / rail 6 base). This replaces the old
+//   force-to-'idle' transitions which had to compete with priorities.
+// AI-initiated events express Sapph's internal state — they DO NOT trigger
+// wind-down on rail 2 (her loop is undisturbed while her brain ticks).
+const AI_TRANSITIONS = {
+    [eventBus.Events.AI_TYPING_START]:           'typing',
+    [eventBus.Events.AI_TYPING_END]:             'happy',
+    [eventBus.Events.TTS_PLAYING]:               'speaking',
+    [eventBus.Events.TTS_STOPPED]:               null,
+    [eventBus.Events.TOOL_EXECUTING]:            'toolcall',
+    [eventBus.Events.TOOL_COMPLETE]:             'typing',
+    [eventBus.Events.AGENT_SPAWNED]:             'agent',
+    [eventBus.Events.AGENT_COMPLETED]:           'happy',
+    [eventBus.Events.AGENT_DISMISSED]:           null,
+    [eventBus.Events.CONTINUITY_TASK_STARTING]:  'cron',
+    [eventBus.Events.CONTINUITY_TASK_COMPLETE]:  null,
+};
+// User-initiated events express a human reaching for her — they DO request
+// wind-down on rail 2 (her loop ends gracefully at its next iteration so she
+// can acknowledge the user). Pass 2 wires the wind-down mechanic; Pass 1
+// just keeps the events writing rail 4.
+const USER_TRANSITIONS = {
     [eventBus.Events.STT_RECORDING_START]:  'listening',
     [eventBus.Events.STT_RECORDING_END]:    'processing',
     [eventBus.Events.STT_PROCESSING]:       'processing',
-    [eventBus.Events.AI_TYPING_START]:      'typing',
-    [eventBus.Events.AI_TYPING_END]:        'happy',
-    [eventBus.Events.TTS_PLAYING]:          'speaking',
-    [eventBus.Events.TTS_STOPPED]:          'idle',
-    [eventBus.Events.TOOL_EXECUTING]:       'toolcall',
-    [eventBus.Events.TOOL_COMPLETE]:        'typing',
     [eventBus.Events.WAKEWORD_DETECTED]:    'wakeword',
-    [eventBus.Events.AGENT_SPAWNED]:        'agent',
-    [eventBus.Events.AGENT_COMPLETED]:      'happy',
-    [eventBus.Events.AGENT_DISMISSED]:      'idle',
-    [eventBus.Events.CONTINUITY_TASK_STARTING]: 'cron',
-    [eventBus.Events.CONTINUITY_TASK_COMPLETE]: 'idle',
     [eventBus.Events.USER_TYPING]:          'user_typing',
     [eventBus.Events.USER_SENT]:            'reading',
 };
@@ -542,10 +549,28 @@ export async function init(container) {
     const loader = new GLTFLoader();
     let mixer, actions = {}, currentAction = null;
 
-    // State vars must exist before the greeting flow inside the try-block
-    // calls setState('idle'). Function declarations hoist; `let` doesn't.
+    // Rails system. Six slots, top wins. Each writer sets its slot and calls
+    // applyWinningRail() which crossfades to whatever wins. No priority math,
+    // no time-locks — rail ownership replaces both.
+    //
+    //   1 Sapph oneshot — `<<avatar: rumba>>` tags. Pass 1: every Sapph tag
+    //                     lands here as oneshot. Pass 2 splits in loop/once.
+    //   2 Sapph loop    — wired in Pass 2; stays inactive for now.
+    //   3 AI-init SSE   — typing/speaking/toolcall/agent/cron etc.
+    //   4 User-init SSE — listening/user_typing/wakeword/reading etc.
+    //   5 Idle variety  — weighted pick from idle_pool, plays while base wins.
+    //   6 Base state    — always-on background. Pass 3 makes it configurable.
+    //
+    // Must exist before the greeting flow (inside the model-load try-block).
     let idleTimer = null;
-    let current = greetingTrack ? 'wave' : 'idle';
+    const rails = {
+        1: { active: false, track: null, mode: 'oneshot' },
+        2: { active: false, track: null, mode: 'loop', windDownRequested: false },
+        3: { active: false, track: null, mode: 'loop' },
+        4: { active: false, track: null, mode: 'loop' },
+        5: { active: false, track: null, mode: 'oneshot' },
+        6: { active: false, track: null, mode: 'loop' },
+    };
 
     try {
         const gltf = await new Promise((resolve, reject) => {
@@ -592,23 +617,34 @@ export async function init(container) {
             actions[clip.name] = action;
         }
 
-        // Start with greeting track, then idle. Go through setState('idle')
-        // after the greeting so the variety picker actually arms — going
-        // through crossfadeTo directly skipped scheduleIdleVariant and the
-        // pool wouldn't start cycling until the first SSE event landed.
-        const greetAction = greetingTrack ? actions[greetingTrack] : null;
-        if (greetAction) {
-            greetAction.setLoop(THREE.LoopOnce);
-            greetAction.play();
-            currentAction = greetAction;
-            mixer.addEventListener('finished', function onGreetDone(e) {
-                if (e.action === greetAction) {
-                    mixer.removeEventListener('finished', onGreetDone);
-                    setState('idle');
+        // Rail 6 (base state) — always-active background. Pass 3 will make
+        // this configurable; for now it's the legacy 'idle' track.
+        rails[6].active = true;
+        rails[6].track = trackMap.idle || 'idle';
+
+        // Unified mixer 'finished' listener. Replaces the per-action listeners
+        // that crossfadeTo + avatar_animate used to attach individually. When
+        // any clip finishes, identify the oneshot rail that owns it, clear
+        // the slot, re-apply the picker.
+        mixer.addEventListener('finished', (e) => {
+            const clipName = e.action.getClip().name;
+            for (let i = 1; i <= 6; i++) {
+                if (rails[i].active && rails[i].track === clipName && rails[i].mode === 'oneshot') {
+                    rails[i].active = false;
+                    rails[i].track = null;
+                    applyWinningRail();
+                    return;
                 }
-            });
+            }
+        });
+
+        // Greeting → rail 1 as oneshot. When its clip ends, the listener
+        // above clears rail 1, picker falls to rail 6 (base), variety arms
+        // naturally. No greeting? Just apply the picker — rail 6 wins.
+        if (greetingTrack && actions[greetingTrack]) {
+            writeSapphRail(greetingTrack);
         } else {
-            setState('idle');
+            applyWinningRail();
         }
 
         // Enable avatar shadow casting for environment
@@ -664,92 +700,132 @@ export async function init(container) {
         return;
     }
 
-    // --- Animation crossfade ---
-    function crossfadeTo(stateName) {
-        const trackName = trackMap[stateName] || stateName;  // allow raw track names for idle variety
+    // --- Animation crossfade (renderer primitive) ---
+    // Pure three.js execution layer — takes a track name + loop bool, plays
+    // it. The rail layer above decides what to play; this just blends.
+    function crossfadeTo(trackName, isOneshot) {
         const action = actions[trackName];
-        if (!action || currentAction === action) return;
-
+        if (!action) return;
+        const desiredLoop = isOneshot ? THREE.LoopOnce : THREE.LoopRepeat;
+        if (currentAction === action) {
+            // Same track — sync loop mode if it changed (e.g. rail 5 picked
+            // the same track rail 6 was already playing but with oneshot).
+            if (action.loop !== desiredLoop) {
+                action.setLoop(desiredLoop);
+                if (isOneshot) action.reset();
+            }
+            return;
+        }
         action.reset();
-        action.setLoop(ONESHOT_TRACKS.has(trackName) ? THREE.LoopOnce : THREE.LoopRepeat);
+        action.setLoop(desiredLoop);
         action.clampWhenFinished = true;
-
         if (currentAction) {
             action.crossFadeFrom(currentAction, CROSSFADE_MS / 1000, true);
         }
         action.play();
         currentAction = action;
+    }
 
-        // Oneshot tracks return to idle when the clip finishes. setState('idle')
-        // re-arms the variety scheduler so the picker keeps cycling.
-        if (ONESHOT_TRACKS.has(trackName)) {
-            mixer.addEventListener('finished', function onDone(e) {
-                if (e.action !== action) return;
-                mixer.removeEventListener('finished', onDone);
-                if (currentAction === action) setState('idle');
-            });
+    // --- Rail picker ---
+    function winningRail() {
+        for (let i = 1; i <= 6; i++) if (rails[i].active) return i;
+        return null;
+    }
+
+    function applyWinningRail() {
+        const id = winningRail();
+        if (id == null) return;
+        const slot = rails[id];
+        if (statusEl) statusEl.textContent = (id === 6) ? '' : (slot.track || '');
+        crossfadeTo(slot.track, slot.mode === 'oneshot');
+        // Falling into base means "nothing is happening" in the user-facing
+        // sense — arm the variety timer. Otherwise cancel any pending pick.
+        if (id === 6) scheduleIdleVariant();
+        else clearTimeout(idleTimer);
+    }
+
+    // --- Rail writers ---
+    function writeAIRail(state) {
+        if (state == null) {
+            rails[3].active = false;
+            rails[3].track = null;
+        } else {
+            const track = trackMap[state] || state;
+            rails[3].active = true;
+            rails[3].track = track;
+            rails[3].mode = ONESHOT_TRACKS.has(track) ? 'oneshot' : 'loop';
         }
+        applyWinningRail();
+    }
+
+    function writeUserRail(state) {
+        if (state == null) {
+            rails[4].active = false;
+            rails[4].track = null;
+        } else {
+            const track = trackMap[state] || state;
+            rails[4].active = true;
+            rails[4].track = track;
+            rails[4].mode = ONESHOT_TRACKS.has(track) ? 'oneshot' : 'loop';
+        }
+        applyWinningRail();
+    }
+
+    function writeSapphRail(track) {
+        // Pass 1: every Sapph tag lands on rail 1 as oneshot. Pass 2 reads
+        // mode from the dispatch payload and chooses rail 1 vs rail 2.
+        if (!actions[track]) {
+            console.warn(`[Avatar] Track "${track}" not found in model`);
+            return;
+        }
+        rails[1].active = true;
+        rails[1].track = track;
+        rails[1].mode = 'oneshot';
+        applyWinningRail();
+    }
+
+    function writeIdleRail(track) {
+        if (!actions[track]) return;
+        rails[5].active = true;
+        rails[5].track = track;
+        rails[5].mode = ONESHOT_TRACKS.has(track) ? 'oneshot' : 'loop';
+        applyWinningRail();
     }
 
     // --- Idle variety system ---
+    // Fires when rail 6 is the winner. Oneshot picks auto-cycle through the
+    // mixer 'finished' listener (clears rail 5 → picker returns to 6 → this
+    // re-arms). Loop picks have no natural end so we re-schedule manually.
     function scheduleIdleVariant() {
         clearTimeout(idleTimer);
         const delay = 8000 + Math.random() * 12000;
         idleTimer = setTimeout(() => {
-            if (current !== 'idle') return;
+            if (winningRail() !== 6) return;  // something else took over
             const track = pickIdleVariant();
-            crossfadeTo(track);
-            if (!ONESHOT_TRACKS.has(track)) {
-                scheduleIdleVariant();
-            }
+            writeIdleRail(track);
+            if (!ONESHOT_TRACKS.has(track)) scheduleIdleVariant();
         }, delay);
     }
 
-    // --- State (flat, no priorities) ---
-    // The rail system replaces priority/persist/duration. For now setState
-    // just records the latest event-mapped state and crossfades; the
-    // ONESHOT_TRACKS handling inside crossfadeTo returns to idle when a
-    // transient clip finishes. (`current` is declared earlier so the
-    // greeting flow inside the model-load try-block can call setState.)
-    function setState(name) {
-        clearTimeout(idleTimer);
-        current = name;
-        crossfadeTo(name);
-        if (statusEl) statusEl.textContent = name === 'idle' ? '' : name;
-        if (name === 'idle') scheduleIdleVariant();
-    }
-
-    // Wire SSE events
+    // Wire SSE events — AI-init writers feed rail 3, user-init feed rail 4.
     const unsubs = [];
-    for (const [event, stateName] of Object.entries(TRANSITIONS)) {
-        const unsub = eventBus.on(event, () => setState(stateName));
+    for (const [event, state] of Object.entries(AI_TRANSITIONS)) {
+        const unsub = eventBus.on(event, () => writeAIRail(state));
+        if (unsub) unsubs.push(unsub);
+    }
+    for (const [event, state] of Object.entries(USER_TRANSITIONS)) {
+        const unsub = eventBus.on(event, () => writeUserRail(state));
         if (unsub) unsubs.push(unsub);
     }
 
     // Sapph-triggered animations: <<avatar: trackname>> in chat responses.
-    // Strip-phase version: plain oneshot. The rail system being built next
-    // will own this handler properly (rails 1/2, mode=once|loop, wind-down).
+    // Pass 1: every tag writes rail 1 as oneshot. The unified mixer listener
+    // clears rail 1 on clip-end; picker falls through to whatever's below
+    // (typically rail 3 if she's still mid-turn, else rail 6). Pass 2 will
+    // read mode from the payload to choose rail 1 (oneshot) vs rail 2 (loop).
     const avatarUnsub = eventBus.on('avatar_animate', (data) => {
         const { track } = data || {};
-        const action = actions[track];
-        if (!action) {
-            console.warn(`[Avatar] Track "${track}" not found in model`);
-            return;
-        }
-
-        action.reset();
-        action.setLoop(THREE.LoopOnce);
-        action.clampWhenFinished = true;
-        if (currentAction) action.crossFadeFrom(currentAction, CROSSFADE_MS / 1000, true);
-        action.play();
-        currentAction = action;
-
-        // Return to the latest SSE-mapped state when the clip finishes.
-        mixer.addEventListener('finished', function onDone(e) {
-            if (e.action !== action) return;
-            mixer.removeEventListener('finished', onDone);
-            if (currentAction === action) crossfadeTo(current);
-        });
+        if (track) writeSapphRail(track);
     });
     if (avatarUnsub) unsubs.push(avatarUnsub);
 
