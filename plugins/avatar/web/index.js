@@ -99,23 +99,15 @@ registerPluginSettings({
                     <div id="avatar-track-grid" class="avatar-track-grid"></div>
                 </div>
 
-                <div class="avatar-section" id="avatar-base-section" style="display:none">
-                    <h3>Base State</h3>
-                    <p class="avatar-help">Default pose when nothing else is happening. Variety picks layer on top.</p>
-                    <div class="avatar-field">
-                        <label>Track</label>
-                        <select id="avatar-base-state"></select>
-                    </div>
-                </div>
-
-                <div class="avatar-section" id="avatar-idle-section" style="display:none">
-                    <h3>Idle Variety Pool</h3>
-                    <p class="avatar-help">Tracks to cycle through when idle. Higher weight = more frequent.</p>
+                <div class="avatar-section" id="avatar-behavior-section" style="display:none">
+                    <h3>Idle Behavior</h3>
+                    <p class="avatar-help">Base = resting pose, chosen by time of day (she rotates among the checked tracks). Variety = occasional overlays that play every few minutes, then she returns to base.</p>
+                    <div id="avatar-time-settings" class="avatar-time-settings"></div>
                     <div class="avatar-pool-actions">
-                        <button type="button" class="avatar-btn-secondary" id="avatar-pool-check-all">Check all</button>
-                        <button type="button" class="avatar-btn-secondary" id="avatar-pool-uncheck-all">Uncheck all</button>
+                        <button type="button" class="avatar-btn-secondary" id="avatar-pool-variety-all">Variety: all</button>
+                        <button type="button" class="avatar-btn-secondary" id="avatar-pool-variety-none">Variety: none</button>
                     </div>
-                    <div id="avatar-idle-pool"></div>
+                    <div id="avatar-behavior-pool"></div>
                 </div>
 
                 <div class="avatar-section" id="avatar-greeting-section" style="display:none">
@@ -281,12 +273,14 @@ async function loadTrackMapping(container) {
     const trackMap = _activeConfig.track_map || {};
     const idlePool = _activeConfig.idle_pool || [];
     const greetingTrack = _activeConfig.greeting_track || '';
-    const baseState = _activeConfig.base_state || '';
+    const timeBuckets = _activeConfig.time_buckets?.length
+        ? _activeConfig.time_buckets
+        : [{ name: 'day', start: 7 }, { name: 'night', start: 21 }];
+    const varietyIntervalMin = _activeConfig.variety_interval_min || 2;
 
     // Show sections
     container.querySelector('#avatar-mapping-section').style.display = '';
-    container.querySelector('#avatar-base-section').style.display = '';
-    container.querySelector('#avatar-idle-section').style.display = '';
+    container.querySelector('#avatar-behavior-section').style.display = '';
     container.querySelector('#avatar-greeting-section').style.display = '';
 
     // Track mapping grid
@@ -311,57 +305,69 @@ async function loadTrackMapping(container) {
         if (trackMap[state]) sel.value = trackMap[state];
     });
 
-    // Idle pool
-    const poolEl = container.querySelector('#avatar-idle-pool');
-    poolEl.innerHTML = _activeTracks.map(t => {
-        const entry = idlePool.find(p => p.track === t.name);
-        const enabled = !!entry;
-        const weight = entry?.weight || 10;
-        const oneshot = entry?.oneshot || false;
+    // Time settings — one start-hour input per bucket + variety interval.
+    const timeEl = container.querySelector('#avatar-time-settings');
+    timeEl.innerHTML = timeBuckets.map(b => {
+        const quiet = b.quiet ?? (b.name === 'night');
         return `
-            <div class="avatar-idle-row">
-                <label>
-                    <input type="checkbox" data-track="${t.name}" ${enabled ? 'checked' : ''}>
-                    ${t.name}
-                </label>
-                <input type="number" data-track-weight="${t.name}" min="1" max="100" value="${weight}" class="avatar-weight" ${enabled ? '' : 'disabled'}>
-                <label class="avatar-oneshot">
-                    <input type="checkbox" data-track-oneshot="${t.name}" ${oneshot ? 'checked' : ''} ${enabled ? '' : 'disabled'}>
-                    oneshot
-                </label>
+        <div class="avatar-field">
+            <label>${b.name[0].toUpperCase() + b.name.slice(1)} starts (hour, 0–23)</label>
+            <input type="number" data-bucket-start="${b.name}" min="0" max="23" value="${b.start}" class="avatar-weight">
+            <label class="avatar-quiet-label" title="No variety overlays fire — she rests undisturbed">
+                <input type="checkbox" data-bucket-quiet="${b.name}" ${quiet ? 'checked' : ''}> quiet
+            </label>
+        </div>
+    `;
+    }).join('') + `
+        <div class="avatar-field">
+            <label>Variety every (minutes)</label>
+            <input type="number" id="avatar-variety-interval" min="1" max="120" value="${varietyIntervalMin}" class="avatar-weight">
+        </div>
+    `;
+
+    // Behavior pool — one row per track, with a base checkbox per time bucket,
+    // a variety checkbox, and a weight (used for variety random selection).
+    const poolEl = container.querySelector('#avatar-behavior-pool');
+    const headerCols = timeBuckets.map(b =>
+        `<span class="avatar-pool-col">${b.name[0].toUpperCase() + b.name.slice(1)}</span>`
+    ).join('');
+    poolEl.innerHTML = `
+        <div class="avatar-pool-header">
+            <span class="avatar-pool-name">Track</span>
+            ${headerCols}
+            <span class="avatar-pool-col">Variety</span>
+            <span class="avatar-pool-col">Weight</span>
+        </div>
+    ` + _activeTracks.map(t => {
+        const entry = idlePool.find(p => p.track === t.name);
+        const base = entry?.base || [];
+        const variety = entry ? (entry.variety ?? true) : false;
+        const weight = entry?.weight || 10;
+        const baseCells = timeBuckets.map(b => `
+            <span class="avatar-pool-col">
+                <input type="checkbox" data-base="${t.name}" data-bucket="${b.name}" ${base.includes(b.name) ? 'checked' : ''}>
+            </span>
+        `).join('');
+        return `
+            <div class="avatar-pool-row">
+                <span class="avatar-pool-name" title="${t.name} (${t.duration}s)">${t.name}</span>
+                ${baseCells}
+                <span class="avatar-pool-col">
+                    <input type="checkbox" data-variety="${t.name}" ${variety ? 'checked' : ''}>
+                </span>
+                <span class="avatar-pool-col">
+                    <input type="number" data-weight="${t.name}" min="1" max="100" value="${weight}" class="avatar-weight">
+                </span>
             </div>
         `;
     }).join('');
 
-    // Wire checkbox enable/disable
-    poolEl.querySelectorAll('input[type="checkbox"][data-track]').forEach(cb => {
-        cb.addEventListener('change', () => {
-            const track = cb.dataset.track;
-            const weightInput = poolEl.querySelector(`[data-track-weight="${track}"]`);
-            const oneshotInput = poolEl.querySelector(`[data-track-oneshot="${track}"]`);
-            if (weightInput) weightInput.disabled = !cb.checked;
-            if (oneshotInput) oneshotInput.disabled = !cb.checked;
-        });
-    });
-
-    // Check-all / uncheck-all bulk buttons for the idle pool. Flips every
-    // [data-track] checkbox and fires its change event so the weight +
-    // oneshot inputs disable/enable in sync.
-    const setAllPoolChecks = (checked) => {
-        poolEl.querySelectorAll('input[type="checkbox"][data-track]').forEach(cb => {
-            if (cb.checked !== checked) {
-                cb.checked = checked;
-                cb.dispatchEvent(new Event('change'));
-            }
-        });
+    // Variety bulk buttons.
+    const setAllVariety = (checked) => {
+        poolEl.querySelectorAll('input[type="checkbox"][data-variety]').forEach(cb => { cb.checked = checked; });
     };
-    container.querySelector('#avatar-pool-check-all')?.addEventListener('click', () => setAllPoolChecks(true));
-    container.querySelector('#avatar-pool-uncheck-all')?.addEventListener('click', () => setAllPoolChecks(false));
-
-    // Base state dropdown
-    const baseSel = container.querySelector('#avatar-base-state');
-    baseSel.innerHTML = trackOptions;
-    if (baseState) baseSel.value = baseState;
+    container.querySelector('#avatar-pool-variety-all')?.addEventListener('click', () => setAllVariety(true));
+    container.querySelector('#avatar-pool-variety-none')?.addEventListener('click', () => setAllVariety(false));
 
     // Greeting dropdown
     const greetSel = container.querySelector('#avatar-greeting-track');
@@ -380,18 +386,33 @@ function collectConfig(container) {
         if (sel.value) track_map[sel.dataset.state] = sel.value;
     });
 
-    // Idle pool
+    // Behavior pool — one entry per track that has ANY role (base or variety).
     const idle_pool = [];
-    container.querySelectorAll('#avatar-idle-pool input[type="checkbox"][data-track]').forEach(cb => {
-        if (!cb.checked) return;
-        const track = cb.dataset.track;
-        const weight = parseInt(container.querySelector(`[data-track-weight="${track}"]`)?.value || '10');
-        const oneshot = container.querySelector(`[data-track-oneshot="${track}"]`)?.checked || false;
-        idle_pool.push({ track, weight, oneshot });
+    container.querySelectorAll('#avatar-behavior-pool .avatar-pool-row').forEach(row => {
+        const varietyCb = row.querySelector('input[data-variety]');
+        const track = varietyCb?.dataset.variety;
+        if (!track) return;
+        const base = [];
+        row.querySelectorAll('input[data-base]').forEach(cb => {
+            if (cb.checked) base.push(cb.dataset.bucket);
+        });
+        const variety = !!varietyCb.checked;
+        if (!variety && base.length === 0) return;  // no role → omit
+        const weight = parseInt(row.querySelector(`[data-weight="${track}"]`)?.value || '10');
+        idle_pool.push({ track, weight, variety, base });
     });
 
-    // Base, greeting + scale
-    const base_state = container.querySelector('#avatar-base-state')?.value || null;
+    // Time buckets (preserve names/order, update start hours + quiet flag) + interval.
+    const time_buckets = [];
+    container.querySelectorAll('#avatar-time-settings input[data-bucket-start]').forEach(inp => {
+        const name = inp.dataset.bucketStart;
+        const start = Math.max(0, Math.min(23, parseInt(inp.value || '0')));
+        const quiet = !!container.querySelector(`[data-bucket-quiet="${name}"]`)?.checked;
+        time_buckets.push({ name, start, quiet });
+    });
+    const variety_interval_min = Math.max(1, parseInt(container.querySelector('#avatar-variety-interval')?.value || '2'));
+
+    // Greeting + scale
     const greeting_track = container.querySelector('#avatar-greeting-track')?.value || null;
     const scale = parseFloat(container.querySelector('#avatar-scale')?.value || '1.0') || 1.0;
 
@@ -402,7 +423,8 @@ function collectConfig(container) {
                 ..._activeConfig,
                 track_map,
                 idle_pool,
-                base_state,
+                time_buckets,
+                variety_interval_min,
                 greeting_track,
                 scale,
             }
@@ -442,12 +464,18 @@ function injectStyles() {
             border-radius: 5px; background: var(--bg-primary); color: var(--text); font-size: 12px;
         }
 
-        .avatar-idle-row {
-            display: flex !important; align-items: center; gap: 10px; padding: 4px 0;
-        }
-        .avatar-idle-row > label { font-size: 13px; color: var(--text); min-width: 120px; flex-shrink: 0; }
         .avatar-weight { width: 50px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-primary); color: var(--text); font-size: 12px; text-align: center; }
-        .avatar-oneshot { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+        .avatar-time-settings { display: flex !important; flex-direction: column !important; gap: 6px; margin-bottom: 10px; }
+        .avatar-quiet-label { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+        .avatar-quiet-label input { accent-color: #4a9eff; margin: 0; }
+        .avatar-pool-header, .avatar-pool-row {
+            display: flex !important; align-items: center; gap: 4px; padding: 3px 0;
+        }
+        .avatar-pool-header { border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-muted); font-weight: 600; }
+        .avatar-pool-name { flex: 1; min-width: 90px; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .avatar-pool-col { width: 52px; flex-shrink: 0; text-align: center; }
+        .avatar-pool-col input[type="checkbox"] { accent-color: #4a9eff; margin: 0; }
+        .avatar-pool-row .avatar-weight { width: 44px; }
 
         .avatar-upload-btn {
             display: inline-block; padding: 6px 14px; border-radius: 6px; cursor: pointer;

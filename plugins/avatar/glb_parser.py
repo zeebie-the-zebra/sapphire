@@ -122,24 +122,49 @@ def build_default_config(track_names):
     for state in ['idle', 'processing', 'typing', 'listening', 'speaking', 'toolcall', 'happy', 'wakeword', 'agent', 'cron', 'user_typing', 'reading']:
         track_map[state] = mapped.get(state, fallback)
 
-    # Default idle pool — EVERY track checked at uniform weight. User opts
-    # out via the settings UI's check-all/uncheck-all helpers rather than
-    # opting in. Matches the "give me the buttons, I'll uncheck" intent.
-    idle_pool = [
-        {'track': name, 'weight': 10, 'oneshot': False}
-        for name in track_names
-    ]
+    # Behavior pool — every track included. Each entry has roles:
+    #   base:    list of time-bucket names this track can be a resting pose for
+    #   variety: eligible as an occasional overlay (fires every N minutes)
+    #   weight:  relative frequency for variety random selection
+    # Smart defaults: sleep tracks → night base; idle/stand/breathing → day
+    # base; everything is variety-eligible so the pool starts full (the
+    # settings UI's check-all/uncheck-all lets the user prune).
+    night_patterns = ('sleep', 'lie', 'lying')
+    day_patterns = ('idle', 'stand', 'standing', 'rest', 'breathe', 'breathing')
+    idle_pool = []
+    for name in track_names:
+        lower = name.lower()
+        base = []
+        if any(p in lower for p in night_patterns):
+            base.append('night')
+        elif any(p in lower for p in day_patterns):
+            base.append('day')
+        idle_pool.append({'track': name, 'weight': 10, 'variety': True, 'base': base})
 
-    # Default base state (rail 6 — always-on background) is the auto-mapped
-    # idle track. User can override via settings.
-    base_state = track_map.get('idle', fallback)
+    # Guarantee each shipped bucket has at least one base track — fall back
+    # to the auto-mapped idle track so she always has a resting pose.
+    idle_track = mapped.get('idle', fallback)
+    for bucket in ('day', 'night'):
+        if not any(bucket in e['base'] for e in idle_pool):
+            for e in idle_pool:
+                if e['track'] == idle_track:
+                    e['base'].append(bucket)
+                    break
 
     greeting = mapped.get('wave', None)
 
     return {
         'track_map': track_map,
         'idle_pool': idle_pool,
-        'base_state': base_state,
+        # N-bucket ready; ships with day/night. start = hour (24h) the bucket
+        # begins; the latest start <= current hour wins (wrapping midnight).
+        # quiet = no variety overlays fire (she rests undisturbed). Night
+        # defaults quiet so she sleeps in peace.
+        'time_buckets': [
+            {'name': 'day', 'start': 7, 'quiet': False},
+            {'name': 'night', 'start': 21, 'quiet': True},
+        ],
+        'variety_interval_min': 2,
         'greeting_track': greeting,
         'camera': {'x': 0, 'y': 1.3, 'z': 4.4},
         'target': {'x': 0, 'y': 1.1, 'z': 0},

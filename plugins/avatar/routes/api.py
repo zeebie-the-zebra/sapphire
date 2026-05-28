@@ -230,12 +230,14 @@ async def save_config(**kwargs):
         cfg['active_location'] = body['active_location']
 
     # Shorthand: update just the active model's config
-    if any(k in body for k in ('track_map', 'idle_pool', 'base_state', 'greeting_track', 'camera', 'target')):
+    _model_keys = ('track_map', 'idle_pool', 'base_state', 'time_buckets',
+                   'variety_interval_min', 'greeting_track', 'camera', 'target')
+    if any(k in body for k in _model_keys):
         active = cfg.get('active_model', '')
         if active:
             if active not in cfg.get('models', {}):
                 cfg['models'][active] = {}
-            for key in ('track_map', 'idle_pool', 'base_state', 'greeting_track', 'camera', 'target'):
+            for key in _model_keys:
                 if key in body:
                     cfg['models'][active][key] = body[key]
 

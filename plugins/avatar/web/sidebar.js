@@ -370,10 +370,12 @@ export async function init(container) {
     let trackMap = { ...FALLBACK_TRACK_MAP };
     let idlePool = [...FALLBACK_IDLE_POOL];
     let greetingTrack = 'wave';
-    let baseStateTrack = null;  // rail 6 — null falls back to trackMap.idle
     let camPos = { ...FALLBACK_CAMERA };
     let camTarget = { ...FALLBACK_TARGET };
     let modelScale = 1.0;
+    let baseStateTrack = null;  // legacy single base; used as fallback only
+    let timeBuckets = [{ name: 'day', start: 7 }, { name: 'night', start: 21 }];
+    let varietyIntervalMin = 2;
 
     try {
         const resp = await fetch('/api/plugin/avatar/config');
@@ -386,12 +388,26 @@ export async function init(container) {
                 if (modelCfg.idle_pool?.length) idlePool = modelCfg.idle_pool;
                 if (modelCfg.greeting_track !== undefined) greetingTrack = modelCfg.greeting_track;
                 if (modelCfg.base_state) baseStateTrack = modelCfg.base_state;
+                if (modelCfg.time_buckets?.length) timeBuckets = modelCfg.time_buckets;
+                if (modelCfg.variety_interval_min) varietyIntervalMin = modelCfg.variety_interval_min;
                 if (modelCfg.camera) camPos = modelCfg.camera;
                 if (modelCfg.target) camTarget = modelCfg.target;
                 if (modelCfg.scale) modelScale = modelCfg.scale;
             }
         }
     } catch (e) { /* use fallbacks */ }
+
+    // Normalize pool entries. Legacy entries (track/weight/oneshot, no
+    // `variety` field) were ALL variety tracks — migrate them so old configs
+    // keep cycling. `base` is the list of time-bucket names a track can rest
+    // in (empty = not a base candidate).
+    idlePool = idlePool.map(v => ({
+        track: v.track,
+        weight: v.weight ?? 10,
+        oneshot: v.oneshot ?? false,
+        variety: v.variety ?? true,
+        base: Array.isArray(v.base) ? v.base : [],
+    }));
 
     const MODEL_URL = `/api/avatar/${modelFile}`;
 
@@ -402,15 +418,53 @@ export async function init(container) {
     // Also treat known oneshot animations as oneshot
     for (const t of ['happy', 'wave', 'attention', 'attention2']) ONESHOT_TRACKS.add(t);
 
-    // Weighted random idle pick
+    // Which time bucket are we in right now? The latest bucket whose `start`
+    // hour is <= the current hour wins, wrapping past midnight (so if the
+    // earliest bucket starts at 07:00, hours 00:00–06:59 belong to the last
+    // bucket of the day, e.g. night).
+    function currentBucket() {
+        if (!timeBuckets.length) return null;
+        const hour = new Date().getHours();
+        const sorted = [...timeBuckets].sort((a, b) => a.start - b.start);
+        let pick = sorted[sorted.length - 1];  // wrap: before first start = last bucket
+        for (const b of sorted) {
+            if (hour >= b.start) pick = b;
+        }
+        return pick.name;
+    }
+
+    // Is the current time bucket "quiet" (no variety overlays)? A bucket can
+    // set quiet:true; if unset, 'night' defaults quiet so legacy configs that
+    // predate the flag still let her sleep undisturbed.
+    function isQuietNow() {
+        const name = currentBucket();
+        const b = timeBuckets.find(x => x.name === name);
+        if (!b) return false;
+        return b.quiet ?? (name === 'night');
+    }
+
+    // Random base track eligible for a given bucket. Falls back to the legacy
+    // base_state, then trackMap.idle, then 'idle'.
+    function pickBaseTrack(bucketName) {
+        const eligible = idlePool.filter(v => v.base.includes(bucketName) && actions[v.track]);
+        if (eligible.length) {
+            return eligible[Math.floor(Math.random() * eligible.length)].track;
+        }
+        if (baseStateTrack && actions[baseStateTrack]) return baseStateTrack;
+        return trackMap.idle || 'idle';
+    }
+
+    // Weighted random pick among VARIETY-tagged tracks (the occasional overlay).
     function pickIdleVariant() {
-        const total = idlePool.reduce((s, v) => s + v.weight, 0);
+        const pool = idlePool.filter(v => v.variety);
+        if (!pool.length) return null;
+        const total = pool.reduce((s, v) => s + v.weight, 0);
         let roll = Math.random() * total;
-        for (const v of idlePool) {
+        for (const v of pool) {
             roll -= v.weight;
             if (roll <= 0) return v.track;
         }
-        return trackMap.idle || 'idle';
+        return pool[pool.length - 1].track;  // float-edge fallback
     }
 
     // Dynamic imports (cached after first load)
@@ -620,17 +674,11 @@ export async function init(container) {
             actions[clip.name] = action;
         }
 
-        // Rail 6 (base state) — always-active background. Configured by the
-        // user via Settings → Avatar → Base State; falls through to the
-        // configured 'idle' track when unset. Validates the track actually
-        // exists in the loaded GLB before committing — otherwise rail 6
-        // would point at a missing clip and crossfadeTo would silently do
-        // nothing every time we fall through to base.
-        const resolvedBase = (baseStateTrack && actions[baseStateTrack])
-            ? baseStateTrack
-            : (trackMap.idle || 'idle');
+        // Rail 6 (base state) — always-active, time-aware background. Picks a
+        // random base track eligible for the current time bucket (day/night/
+        // …). Re-rolled by the rotation timer below and on bucket crossover.
         rails[6].active = true;
-        rails[6].track = resolvedBase;
+        rails[6].track = pickBaseTrack(currentBucket());
 
         // Unified mixer 'finished' listener — clears oneshot rails when their
         // clip ends. Replaces per-action listeners that crossfadeTo and the
@@ -841,22 +889,53 @@ export async function init(container) {
         if (!actions[track]) return;
         rails[5].active = true;
         rails[5].track = track;
-        rails[5].mode = ONESHOT_TRACKS.has(track) ? 'oneshot' : 'loop';
+        // Variety ALWAYS plays once and returns to base — even tracks that
+        // would normally loop. A variety overlay is a brief gesture, not a
+        // sustained state; without this, a non-oneshot pick (e.g. `typing`)
+        // would loop for the whole variety interval. The mixer 'finished'
+        // listener clears rail 5 when the clip ends → picker returns to base.
+        rails[5].mode = 'oneshot';
         applyWinningRail();
     }
 
-    // --- Idle variety system ---
-    // Fires when rail 6 is the winner. Oneshot picks auto-cycle through the
-    // mixer 'finished' listener (clears rail 5 → picker returns to 6 → this
-    // re-arms). Loop picks have no natural end so we re-schedule manually.
+    // --- Idle variety + base rotation ---
+    // On each cycle: re-roll rail 6's base track for the CURRENT time bucket
+    // (this also catches day↔night crossover for free — pickBaseTrack reads
+    // the clock), then fire a variety overlay if she's idle. Oneshot variety
+    // auto-cycles via the mixer 'finished' listener; loop variety re-schedules
+    // here. Interval is the user's variety_interval_min (with ±30% jitter).
     function scheduleIdleVariant() {
         clearTimeout(idleTimer);
-        const delay = 8000 + Math.random() * 12000;
+        const baseMs = Math.max(0.5, varietyIntervalMin) * 60000;
+        const delay = baseMs * (0.7 + Math.random() * 0.6);
         idleTimer = setTimeout(() => {
-            if (winningRail() !== 6) return;  // something else took over
+            // Re-roll base for the current bucket. Applies on next fall-through
+            // to rail 6 (after variety) or immediately if nothing else plays.
+            const freshBase = pickBaseTrack(currentBucket());
+            if (winningRail() !== 6) {
+                rails[6].track = freshBase;  // shows when she next falls idle
+                scheduleIdleVariant();
+                return;
+            }
+            // Quiet bucket (e.g. night): rotate the base pose but fire NO
+            // variety overlay — she rests undisturbed. Keep rescheduling so
+            // base rotation continues and we catch the bucket crossover.
+            if (isQuietNow()) {
+                rails[6].track = freshBase;
+                applyWinningRail();
+                scheduleIdleVariant();
+                return;
+            }
             const track = pickIdleVariant();
-            writeIdleRail(track);
-            if (!ONESHOT_TRACKS.has(track)) scheduleIdleVariant();
+            if (track && actions[track]) {
+                rails[6].track = freshBase;  // she'll settle here when variety ends
+                writeIdleRail(track);  // oneshot — mixer 'finished' re-arms via rail-6 return
+            } else {
+                // No variety tracks configured — just rotate the base pose.
+                rails[6].track = freshBase;
+                applyWinningRail();
+                scheduleIdleVariant();
+            }
         }, delay);
     }
 
