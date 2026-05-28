@@ -159,6 +159,16 @@ export const playText = async (txt, cacheKey = null) => {
         // Bail if stopped while fetching
         if (!isStreaming) return;
 
+        // fetchWithTimeout returns a raw Response (not a Blob) when the
+        // content-type wasn't audio/* — e.g. Brave/an extension/a proxy
+        // stripped or rewrote the header. Surface it with a clear message
+        // instead of letting URL.createObjectURL throw a TypeError that the
+        // catch's stop-detection would swallow silently. 2026-05-28.
+        if (!(blob instanceof Blob)) {
+            const ct = blob?.headers?.get?.('content-type') || 'unknown';
+            throw new Error(`TTS response not audio (content-type=${ct})`);
+        }
+
         blobUrl = URL.createObjectURL(blob);
         player = new Audio(blobUrl);
 
@@ -184,19 +194,25 @@ export const playText = async (txt, cacheKey = null) => {
     } catch (e) {
         isStreaming = false;
         ui.hideStatus();
-        // stop() / a newer playText nulls `player` before this catch fires,
-        // so a null `player` here means the rejection IS the expected
-        // consequence of a stop/preempt — stay quiet. With `player` still
-        // set, the failure is genuine; the previous behavior of swallowing
-        // AbortError/NotAllowedError/autoplay silently left the user with
-        // no signal on Brave autoplay-block + Shields blob-URL races, which
-        // is the symmetric form of the streaming-path silent drain.
-        if (player === null) return;
         const cls = e.name || '';
         const msg = e.message || '';
+        // Swallow ONLY recognized stop/preempt rejections — those are the
+        // expected consequence of stop()/a newer playText tearing down the
+        // element mid-flight. Everything else is a genuine failure and must
+        // be surfaced. (Previously this was a blanket `player===null` return,
+        // which also ate the content-type TypeError above — the silent hole
+        // a scout found. 2026-05-28.)
+        const isStopRejection =
+            msg.includes('Cancelled') || msg.includes('cancelled') ||
+            msg.includes('aborted') || msg.includes('interrupted') || msg.includes('removed') ||
+            (cls.includes('AbortError') && player === null);
+        if (isStopRejection) return;
         if (cls.includes('NotAllowedError') || msg.includes('autoplay')) {
             ui.showToast('Browser blocked audio — click anywhere on the page, then try again.', 'warning');
-        } else if (cls.includes('AbortError') || msg.includes('interrupted')) {
+        } else if (msg.includes('not audio')) {
+            console.warn('[TTS] whole-blob fallback got non-audio response:', msg);
+            ui.showToast('TTS response was not playable audio — check TTS provider / proxy.', 'error');
+        } else if (cls.includes('AbortError')) {
             ui.showToast('Audio playback failed — check system audio output or browser autoplay permissions.', 'warning');
         } else {
             ui.showToast(`Audio error: ${msg}`, 'error');
@@ -348,6 +364,36 @@ let _ttsStreamAnyPlayed = false;
 // streaming" overlap that otherwise causes audio bleed across turns.
 // New stream with different id preempts the old one. 2026-05-18 herring #5.
 let _currentStreamId = null;
+// Per-turn playback diagnostics — the "black box". Reset on startTtsStream,
+// consumed (logged) at turn end. `played` counts chunks whose audio actually
+// PROGRESSED (currentTime advanced) — not chunks whose play() merely resolved,
+// which is the blind spot that hid the Brave no-audio reports. The one-line
+// summary emitted at turn end is what a user pastes to tell us why they heard
+// nothing, without us having to ask. 2026-05-28.
+let _ttsStats = null;
+const _newTtsStats = () => ({ received: 0, decoded: 0, played: 0, failed: 0, fails: [] });
+// Record a chunk's terminal outcome exactly once. outcome 'played' or a
+// failure tag ('autoplay-blocked','aborted','play-reject','media-error',
+// 'silent-ended','decode-error').
+const _recordChunk = (item, outcome, detail) => {
+    if (item && item._recorded) return;
+    if (item) item._recorded = true;
+    if (outcome === 'played') _ttsStreamAnyPlayed = true;  // accurate signal: real progress, not mere resolve
+    if (!_ttsStats) return;
+    if (outcome === 'played') {
+        _ttsStats.played++;
+    } else {
+        _ttsStats.failed++;
+        _ttsStats.fails.push({ idx: item?.index, outcome, detail });
+    }
+};
+const _dominantFail = (fails) => {
+    const counts = {};
+    for (const f of fails) counts[f.outcome] = (counts[f.outcome] || 0) + 1;
+    let best = 'unknown', n = 0;
+    for (const k in counts) if (counts[k] > n) { n = counts[k]; best = k; }
+    return best;
+};
 
 const _b64ToBlob = (b64, contentType) => {
     const bin = atob(b64);
@@ -400,13 +446,23 @@ const _ttsStreamCleanupCurrent = () => {
     _ttsStreamUrl = null;
 };
 
-// Called when the stream is finishing naturally (SSE end + queue drained).
-// If chunks arrived but no play() ever resolved, the user got text + no
-// audio + no signal — surface a toast so they know to check audio output
-// or browser autoplay rules. Gated on sawChunk so we don't toast when the
-// stream produced zero chunks (the legacy fallback handles that case).
+// Called once when a streaming-TTS turn finishes (SSE end + queue drained).
+// Emits the always-on one-line "black box" summary, and — only when chunks
+// arrived but none actually produced sound — dumps the per-chunk failure
+// detail and shows the user a toast. Idempotent: consumes _ttsStats so a
+// second caller (endTtsStream vs _ttsStreamPlayNext, whichever lands second)
+// is a no-op.
 const _ttsStreamMaybeWarnSilent = () => {
-    if (_ttsStreamSawChunk && !_ttsStreamAnyPlayed) {
+    const s = _ttsStats;
+    if (!s) return;
+    _ttsStats = null;  // consume — fresh stats created by next startTtsStream
+    const reason = s.failed ? ` reason=${_dominantFail(s.fails)}` : '';
+    console.info(`[TTS-STREAM] turn done: received=${s.received} decoded=${s.decoded} ` +
+                 `played=${s.played} failed=${s.failed}${reason}`);
+    if (s.received > 0 && s.played === 0) {
+        // The silent-failure signature: audio arrived, nothing was audible.
+        // This is the line the user pastes that tells us exactly why.
+        console.warn('[TTS-STREAM] NO AUDIO this turn — per-chunk outcomes:', s.fails);
         try {
             ui.showToast(
                 'TTS chunks couldn’t play — check system audio output or browser autoplay permissions.',
@@ -448,7 +504,25 @@ const _ttsStreamPlayNext = (gen) => {
         return;
     }
     _ttsStreamPlayer.volume = muted ? 0 : volume;
+    // Real-progress detection: 'timeupdate' fires as currentTime advances
+    // during actual playback. The FIRST advance past 0 is the only in-browser
+    // proof that decode + output succeeded — drives accurate played/failed
+    // accounting and the silent-failure toast. (A dead OS sink still advances
+    // currentTime, so this can't catch that case — nothing in-browser can —
+    // but it catches codec failure, autoplay throttle, and abort.)
+    const onProgress = () => {
+        if (item.audio && item.audio.currentTime > 0) {
+            item.audio.removeEventListener('timeupdate', onProgress);
+            _recordChunk(item, 'played');
+        }
+    };
+    _ttsStreamPlayer.addEventListener('timeupdate', onProgress);
     _ttsStreamPlayer.onended = () => {
+        // currentTime>0 at end = the clip really advanced (covers very short
+        // clips that may not have fired a timeupdate). Otherwise it ended
+        // without ever progressing = silent.
+        if (item.audio && item.audio.currentTime > 0) _recordChunk(item, 'played');
+        else _recordChunk(item, 'silent-ended');
         const pause = item.pause_after_ms || 0;
         if (pause > 0) {
             setTimeout(() => _ttsStreamPlayNext(gen), pause);
@@ -456,36 +530,28 @@ const _ttsStreamPlayNext = (gen) => {
             _ttsStreamPlayNext(gen);
         }
     };
-    _ttsStreamPlayer.onerror = (e) => {
-        console.warn('[TTS-STREAM] chunk playback error', e, 'index=', item.index);
+    _ttsStreamPlayer.onerror = () => {
+        // error.code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED = codec/decode failure
+        // (the OGG/Opus-on-hardened-Brave signature).
+        _recordChunk(item, 'media-error', 'code=' + (item.audio?.error?.code));
         // Don't surface to user — keep draining queue
         _ttsStreamPlayNext(gen);
     };
-    // Track when play() actually resolves (= audio truly playing) so
+    // Track when play() actually resolves (= in the media stack) so
     // _disposeItem can safely abort it later without rejecting a pending
-    // promise. Modern browsers always return a Promise from play(); the
-    // optional-chain guards the rare legacy case where it returns undefined.
-    // Single chained .then(onFulfilled).catch(onRejected) — keeps both
-    // resolution paths on one promise chain so a play() rejection doesn't
-    // produce an "Uncaught (in promise)" via the .then branch.
+    // promise. NOTE: resolution is NOT proof of audible output — that's why
+    // _ttsStreamAnyPlayed is set on real progress (onProgress/onended), not
+    // here. The optional-chain guards the rare legacy undefined return.
     _ttsStreamPlayer.play()?.then(() => {
-        // item.audio may already be nulled (e.g. stop() ran before play
-        // settled); guard before flagging.
         if (item.audio) item.audio._playStarted = true;
-        _ttsStreamAnyPlayed = true;
     }).catch(err => {
-        if (err?.message?.includes('autoplay')) {
-            // Autoplay-blocked. Recoverable on next user gesture; stay quiet.
-        } else if (err?.name === 'AbortError') {
-            // AbortError = play() interrupted by load/src change/removal.
-            // Was previously suppressed entirely — that masked the no-audio
-            // bug class for cases where every chunk's play() aborts. Surface
-            // as info (not warn — happens during legitimate stop/preempt too)
-            // so future repros are diagnosable from DevTools alone. 2026-05-26.
-            console.info('[TTS-STREAM] play() aborted for chunk', item.index, '—', err.message);
-        } else {
-            console.warn('[TTS-STREAM] play() rejected:', err);
-        }
+        // Classify for the turn summary. autoplay/abort stay quiet (recoverable
+        // / happen during legitimate stop) but are still recorded so the
+        // black-box can report "every chunk aborted".
+        let tag = 'play-reject';
+        if (err?.message?.includes('autoplay') || err?.name === 'NotAllowedError') tag = 'autoplay-blocked';
+        else if (err?.name === 'AbortError') tag = 'aborted';
+        _recordChunk(item, tag, err?.message);
         _ttsStreamPlayNext(gen);
     });
 };
@@ -507,6 +573,8 @@ export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, paus
         console.warn('[TTS-STREAM] dropping stale chunk from preempted stream', stream_id);
         return;
     }
+    if (!_ttsStats) _ttsStats = _newTtsStats();  // defensive: chunk before start
+    _ttsStats.received++;
     // Decode + Audio() build can throw on bad base64 or unsupported codec.
     // Build the blob/URL/audio element BEFORE setting sawChunk — otherwise
     // a malformed first chunk crashes the decode, sawChunk stays true, and
@@ -525,9 +593,14 @@ export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, paus
         // environments. Dropped 2026-05-26 user-report scouting party.
     } catch (e) {
         console.warn('[TTS-STREAM] chunk decode failed, skipping', { index, err: e?.message });
+        if (_ttsStats) {
+            _ttsStats.failed++;
+            _ttsStats.fails.push({ idx: index, outcome: 'decode-error', detail: e?.message });
+        }
         if (url) { try { URL.revokeObjectURL(url); } catch {} }
         return;  // sawChunk NOT set — legacy fallback can still fire
     }
+    if (_ttsStats) _ttsStats.decoded++;
     _ttsStreamSawChunk = true;
     _ttsStreamQueue.push({
         audio, url, blob,
@@ -565,6 +638,7 @@ export const startTtsStream = (data = {}) => {
     _ttsStreamEnded = false;
     _ttsStreamSawChunk = false;
     _ttsStreamAnyPlayed = false;
+    _ttsStats = _newTtsStats();  // fresh black-box for this turn
     // Don't clear _ttsStreamActive — first chunk arrival kicks playback.
 };
 

@@ -156,12 +156,14 @@ class KokoroTTSProvider(BaseTTSProvider):
             # concatenated blob and silently drops trailing audio.
             # 2026-05-18 herring-table #3.
             buffer = bytearray()
+            oggs_split = 0
             for chunk in response.iter_content(chunk_size=None):
                 if not chunk:
                     continue
                 buffer.extend(chunk)
                 complete, remaining = _split_complete_oggs(bytes(buffer))
                 for ogg in complete:
+                    oggs_split += 1
                     yield ogg
                 buffer = bytearray(remaining)
             # Any final non-EOS-terminated remainder (shouldn't normally
@@ -169,6 +171,12 @@ class KokoroTTSProvider(BaseTTSProvider):
             if buffer:
                 logger.debug(f"[Kokoro] stream ended with {len(buffer)} bytes of un-EOS'd OGG data")
                 yield bytes(buffer)
+            # Diagnostic fingerprint: oggs_split=0 with a large trailing
+            # remainder means the server's OGG/Opus pages carry no per-segment
+            # EOS flag (libsndfile/libopus version skew), so the splitter never
+            # fired and the browser receives one possibly-malformed blob — a
+            # server-environment cause of "no audio". 2026-05-28.
+            logger.info(f"[Kokoro] stream voice={voice} oggs_split={oggs_split} trailing={len(buffer)}")
         except Exception as e:
             logger.warning(f"Kokoro /tts/stream failed: {e!r} — falling back to non-streaming")
             audio = self.generate(text, voice, speed, **kwargs)

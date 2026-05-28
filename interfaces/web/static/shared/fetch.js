@@ -41,6 +41,13 @@ export const fetchWithTimeout = async (url, opts = {}, timeout = 60000) => {
       if (blob.size === 0) throw new Error('Empty audio');
       return blob;
     }
+    // Neither JSON nor audio — return the raw Response. Callers expecting a
+    // blob (TTS) must guard against this. A stripped/rewritten content-type
+    // (Brave Shields, an extension, a proxy) lands here and is a known
+    // silent-failure vector, so leave a breadcrumb. 2026-05-28.
+    if (ct && !ct.includes('text/html')) {
+      console.warn('[FETCH] non-json/non-audio content-type, returning raw Response:', url, 'ct=', ct, 'status=', res.status);
+    }
     return res;
   } catch (e) {
     clearTimeout(id);

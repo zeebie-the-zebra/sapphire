@@ -477,8 +477,8 @@ class StreamingTTSPump:
                     n_segments += 1
                     total_bytes += len(audio)
             logger.info(
-                f"[TTS-STREAM] chunk {chunk_index} synth done: "
-                f"{n_segments} segments, {total_bytes} bytes"
+                f"[TTS-STREAM] chunk {chunk_index} synth done: voice={voice} "
+                f"streams={self._provider_streams} {n_segments} segments, {total_bytes} bytes"
             )
         except Exception as e:
             logger.warning(
