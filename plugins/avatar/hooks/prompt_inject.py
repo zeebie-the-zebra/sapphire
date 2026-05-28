@@ -51,9 +51,11 @@ def prompt_inject(event):
     event.context_parts.append(
         f"\n[Avatar]\n"
         f"You have a 3D animated avatar visible to the user. "
-        f"You can trigger animations by including <<avatar: trackname>> in your responses. "
-        f"Available tracks: {track_list}. "
-        f"Use these naturally to express yourself — wave when greeting, "
-        f"show happy when celebrating, use attention when something catches your interest. "
+        f"Trigger animations with <<avatar: trackname>> — the track plays once and "
+        f"your avatar returns to its normal behavior. "
+        f"For sustained moods, add `loop`: <<avatar: sleep loop>> holds the pose "
+        f"until you call another <<avatar: ...>> tag. Use loop for ongoing states "
+        f"(sleep, dance, meditate); leave it off for reactions (wave, nod, celebrate). "
+        f"ONLY use track names from this list — do not invent new ones: {track_list}. "
         f"The tags are visible in chat as part of your expression. Don't overuse them."
     )

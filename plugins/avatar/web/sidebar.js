@@ -57,17 +57,18 @@ const AI_TRANSITIONS = {
     [eventBus.Events.CONTINUITY_TASK_STARTING]:  'cron',
     [eventBus.Events.CONTINUITY_TASK_COMPLETE]:  null,
 };
-// User-initiated events express a human reaching for her — they DO request
-// wind-down on rail 2 (her loop ends gracefully at its next iteration so she
-// can acknowledge the user). Pass 2 wires the wind-down mechanic; Pass 1
-// just keeps the events writing rail 4.
+// User-initiated events express a human reaching for her. They request
+// wind-down on rail 2 (her loop ends gracefully at next iteration). Values
+// are { state, ttlMs? } — ttlMs auto-clears rail 4 after N ms when no
+// natural follow-up event will (USER_SENT is a brief reaction with no
+// matching end-event; STT events have explicit pairs, no TTL needed).
 const USER_TRANSITIONS = {
-    [eventBus.Events.STT_RECORDING_START]:  'listening',
-    [eventBus.Events.STT_RECORDING_END]:    'processing',
-    [eventBus.Events.STT_PROCESSING]:       'processing',
-    [eventBus.Events.WAKEWORD_DETECTED]:    'wakeword',
-    [eventBus.Events.USER_TYPING]:          'user_typing',
-    [eventBus.Events.USER_SENT]:            'reading',
+    [eventBus.Events.STT_RECORDING_START]:  { state: 'listening' },
+    [eventBus.Events.STT_RECORDING_END]:    { state: 'processing' },
+    [eventBus.Events.STT_PROCESSING]:       { state: 'processing' },
+    [eventBus.Events.WAKEWORD_DETECTED]:    { state: 'wakeword' },
+    [eventBus.Events.USER_TYPING]:          { state: 'user_typing' },
+    [eventBus.Events.USER_SENT]:            { state: 'reading', ttlMs: 3000 },
 };
 
 // Track cleanup between sidebar reloads
@@ -300,7 +301,7 @@ export async function init(container) {
             if (_thinkOpen) return;
 
             // Strip avatar tags
-            text = text.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+\d+(?:\.\d+)?s)?>>/g, '');
+            text = text.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+(?:once|loop|\d+(?:\.\d+)?s))?>>/g, '');
             // Strip any stray think tags (edge case: open+close in same chunk)
             text = text.replace(/<\/?(?:seed:)?think[^>]*>/gi, '');
 
@@ -369,6 +370,7 @@ export async function init(container) {
     let trackMap = { ...FALLBACK_TRACK_MAP };
     let idlePool = [...FALLBACK_IDLE_POOL];
     let greetingTrack = 'wave';
+    let baseStateTrack = null;  // rail 6 — null falls back to trackMap.idle
     let camPos = { ...FALLBACK_CAMERA };
     let camTarget = { ...FALLBACK_TARGET };
     let modelScale = 1.0;
@@ -383,6 +385,7 @@ export async function init(container) {
                 if (modelCfg.track_map) trackMap = { ...FALLBACK_TRACK_MAP, ...modelCfg.track_map };
                 if (modelCfg.idle_pool?.length) idlePool = modelCfg.idle_pool;
                 if (modelCfg.greeting_track !== undefined) greetingTrack = modelCfg.greeting_track;
+                if (modelCfg.base_state) baseStateTrack = modelCfg.base_state;
                 if (modelCfg.camera) camPos = modelCfg.camera;
                 if (modelCfg.target) camTarget = modelCfg.target;
                 if (modelCfg.scale) modelScale = modelCfg.scale;
@@ -617,15 +620,21 @@ export async function init(container) {
             actions[clip.name] = action;
         }
 
-        // Rail 6 (base state) — always-active background. Pass 3 will make
-        // this configurable; for now it's the legacy 'idle' track.
+        // Rail 6 (base state) — always-active background. Configured by the
+        // user via Settings → Avatar → Base State; falls through to the
+        // configured 'idle' track when unset. Validates the track actually
+        // exists in the loaded GLB before committing — otherwise rail 6
+        // would point at a missing clip and crossfadeTo would silently do
+        // nothing every time we fall through to base.
+        const resolvedBase = (baseStateTrack && actions[baseStateTrack])
+            ? baseStateTrack
+            : (trackMap.idle || 'idle');
         rails[6].active = true;
-        rails[6].track = trackMap.idle || 'idle';
+        rails[6].track = resolvedBase;
 
-        // Unified mixer 'finished' listener. Replaces the per-action listeners
-        // that crossfadeTo + avatar_animate used to attach individually. When
-        // any clip finishes, identify the oneshot rail that owns it, clear
-        // the slot, re-apply the picker.
+        // Unified mixer 'finished' listener — clears oneshot rails when their
+        // clip ends. Replaces per-action listeners that crossfadeTo and the
+        // old avatar_animate used to attach individually.
         mixer.addEventListener('finished', (e) => {
             const clipName = e.action.getClip().name;
             for (let i = 1; i <= 6; i++) {
@@ -636,6 +645,19 @@ export async function init(container) {
                     return;
                 }
             }
+        });
+
+        // Mixer 'loop' listener for rail 2 wind-down. Fires at each loop
+        // iteration boundary of a LoopRepeat action. If rail 2 has been
+        // marked windDownRequested by a user-init event, clear it now —
+        // her loop completes naturally to the bar, then yields gracefully.
+        mixer.addEventListener('loop', (e) => {
+            if (!rails[2].active || !rails[2].windDownRequested) return;
+            if (e.action.getClip().name !== rails[2].track) return;
+            rails[2].active = false;
+            rails[2].track = null;
+            rails[2].windDownRequested = false;
+            applyWinningRail();
         });
 
         // Greeting → rail 1 as oneshot. When its clip ends, the listener
@@ -758,7 +780,9 @@ export async function init(container) {
         applyWinningRail();
     }
 
-    function writeUserRail(state) {
+    let _userRailTtlTimer = null;
+    function writeUserRail(state, ttlMs) {
+        clearTimeout(_userRailTtlTimer);
         if (state == null) {
             rails[4].active = false;
             rails[4].track = null;
@@ -767,20 +791,49 @@ export async function init(container) {
             rails[4].active = true;
             rails[4].track = track;
             rails[4].mode = ONESHOT_TRACKS.has(track) ? 'oneshot' : 'loop';
+            // Wind-down request: a human is reaching for her. If her loop
+            // (rail 2) is currently active, mark it for graceful end at the
+            // next clip iteration boundary. The mixer 'loop' listener clears
+            // rail 2 when this flag is set, then the picker falls through.
+            if (rails[2].active) rails[2].windDownRequested = true;
+            // Optional TTL: events without natural end-pairs (USER_SENT)
+            // self-expire so she doesn't get stuck in their pose. Resets on
+            // every write — STT_RECORDING_START with no ttlMs cancels any
+            // prior USER_SENT timer (the new state supersedes).
+            if (ttlMs) {
+                _userRailTtlTimer = setTimeout(() => {
+                    rails[4].active = false;
+                    rails[4].track = null;
+                    applyWinningRail();
+                }, ttlMs);
+            }
         }
         applyWinningRail();
     }
 
-    function writeSapphRail(track) {
-        // Pass 1: every Sapph tag lands on rail 1 as oneshot. Pass 2 reads
-        // mode from the dispatch payload and chooses rail 1 vs rail 2.
+    function writeSapphRail(track, mode = 'once') {
+        // mode='once' → rail 1 (oneshot, clip-end clears slot).
+        // mode='loop' → rail 2 (loop, holds until Sapph replaces it or a
+        // user-init event triggers wind-down).
         if (!actions[track]) {
             console.warn(`[Avatar] Track "${track}" not found in model`);
             return;
         }
-        rails[1].active = true;
-        rails[1].track = track;
-        rails[1].mode = 'oneshot';
+        if (mode === 'loop') {
+            // Writing a fresh loop clears any pending wind-down from a
+            // previous loop she replaced.
+            rails[2].active = true;
+            rails[2].track = track;
+            rails[2].mode = 'loop';
+            rails[2].windDownRequested = false;
+            // Clear rail 1 too so a stale oneshot doesn't mask the new loop.
+            rails[1].active = false;
+            rails[1].track = null;
+        } else {
+            rails[1].active = true;
+            rails[1].track = track;
+            rails[1].mode = 'oneshot';
+        }
         applyWinningRail();
     }
 
@@ -813,19 +866,18 @@ export async function init(container) {
         const unsub = eventBus.on(event, () => writeAIRail(state));
         if (unsub) unsubs.push(unsub);
     }
-    for (const [event, state] of Object.entries(USER_TRANSITIONS)) {
-        const unsub = eventBus.on(event, () => writeUserRail(state));
+    for (const [event, cfg] of Object.entries(USER_TRANSITIONS)) {
+        const unsub = eventBus.on(event, () => writeUserRail(cfg.state, cfg.ttlMs));
         if (unsub) unsubs.push(unsub);
     }
 
-    // Sapph-triggered animations: <<avatar: trackname>> in chat responses.
-    // Pass 1: every tag writes rail 1 as oneshot. The unified mixer listener
-    // clears rail 1 on clip-end; picker falls through to whatever's below
-    // (typically rail 3 if she's still mid-turn, else rail 6). Pass 2 will
-    // read mode from the payload to choose rail 1 (oneshot) vs rail 2 (loop).
+    // Sapph-triggered animations: <<avatar: trackname [once|loop]>>.
+    // mode='loop' lands on rail 2 (held until she replaces it or user-init
+    // event triggers wind-down). mode='once' (default) lands on rail 1
+    // (clears on clip-end). Unknown/missing mode → 'once'.
     const avatarUnsub = eventBus.on('avatar_animate', (data) => {
-        const { track } = data || {};
-        if (track) writeSapphRail(track);
+        const { track, mode } = data || {};
+        if (track) writeSapphRail(track, mode === 'loop' ? 'loop' : 'once');
     });
     if (avatarUnsub) unsubs.push(avatarUnsub);
 
@@ -855,6 +907,7 @@ export async function init(container) {
     const _thisCleanup = () => {
         running = false;
         clearTimeout(idleTimer);
+        clearTimeout(_userRailTtlTimer);
         clearInterval(_micPoll);
         unsubs.forEach(fn => fn());
         _chatUnsubs.forEach(fn => fn());

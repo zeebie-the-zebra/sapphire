@@ -76,7 +76,12 @@ registerPluginSettings({
                         <input type="checkbox" id="avatar-strip-tags">
                         <span>Hide animation tags from chat</span>
                     </label>
-                    <p class="avatar-help" style="margin:2px 0 0 22px">Strip &lt;&lt;avatar: ...&gt;&gt; tags so they don't appear in chat messages. Animations still play.</p>
+                    <p class="avatar-help" style="margin:2px 0 6px 22px">Strip &lt;&lt;avatar: ...&gt;&gt; tags so they don't appear in chat messages. Animations still play.</p>
+                    <label class="avatar-checkbox">
+                        <input type="checkbox" id="avatar-user-tags">
+                        <span>Let my typed tags trigger animations</span>
+                    </label>
+                    <p class="avatar-help" style="margin:2px 0 0 22px">When on, &lt;&lt;avatar: trackname&gt;&gt; tags YOU type in chat also play. Off by default — normally only the AI drives her avatar.</p>
                 </div>
 
                 <div class="avatar-section">
@@ -94,9 +99,22 @@ registerPluginSettings({
                     <div id="avatar-track-grid" class="avatar-track-grid"></div>
                 </div>
 
+                <div class="avatar-section" id="avatar-base-section" style="display:none">
+                    <h3>Base State</h3>
+                    <p class="avatar-help">Default pose when nothing else is happening. Variety picks layer on top.</p>
+                    <div class="avatar-field">
+                        <label>Track</label>
+                        <select id="avatar-base-state"></select>
+                    </div>
+                </div>
+
                 <div class="avatar-section" id="avatar-idle-section" style="display:none">
                     <h3>Idle Variety Pool</h3>
                     <p class="avatar-help">Tracks to cycle through when idle. Higher weight = more frequent.</p>
+                    <div class="avatar-pool-actions">
+                        <button type="button" class="avatar-btn-secondary" id="avatar-pool-check-all">Check all</button>
+                        <button type="button" class="avatar-btn-secondary" id="avatar-pool-uncheck-all">Uncheck all</button>
+                    </div>
                     <div id="avatar-idle-pool"></div>
                 </div>
 
@@ -151,8 +169,10 @@ registerPluginSettings({
             if (!cfg) return;
             const injectCb = container.querySelector('#avatar-inject-prompt');
             const stripCb = container.querySelector('#avatar-strip-tags');
+            const userCb = container.querySelector('#avatar-user-tags');
             if (injectCb) injectCb.checked = cfg.inject_prompt !== false;
             if (stripCb) stripCb.checked = cfg.strip_tags === true;
+            if (userCb) userCb.checked = cfg.user_tags === true;
         });
 
         // Wire behavior checkboxes — save immediately on change
@@ -172,6 +192,15 @@ registerPluginSettings({
                 });
                 // Update the live scanner
                 window._avatarStripTags = e.target.checked;
+            }
+            if (e.target.id === 'avatar-user-tags') {
+                fetch(`${API}/config`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
+                    body: JSON.stringify({ user_tags: e.target.checked }),
+                });
+                // Update the live scanner
+                window._avatarUserTags = e.target.checked;
             }
         });
 
@@ -252,9 +281,11 @@ async function loadTrackMapping(container) {
     const trackMap = _activeConfig.track_map || {};
     const idlePool = _activeConfig.idle_pool || [];
     const greetingTrack = _activeConfig.greeting_track || '';
+    const baseState = _activeConfig.base_state || '';
 
     // Show sections
     container.querySelector('#avatar-mapping-section').style.display = '';
+    container.querySelector('#avatar-base-section').style.display = '';
     container.querySelector('#avatar-idle-section').style.display = '';
     container.querySelector('#avatar-greeting-section').style.display = '';
 
@@ -313,6 +344,25 @@ async function loadTrackMapping(container) {
         });
     });
 
+    // Check-all / uncheck-all bulk buttons for the idle pool. Flips every
+    // [data-track] checkbox and fires its change event so the weight +
+    // oneshot inputs disable/enable in sync.
+    const setAllPoolChecks = (checked) => {
+        poolEl.querySelectorAll('input[type="checkbox"][data-track]').forEach(cb => {
+            if (cb.checked !== checked) {
+                cb.checked = checked;
+                cb.dispatchEvent(new Event('change'));
+            }
+        });
+    };
+    container.querySelector('#avatar-pool-check-all')?.addEventListener('click', () => setAllPoolChecks(true));
+    container.querySelector('#avatar-pool-uncheck-all')?.addEventListener('click', () => setAllPoolChecks(false));
+
+    // Base state dropdown
+    const baseSel = container.querySelector('#avatar-base-state');
+    baseSel.innerHTML = trackOptions;
+    if (baseState) baseSel.value = baseState;
+
     // Greeting dropdown
     const greetSel = container.querySelector('#avatar-greeting-track');
     greetSel.innerHTML = `<option value="">(none)</option>` + trackOptions;
@@ -340,7 +390,8 @@ function collectConfig(container) {
         idle_pool.push({ track, weight, oneshot });
     });
 
-    // Greeting + scale
+    // Base, greeting + scale
+    const base_state = container.querySelector('#avatar-base-state')?.value || null;
     const greeting_track = container.querySelector('#avatar-greeting-track')?.value || null;
     const scale = parseFloat(container.querySelector('#avatar-scale')?.value || '1.0') || 1.0;
 
@@ -351,6 +402,7 @@ function collectConfig(container) {
                 ..._activeConfig,
                 track_map,
                 idle_pool,
+                base_state,
                 greeting_track,
                 scale,
             }
@@ -414,6 +466,12 @@ function injectStyles() {
         .avatar-btn-sm { padding: 3px 8px; font-size: 11px; }
         .avatar-btn-danger { color: var(--error, #ff4444); }
         .avatar-btn-danger:hover { background: var(--error, #ff4444); color: white; }
+        .avatar-pool-actions { display: flex; gap: 6px; margin-bottom: 8px; }
+        .avatar-btn-secondary {
+            padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px;
+            background: var(--bg-primary); color: var(--text); cursor: pointer; font-size: 11px;
+        }
+        .avatar-btn-secondary:hover { background: var(--bg-secondary); }
     `;
     document.head.appendChild(style);
 }

@@ -353,9 +353,9 @@ export const renderHistory = (hist) => {
         if (!msg || typeof msg !== 'object') return;
         // Strip avatar tags from history if setting is enabled
         if (window._avatarStripTags) {
-            if (msg.content) msg.content = msg.content.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+\d+(?:\.\d+)?s)?>>/g, '');
+            if (msg.content) msg.content = msg.content.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+(?:once|loop|\d+(?:\.\d+)?s))?>>/g, '');
             if (msg.parts) msg.parts = msg.parts.map(p => p.type === 'content' && p.text
-                ? { ...p, text: p.text.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+\d+(?:\.\d+)?s)?>>/g, '') } : p);
+                ? { ...p, text: p.text.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+(?:once|loop|\d+(?:\.\d+)?s))?>>/g, '') } : p);
         }
         const { clone } = createMessage(msg, i, hist.length, true);
         chat.appendChild(clone);
@@ -519,11 +519,11 @@ export const finishStreaming = async (ephemeral = false) => {
                     const lastMsg = hist[hist.length - 1];
                     // Strip avatar tags from history if setting is enabled
                     if (window._avatarStripTags && lastMsg.content) {
-                        lastMsg.content = lastMsg.content.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+\d+(?:\.\d+)?s)?>>/g, '');
+                        lastMsg.content = lastMsg.content.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+(?:once|loop|\d+(?:\.\d+)?s))?>>/g, '');
                     }
                     if (window._avatarStripTags && lastMsg.parts) {
                         lastMsg.parts = lastMsg.parts.map(p => p.type === 'content' && p.text
-                            ? { ...p, text: p.text.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+\d+(?:\.\d+)?s)?>>/g, '') }
+                            ? { ...p, text: p.text.replace(/<<avatar:\s*[a-zA-Z0-9_]+(?:\s+(?:once|loop|\d+(?:\.\d+)?s))?>>/g, '') }
                             : p);
                     }
                     const { clone } = createMessage(lastMsg, hist.length - 1, hist.length, true);

@@ -45,6 +45,7 @@ def _get_config():
         'models': models,
         'inject_prompt': state.get('inject_prompt', True),
         'strip_tags': state.get('strip_tags', False),
+        'user_tags': state.get('user_tags', False),
     }
 
 
@@ -220,18 +221,21 @@ async def save_config(**kwargs):
     if 'strip_tags' in body:
         state = _get_state()
         state.save('strip_tags', bool(body['strip_tags']))
+    if 'user_tags' in body:
+        state = _get_state()
+        state.save('user_tags', bool(body['user_tags']))
 
     # Update active location
     if 'active_location' in body:
         cfg['active_location'] = body['active_location']
 
     # Shorthand: update just the active model's config
-    if 'track_map' in body or 'idle_pool' in body or 'greeting_track' in body or 'camera' in body or 'target' in body:
+    if any(k in body for k in ('track_map', 'idle_pool', 'base_state', 'greeting_track', 'camera', 'target')):
         active = cfg.get('active_model', '')
         if active:
             if active not in cfg.get('models', {}):
                 cfg['models'][active] = {}
-            for key in ('track_map', 'idle_pool', 'greeting_track', 'camera', 'target'):
+            for key in ('track_map', 'idle_pool', 'base_state', 'greeting_track', 'camera', 'target'):
                 if key in body:
                     cfg['models'][active][key] = body[key]
 

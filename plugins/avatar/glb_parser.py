@@ -122,28 +122,24 @@ def build_default_config(track_names):
     for state in ['idle', 'processing', 'typing', 'listening', 'speaking', 'toolcall', 'happy', 'wakeword', 'agent', 'cron', 'user_typing', 'reading']:
         track_map[state] = mapped.get(state, fallback)
 
-    # Default idle pool — include idle + any mapped tracks at low weights
-    idle_pool = []
-    idle_track = track_map.get('idle', fallback)
-    idle_pool.append({'track': idle_track, 'weight': 60, 'oneshot': False})
+    # Default idle pool — EVERY track checked at uniform weight. User opts
+    # out via the settings UI's check-all/uncheck-all helpers rather than
+    # opting in. Matches the "give me the buttons, I'll uncheck" intent.
+    idle_pool = [
+        {'track': name, 'weight': 10, 'oneshot': False}
+        for name in track_names
+    ]
 
-    # Add a few variety tracks if they exist
-    for name in track_names:
-        if name == idle_track:
-            continue
-        lower = name.lower()
-        if lower in ('defaultanim', 'default'):
-            idle_pool.append({'track': name, 'weight': 20, 'oneshot': False})
-        elif lower in ('wave', 'greet', 'greeting'):
-            idle_pool.append({'track': name, 'weight': 3, 'oneshot': True})
-        elif lower in ('happy', 'joy', 'smile'):
-            idle_pool.append({'track': name, 'weight': 4, 'oneshot': True})
+    # Default base state (rail 6 — always-on background) is the auto-mapped
+    # idle track. User can override via settings.
+    base_state = track_map.get('idle', fallback)
 
     greeting = mapped.get('wave', None)
 
     return {
         'track_map': track_map,
         'idle_pool': idle_pool,
+        'base_state': base_state,
         'greeting_track': greeting,
         'camera': {'x': 0, 'y': 1.3, 'z': 4.4},
         'target': {'x': 0, 'y': 1.1, 'z': 0},

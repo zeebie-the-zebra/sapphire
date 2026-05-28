@@ -1,6 +1,6 @@
 // api.js - Backend communication
 import { fetchWithTimeout } from './shared/fetch.js';
-import { dispatch } from './core/event-bus.js';
+import { dispatch, on, Events } from './core/event-bus.js';
 
 export { fetchWithTimeout };
 
@@ -262,43 +262,81 @@ export const streamChatContinue = async (text, prefill, onChunk, onComplete, onE
 // Avatar tag scanner — wraps onChunk to detect <<avatar: trackname>> in streamed responses
 // Reads strip_tags setting from avatar plugin state (cached on page load)
 window._avatarStripTags = false;
+window._avatarUserTags = false;  // gated by the "User tags trigger animations" setting
 fetch('/api/plugin/avatar/config').then(r => {
     if (!r.ok) { console.warn('[Avatar] Config fetch failed:', r.status); return {}; }
     return r.json();
 }).then(cfg => {
     window._avatarStripTags = cfg?.strip_tags ?? false;
-    console.log('[Avatar] strip_tags =', window._avatarStripTags);
+    window._avatarUserTags = cfg?.user_tags ?? false;
 }).catch(e => { console.warn('[Avatar] Config fetch error:', e); });
+
+// User-typed avatar tags can also fire animations, when enabled in settings.
+// Scans USER_SENT payloads with the same regex as the AI chunk scanner.
+on(Events.USER_SENT, (data) => {
+    if (!window._avatarUserTags) return;
+    const text = data?.text || '';
+    if (!text) return;
+    const userTagRe = /<<avatar:\s*([a-zA-Z0-9_]+)(?:\s+(once|loop|\d+(?:\.\d+)?s))?>>/g;
+    for (const match of text.matchAll(userTagRe)) {
+        const track = match[1];
+        const mode = (match[2] === 'loop') ? 'loop' : 'once';
+        dispatch('avatar_animate', { track, mode });
+    }
+});
 
 function _wrapChunkWithAvatarScan(onChunk) {
     let scanBuf = '';
     let holdBuf = '';  // text held back while a potential tag is forming
-    const tagRe = /<<avatar:\s*([a-zA-Z0-9_]+)(?:\s+(\d+(?:\.\d+)?s))?>>/g;
+    // Permissive regex: matches `<<avatar: track>>`, `<<avatar: track loop>>`,
+    // `<<avatar: track once>>`, and (for backward compat with old chat history)
+    // `<<avatar: track 2.5s>>`. The dispatcher treats any captured token that
+    // isn't 'loop' as the default 'once' mode, so old syntax keeps its
+    // historical behavior and old messages still strip cleanly.
+    const tagRe = /<<avatar:\s*([a-zA-Z0-9_]+)(?:\s+(once|loop|\d+(?:\.\d+)?s))?>>/g;
     return (chunk) => {
         // Scan for complete tags
         scanBuf += chunk;
         for (const match of scanBuf.matchAll(tagRe)) {
             const track = match[1];
-            const duration = match[2] ? parseFloat(match[2]) * 1000 : null;
-            dispatch('avatar_animate', { track, duration });
+            const mode = (match[2] === 'loop') ? 'loop' : 'once';
+            dispatch('avatar_animate', { track, mode });
         }
-        const lastOpen = scanBuf.lastIndexOf('<<');
-        scanBuf = lastOpen >= 0 && scanBuf.indexOf('>>', lastOpen) < 0 ? scanBuf.slice(lastOpen) : '';
+        // Carry over any partial tag for the next chunk. Two cases:
+        //   (a) Unclosed `<<...` — keep from the last `<<` onwards.
+        //   (b) Trailing single `<` — LLM tokenizers commonly emit `<<` as
+        //       two separate `<` tokens, so a trailing single `<` could be
+        //       the first half of a forming `<<`. Without this branch the
+        //       leading `<` was discarded and the next chunk's `<avatar:`
+        //       would never reach the regex as `<<avatar:`. 2026-05-27.
+        const lastDouble = scanBuf.lastIndexOf('<<');
+        if (lastDouble >= 0 && scanBuf.indexOf('>>', lastDouble) < 0) {
+            scanBuf = scanBuf.slice(lastDouble);
+        } else if (scanBuf.endsWith('<')) {
+            scanBuf = '<';
+        } else {
+            scanBuf = '';
+        }
 
         if (window._avatarStripTags) {
             // Buffer text to avoid showing partial tags
             holdBuf += chunk;
             // Strip complete tags
             holdBuf = holdBuf.replace(tagRe, '');
-            // Check for a partial tag at the end
+            // Hold any partial forming tag — both `<<...` and trailing `<`
+            // (split-bracket case, same as scanBuf above).
             const partialIdx = holdBuf.lastIndexOf('<<');
+            let holdFrom = -1;
             if (partialIdx >= 0 && holdBuf.indexOf('>>', partialIdx) < 0) {
-                // Partial tag — flush everything before it, hold the rest
-                const safe = holdBuf.slice(0, partialIdx);
-                holdBuf = holdBuf.slice(partialIdx);
+                holdFrom = partialIdx;
+            } else if (holdBuf.endsWith('<')) {
+                holdFrom = holdBuf.length - 1;
+            }
+            if (holdFrom >= 0) {
+                const safe = holdBuf.slice(0, holdFrom);
+                holdBuf = holdBuf.slice(holdFrom);
                 if (safe) { onChunk(safe); dispatch('chat_chunk', { text: safe }); }
             } else {
-                // No partial tag — flush all
                 if (holdBuf) { onChunk(holdBuf); dispatch('chat_chunk', { text: holdBuf }); }
                 holdBuf = '';
             }
