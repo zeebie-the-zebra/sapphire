@@ -305,12 +305,16 @@ async def list_people_scopes(request: Request, _=Depends(require_login)):
 
 @router.post("/api/knowledge/people/scopes")
 async def create_people_scope(request: Request, _=Depends(require_login)):
+    import re as _re
     from plugins.memory.tools import knowledge_tools as knowledge
     data = await request.json()
     name = data.get('name', '').strip().lower()
-    if not name or len(name) > 32:
+    # Match the validation of the other three scope domains (memory/goal/knowledge)
+    # so a lockstep create can't half-succeed and orphan a scope.
+    if not name or not _re.match(r'^[a-z0-9_]{1,32}$', name):
         raise HTTPException(status_code=400, detail="Invalid scope name")
-    knowledge.create_people_scope(name)
+    if not knowledge.create_people_scope(name):
+        raise HTTPException(status_code=500, detail="Failed to create scope")
     from core.event_bus import publish, Events
     publish(Events.SCOPE_CHANGED, {"kind": "people", "action": "created", "name": name})
     return {"created": name}

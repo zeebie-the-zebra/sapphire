@@ -36,13 +36,15 @@ function resetFilters() { _memSearch = ''; _memSort = 'newest'; _memLabelFilter 
 export default {
     init(el) { container = el; },
     async show() {
+        // Subscribe BEFORE the awaits so a fast tab-switch (hide() during the
+        // await) can't orphan the subscription. Guarded so re-entry won't double.
+        if (!unsub) unsub = subscribeMindDomain(DOMAIN, () => scope, () => container?.offsetParent !== null,
+            () => { _invalidateMemCache(); renderMemories(); });
         if (window._mindScope) { scope = window._mindScope; delete window._mindScope; }
         else { const s = await scopeForChatTab(SCOPE_KEY); if (s) scope = s; }
         delete window._mindTab;
         scopes = await listScopes(SCOPE_ENDPOINT);
         render();
-        unsub = subscribeMindDomain(DOMAIN, () => scope, () => container?.offsetParent !== null,
-            () => { _invalidateMemCache(); renderMemories(); });
     },
     hide() { if (unsub) { unsub(); unsub = null; } }
 };

@@ -18,16 +18,21 @@ function esc(s) {
  * @param {string} selectedScope
  */
 export function renderScopeSidebar(scopes, selectedScope) {
+    // Fallback so a fetch failure (listScopes → []) still shows 'default'
+    // rather than an empty, unusable sidebar.
+    const items = (scopes && scopes.length) ? scopes : [{ name: 'default' }];
     return renderPanelList({
         title: 'Scopes',
-        items: scopes,
+        items,
         selectedId: selectedScope,
         idKey: 'name',
         renderItem: s => `<span class="ts-item-name">${esc(s.name)}</span>`
             + (s.count != null ? `<span class="ts-item-count">${s.count}</span>` : ''),
         addTitle: 'New scope (all Mind sections)',
         showDelete: true,
-        deletable: !!selectedScope && selectedScope !== 'default',
+        // Only enable the trash when the selected scope actually exists in the
+        // list (not a ghost/stale selection) and isn't 'default'.
+        deletable: items.some(s => s.name === selectedScope) && selectedScope !== 'default',
         deleteTitle: `Delete scope "${selectedScope || ''}" everywhere`,
     });
 }
@@ -47,9 +52,12 @@ export function bindScopeSidebar(container, { onScopeChange, onChanged } = {}) {
                 ui.showToast('Invalid name — use a-z, 0-9, _ (max 32)', 'error');
                 return;
             }
-            const ok = await createScopeEverywhere(name);
-            if (ok) { ui.showToast(`Scope "${name}" created`, 'success'); onChanged && onChanged(name); }
-            else ui.showToast('Failed to create scope', 'error');
+            const res = await createScopeEverywhere(name);
+            if (res.ok) {
+                const partial = res.done < res.total;
+                ui.showToast(partial ? `Scope "${name}" created in ${res.done}/${res.total} sections (some failed)` : `Scope "${name}" created`, partial ? 'warning' : 'success');
+                onChanged && onChanged(name);
+            } else ui.showToast('Failed to create scope', 'error');
         },
         onDelete: async () => {
             const sel = container.querySelector('.panel-list-item.active');
@@ -57,9 +65,12 @@ export function bindScopeSidebar(container, { onScopeChange, onChanged } = {}) {
             if (!name || name === 'default') return;
             const confirmed = await confirmScopeDelete(name);
             if (!confirmed) return;
-            const ok = await deleteScopeEverywhere(name);
-            if (ok) { ui.showToast(`Scope "${name}" deleted`, 'success'); onChanged && onChanged(null); }
-            else ui.showToast('Failed to delete scope', 'error');
+            const res = await deleteScopeEverywhere(name);
+            if (res.ok) {
+                const partial = res.done < res.total;
+                ui.showToast(partial ? `Scope "${name}" deleted from ${res.done}/${res.total} sections (some failed)` : `Scope "${name}" deleted`, partial ? 'warning' : 'success');
+                onChanged && onChanged(null);
+            } else ui.showToast('Failed to delete scope', 'error');
         },
     });
 }

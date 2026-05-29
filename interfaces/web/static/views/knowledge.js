@@ -20,13 +20,13 @@ let unsub = null;
 export default {
     init(el) { container = el; },
     async show() {
+        if (!unsub) unsub = subscribeMindDomain(DOMAIN, () => scope, () => container?.offsetParent !== null,
+            () => renderKnowledge(content(), TAB_TYPE, scope));
         if (window._mindScope) { scope = window._mindScope; delete window._mindScope; }
         else { const s = await scopeForChatTab(SCOPE_KEY); if (s) scope = s; }
         delete window._mindTab;
         scopes = await listScopes(SCOPE_ENDPOINT);
         render();
-        unsub = subscribeMindDomain(DOMAIN, () => scope, () => container?.offsetParent !== null,
-            () => renderKnowledge(content(), TAB_TYPE, scope));
     },
     hide() { if (unsub) { unsub(); unsub = null; } }
 };

@@ -38,7 +38,9 @@ export async function listScopes(endpoint) {
     } catch { return []; }
 }
 
-/** Lockstep create: POST {name} to EVERY Mind scope domain. Tolerant; true if any ok. */
+/** Lockstep create: POST {name} to EVERY Mind scope domain.
+ *  Returns {ok, done, total} so callers can surface partial success (the
+ *  alignment invariant: a scope should land in ALL domains, not some). */
 export async function createScopeEverywhere(name) {
     const decls = await mindScopeDomains();
     const results = await Promise.allSettled(decls.map(d =>
@@ -49,10 +51,12 @@ export async function createScopeEverywhere(name) {
             body: JSON.stringify({ name }),
         })
     ));
-    return results.some(r => r.status === 'fulfilled' && r.value.ok);
+    const done = results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+    return { ok: done > 0, done, total: decls.length };
 }
 
-/** Lockstep delete: DELETE {confirm:'DELETE'} from EVERY Mind scope domain. */
+/** Lockstep delete: DELETE {confirm:'DELETE'} from EVERY Mind scope domain.
+ *  Returns {ok, done, total}. */
 export async function deleteScopeEverywhere(name) {
     const decls = await mindScopeDomains();
     const enc = encodeURIComponent(name);
@@ -64,5 +68,6 @@ export async function deleteScopeEverywhere(name) {
             body: JSON.stringify({ confirm: 'DELETE' }),
         })
     ));
-    return results.some(r => r.status === 'fulfilled' && r.value.ok);
+    const done = results.filter(r => r.status === 'fulfilled' && r.value.ok).length;
+    return { ok: done > 0, done, total: decls.length };
 }
