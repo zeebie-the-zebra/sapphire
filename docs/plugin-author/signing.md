@@ -9,6 +9,7 @@ Sapphire uses ed25519 signatures to verify plugin integrity.
 | **Signed** | Green "Signed" | Always loads |
 | **Unsigned** | Yellow "Unsigned" | Blocked unless "Allow Unsigned Plugins" is on |
 | **Tampered** | Red "Tampered" | Always blocked — no override |
+| **Validated** | "Validated" | Managed/Docker mode only — unsigned but passed strict file validation |
 
 ## How It Works
 

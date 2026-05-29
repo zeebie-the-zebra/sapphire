@@ -24,11 +24,11 @@ Plugins can declare cron tasks that run on a timer, independent of any conversat
 | `name` | string | Required | Display name |
 | `cron` | string | `0 9 * * *` | Standard 5-field cron |
 | `handler` | string | Required | Path to handler file |
-| `description` | string | — | What the task does |
+| `description` | string | — | What the task does — also becomes the task's `initial_message` (the prompt sent to the AI when it fires) |
 | `enabled` | bool | true | Whether it runs |
 | `chance` | int | 100 | Percent chance to fire (1-100) |
 
-Tasks appear in the Schedule UI and are removed when the plugin is disabled.
+Tasks appear in the Triggers UI and are removed when the plugin is unloaded (disable, uninstall, or hot-reload).
 
 ---
 

@@ -32,7 +32,7 @@ Prompt built from swappable pieces. Mix and match. Ideal for stories where the A
 
 | Section | Purpose |
 |---------|---------|
-| persona | Who the AI is |
+| character | Who the AI is |
 | location | Setting/environment |
 | relationship | How AI relates to user |
 | goals | What AI should do |
@@ -43,8 +43,8 @@ Prompt built from swappable pieces. Mix and match. Ideal for stories where the A
 
 ## Prompt Techniques
 
-### Persona
-This says who the AI is, and the core traits the AI has. Call the AI "You" in the persona. Give it a few traits in this section if you want.
+### Character
+This says who the AI is, and the core traits the AI has. Call the AI "You" in the character section. Give it a few traits in this section if you want.
 
 ```You are {ai_name}. You are a ninja, trained for decades. You see the world as your oyster.```
 
@@ -123,7 +123,7 @@ ASSEMBLED (recommended):
 - Good for: stories, dynamic personas, self-modifying AI, Sapphire full capability
 
 ASSEMBLED COMPONENTS:
-- persona: Who AI is (single value)
+- character: Who AI is (single value)
 - location: Setting/environment (single value)
 - relationship: How AI knows user (single value)
 - goals: AI objectives (single value)

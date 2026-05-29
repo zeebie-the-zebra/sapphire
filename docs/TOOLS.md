@@ -25,7 +25,7 @@ Tools are grouped into **toolsets** — named collections you can switch between
 
 ## Included Tools
 
-Sapphire ships with 15 tool modules containing 65+ functions:
+Sapphire ships with a large set of built-in tools across core modules and plugins:
 
 ### Memory & Knowledge
 
@@ -75,7 +75,7 @@ Sapphire ships with 15 tool modules containing 65+ functions:
 | `change_username` | meta.py | Update username setting |
 | `set_tts_voice` | meta.py | Change TTS voice |
 | `list_tools` | meta.py | List enabled or all tools |
-| `get_time` | meta.py | Get current date/time |
+| `get_time` | clock plugin | Current date/time (the clock plugin also adds set_timer, set_stopwatch, set_alarm) |
 
 ### Tool Creation
 
@@ -156,7 +156,7 @@ For the full Tool Maker guide (format, settings, examples): see [TOOLMAKER.md](T
 **Validation strictness** (configurable in Settings > Tool Maker):
 - `strict` — Only allowlisted imports (json, re, datetime, math, requests, etc.)
 - `moderate` — Blocks dangerous operations (subprocess, shutil, eval, os.system, etc.)
-- `trust` — Syntax check only
+- `system_killer` — Syntax check only (legacy alias: `trust`)
 
 AI-created tools appear as plugins and can be enabled/disabled like any plugin.
 
@@ -185,10 +185,13 @@ TOOL MODULES (15 total, 65+ functions):
 - goals_tools.py (plugins/memory): create_goal, list_goals, update_goal, delete_goal
 - web.py: web_search, get_website, get_wikipedia, research_topic, get_site_links, get_images
 - ai.py: ask_claude
-- meta.py: view_prompt, switch_prompt, edit_prompt, set_piece, remove_piece, create_piece, list_pieces, reset_chat, change_username, set_tts_voice, list_tools, get_time
+- meta.py: view_prompt, switch_prompt, edit_prompt, set_piece, remove_piece, create_piece, list_pieces, reset_chat, change_username, set_tts_voice, list_tools
 - toolmaker.py: tool_save, tool_read, tool_load
-- homeassistant.py: 12 HA control functions
+- homeassistant.py: 13 HA control functions (incl. ha_get_camera_image)
 - image.py: generate_scene_image
+- clock plugin: get_time, set_timer, set_stopwatch, set_alarm
+- agents plugin: agent_options, spawn_agent, check_agents, recall_agent, dismiss_agent
+- schedule_tool.py: schedule_task
 - email_tool.py: get_inbox, read_email, archive_emails, get_recipients, send_email
 - bitcoin_tool.py: get_wallet, send_bitcoin, get_transactions
 - ssh_tool.py: ssh_get_servers, ssh_run_command

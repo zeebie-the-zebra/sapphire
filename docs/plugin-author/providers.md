@@ -234,7 +234,7 @@ A provider that fails the canary is **disabled** at the registry level and Sapph
 
 Your plugin doesn't have to do anything special — this all works as long as your `PROVIDER_ID` is stable and your `embed()` contract is honored.
 
-**Reference implementation:** `plugins/embedder-minilm/` — 384-dim all-MiniLM-L6-v2 wrapper via the `transformers` library. Shows the full pattern: lazy load, CPU inference, mean-pool + L2-normalize, canary-clean output.
+**Reference implementations:** the built-in embedding providers in `core/embeddings/__init__.py` (`LocalEmbedder`, `RemoteEmbedder`) show the full pattern: lazy load, CPU/remote inference, L2-normalized, canary-clean output. (There is no standalone `embedder-minilm` plugin — embedding providers ship in core.)
 
 **Gotchas:**
 - The registry calls your class's `__init__()` with no arguments. Lazy-load the model inside `available` or inside `embed()`, not in `__init__` — otherwise boot stalls on every restart.
@@ -304,4 +304,4 @@ If a provider plugin is the configured provider (e.g., `TTS_PROVIDER=elevenlabs`
 ## Examples
 
 - `plugins/elevenlabs/` — TTS provider with API key, model selection, voice picker
-- `plugins/embedder-minilm/` — Embedding provider (384-dim all-MiniLM-L6-v2 via `transformers`). Minimal, no extra deps beyond torch + transformers, good template for CPU-inference-based embedders. Exercises the full swap + re-embed + provenance path.
+- `core/embeddings/__init__.py` — the built-in embedding providers (`LocalEmbedder`, `RemoteEmbedder`, etc.); study these for the swap + re-embed + provenance path.

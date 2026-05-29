@@ -26,12 +26,12 @@ Declare settings in `plugin.json` and they auto-render in Settings > Plugins:
 | `label` | yes | Display name |
 | `default` | yes | Default value |
 | `help` | no | Description text |
-| `widget` | no | Override: `"textarea"`, `"password"`, `"select"`, `"radio"` |
+| `widget` | no | Override: `"textarea"`, `"password"`, `"select"`, `"radio"`, `"button"` (action button) |
 | `options` | no | `[{label, value}]` for select/radio |
 | `placeholder` | no | Input hint text |
 | `confirm` | no | Danger confirm gate (see below) |
 
-Widget inference when omitted: `string` -> text, `string` + `options` -> select, `number` -> number spinner, `boolean` -> toggle.
+Widget inference when omitted: `string` -> text, `string` + `options` -> select, `number` -> number spinner, `boolean` -> toggle, `textarea` type -> textarea.
 
 ### Danger Confirm
 

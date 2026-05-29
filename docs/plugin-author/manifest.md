@@ -6,7 +6,7 @@ Every plugin needs a `plugin.json` in its root folder.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | string | Yes | — | Unique identifier (must match folder name) |
+| `name` | string | Yes | — | Unique identifier (overrides the folder name if set; folder name is the fallback) |
 | `version` | string | No | — | Semver (`1.0.0`) |
 | `description` | string | No | — | One-line summary |
 | `author` | string | No | — | Author name |

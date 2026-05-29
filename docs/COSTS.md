@@ -23,7 +23,7 @@ A few things change every turn (spice rotation, current time, plugin context). P
 
 In 2.6.4 these moved to the **ghost-message rail**: a separate per-turn message inserted *after* the cached prefix, just before your new input. Spice and datetime no longer break cache. They also hit the model with stronger compliance because they're closer to the moment of generation (recency effect).
 
-**The only thing that still breaks system-prompt caching:** plugins that register a `prompt_inject` hook (e.g. story-state injectors, Vanta-class plugins). When such a plugin is active, system-prompt caching auto-disables on Claude to avoid the 1.25× cache-write penalty for guaranteed misses. Tools and history still cache.
+**The only thing that still breaks system-prompt caching:** plugins that register a `prompt_inject` hook (e.g. RAG/context injectors, Vanta-class plugins). When such a plugin is active, system-prompt caching auto-disables on Claude to avoid the 1.25× cache-write penalty for guaranteed misses. Tools and history still cache.
 
 If you don't have any `prompt_inject` plugins active and you're not sure why your hit rate is low, check Settings → Dashboard → Token Metrics for per-model breakdown.
 

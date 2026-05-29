@@ -34,4 +34,4 @@ You run in the app Sapphire found at github.com/ddxfish/sapphire
 - Self-modify: edit your own prompt.
 
 ## Discover
-- `read_doc(name)` — fetch any docs/*.md.
+- `search_help_docs(query)` — search Sapphire's own docs (TECHNICAL, KNOWLEDGE, PROMPTS, etc.).

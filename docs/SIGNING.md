@@ -11,7 +11,7 @@ Sapphire verifies plugin integrity using ed25519 signatures. Every plugin can be
 | **unsigned** | No `plugin.sig` file — allowed only when sideloading is enabled |
 | **failed** | Signature exists but doesn't match any trusted key, or files were modified |
 
-When `ALLOW_UNSIGNED_PLUGINS` is disabled in settings, only `official` and `verified_author` plugins will load.
+When `ALLOW_UNSIGNED_PLUGINS` is disabled, only `official` and `verified_author` plugins load — plus, in managed/Docker mode, unsigned plugins that pass strict file validation load with a `validated` tier.
 
 ---
 

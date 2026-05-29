@@ -73,7 +73,7 @@ Configure in Settings → Plugins → Agents:
 
 | Setting | What it does |
 |---------|-------------|
-| **Max Concurrent** | How many agents can run at once (default 3) |
+| **Max Concurrent** | How many agents can run at once (default 3, hard-clamped to 1–5) |
 | **Default Toolset** | Which toolset agents get by default |
 | **Roster** | Pre-configured agent profiles with name, provider, and model |
 
@@ -128,7 +128,7 @@ LIFECYCLE:
 - Auto-return to originating chat, queues if mid-stream
 
 LIMITS:
-- max_concurrent (default 3, configurable)
+- max_concurrent (default 3, hard-clamped to 1–5)
 - LLM agents: max 10 tool rounds per mission
 - Scopes default to 'none' for isolation
 

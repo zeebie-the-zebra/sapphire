@@ -18,7 +18,7 @@ Shows your current Sapphire version and branch. Has buttons to:
 Sapphire checks GitHub for new versions automatically (every 24 hours, starting 30 seconds after boot).
 
 - Shows your current version vs latest available
-- One-click **Update** button runs `git pull --ff-only` with an automatic pre-update backup
+- One-click **Update** button: preflight checks + automatic pre-update backup, then a *deferred* `git pull` + `pip install -r requirements.txt` applied by the runner on restart
 - After updating, Sapphire restarts itself
 
 ### How Updates Work
@@ -26,7 +26,7 @@ Sapphire checks GitHub for new versions automatically (every 24 hours, starting 
 1. Reads your local `VERSION` file
 2. Checks the same file on GitHub for your current branch
 3. Compares versions — if remote is newer, shows the update button
-4. On update: creates backup → `git pull --ff-only` → restarts
+4. On update: preflight + backup → writes a pending-update marker and restarts → the runner (`main.py`) applies `git pull` + `pip install` *before* relaunching Sapphire
 
 ### Special Cases
 
@@ -38,7 +38,7 @@ Sapphire checks GitHub for new versions automatically (every 24 hours, starting 
 
 ## Token Metrics
 
-Tracks every LLM call over a rolling 30-day window.
+Tracks every LLM call. Usage is retained for 90 days (the dashboard's default view shows the last 30).
 
 ### What's Tracked
 
@@ -82,8 +82,8 @@ SYSTEM:
 UPDATES:
 - Auto-checks GitHub every 24 hours
 - GET /api/system/update-check - check for updates
-- POST /api/system/update - run update (backup + git pull + restart)
-- Docker/fork/no-git cases handled with appropriate instructions
+- POST /api/system/update - run update (preflight + backup + deferred git pull/pip on restart)
+- Docker/fork/no-git/dev-branch cases handled with appropriate instructions (the update button is blocked on the `dev` branch)
 
 METRICS API:
 - GET /api/metrics/enabled - check if tracking is on
