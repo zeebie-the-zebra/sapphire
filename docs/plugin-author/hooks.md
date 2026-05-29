@@ -21,6 +21,7 @@ All hooks receive a mutable `HookEvent`. Changes persist across handlers in prio
 | `tts_chunk_audio` | Streaming TTS: per chunk, after synth | `metadata['audio']` carrier | Transform/replace chunk audio bytes |
 | `tts_stream_end` | Streaming TTS: turn ends | — | Finalize captions/recording |
 | `on_wake` | Wakeword detected | — | Play sounds, log, custom reactions |
+| `provider_switched` | After a TTS/STT/embed provider hot-swap | metadata `kind`, `provider` | Warm caches / reset state (observational) |
 
 ### Manifest Declaration
 
@@ -90,6 +91,7 @@ Handlers get the `VoiceChatSystem` instance via `event.metadata.get("system")`. 
 | `tts_chunk_audio` | **Yes** | Yes | `metadata['audio']['audio_bytes']`, `['content_type']` |
 | `tts_stream_end` | **Yes** | Yes | None (observational) |
 | `on_wake` | No | Yes | None (notification only) |
+| `provider_switched` | No | No | None (observational; metadata `kind`, `provider`) |
 
 ### What System Access Gives You
 
@@ -104,7 +106,7 @@ Through `system = event.metadata.get("system")`, plugins can control:
 | **System Prompt** | `system.llm_chat` | `set_system_prompt(text)`, `get_system_prompt_template()` |
 | **Chat History** | `system.llm_chat.session_manager` | `get_messages()`, `list_chats()`, `create_chat(name)`, `set_active_chat(name)`, `delete_chat(name)` |
 | **Tool Manager** | `system.llm_chat.function_manager` | `update_enabled_functions([toolset])`, `execute_function(name, args)`, `get_enabled_function_names()` |
-| **Scopes** | `system.llm_chat.function_manager` | `set_knowledge_scope(s)`, `set_email_scope(s)`, `set_bitcoin_scope(s)`, `set_memory_scope(s)` |
+| **Scopes** | `system.llm_chat.function_manager` | `set_rag_scope(s)`, `set_private_chat(bool)` — the only core scope setters. Plugin scopes (memory/knowledge/people/email/etc.) apply from chat settings via `apply_scopes_from_settings()`; there are no per-scope setter methods |
 | **Generation** | `system` | `cancel_generation()` — cancel in-progress LLM streaming |
 | **Event Bus** | `from core.event_bus import publish, Events` | Broadcast events system-wide |
 

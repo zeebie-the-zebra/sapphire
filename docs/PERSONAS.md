@@ -58,7 +58,6 @@ Click the **Personas** nav item (or find it in the Personas group). Here you can
 | **Voice** | TTS voice, pitch, and speed |
 | **LLM** | Provider and model selection |
 | **Mind Scopes** | Memory, knowledge, people, and goal scopes |
-| **Story Engine** | Preset and story-in-prompt settings |
 | **Trim Color** | Sidebar accent color |
 | **Custom Context** | Always-on text appended to the system prompt |
 
@@ -114,7 +113,6 @@ SETTINGS INCLUDED:
 - voice, pitch, speed
 - llm_primary, llm_model
 - memory_scope, goal_scope, knowledge_scope, people_scope, email_scope, bitcoin_scope
-- story_engine_enabled, story_preset, story_in_prompt, story_vars_in_prompt
 - inject_datetime, custom_context, trim_color
 
 ACTIVATION:

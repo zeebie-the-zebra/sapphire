@@ -12,7 +12,7 @@ main.py (runner with restart loop)
     ├── LLMChat (core/chat/)
     │   ├── llm_providers → Claude, OpenAI, Gemini (core) + custom + plugin-provided
     │   ├── plugin_loader → plugins/*, user/plugins/*
-    │   ├── function_manager → plugin tools, functions/*, scopes, story tools
+    │   ├── function_manager → plugin tools, functions/*, scopes
     │   └── session_manager → chat history (SQLite)
     ├── Continuity (core/continuity/)
     │   ├── scheduler → cron-based task runner
@@ -32,27 +32,28 @@ main.py (runner with restart loop)
 
 ## Scopes Architecture
 
-Eleven scope types isolate data per-chat via ContextVars in `function_manager.py`:
+Scopes isolate data per-chat via ContextVars. Only `rag` and `private` are hardcoded in `function_manager.py`; every other scope is **plugin-manifest-driven** — a plugin declares scopes in `capabilities.scopes` and `register_plugin_scope()` creates the ContextVar at load time, so the available scopes depend on which plugins are enabled. Typical scopes with the core + integration plugins loaded:
 
-| Scope | What it isolates | Overlay |
-|-------|-----------------|---------|
-| `scope_memory` | Memory slot | Yes (sees own + global) |
-| `scope_goal` | Goal set | Yes |
-| `scope_knowledge` | Knowledge tabs | Yes |
-| `scope_people` | Contacts | Yes |
-| `scope_email` | Email account | No |
-| `scope_bitcoin` | Wallet | No |
-| `scope_gcal` | Calendar account | No |
-| `scope_telegram` | Telegram account | No |
-| `scope_discord` | Discord account | No |
-| `scope_rag` | Per-chat documents | No (strict) |
-| `scope_private` | Private mode (bool) | N/A |
+| Scope | What it isolates | Overlay | Source |
+|-------|-----------------|---------|--------|
+| `scope_memory` | Memory slot | Yes (sees own + global) | memory plugin |
+| `scope_goal` | Goal set | Yes | memory plugin |
+| `scope_knowledge` | Knowledge tabs | Yes | memory plugin |
+| `scope_people` | Contacts | Yes | memory plugin |
+| `scope_github` | GitHub account | No | github plugin |
+| `scope_email` | Email account | No | email plugin |
+| `scope_bitcoin` | Wallet | No | bitcoin plugin |
+| `scope_gcal` | Calendar account | No | google-calendar plugin |
+| `scope_telegram` | Telegram account | No | telegram plugin |
+| `scope_discord` | Discord account | No | discord plugin |
+| `scope_rag` | Per-chat documents | No (strict) | core (hardcoded) |
+| `scope_private` | Private mode (bool) | N/A | core (hardcoded) |
 
 **Global overlay:** Memory, goals, knowledge, and people scopes see both their own data AND entries in the "global" scope. RAG is strict — only the chat's own documents.
 
 **Setting scopes:** Per-chat in Chat Settings sidebar → Mind Scopes. Set to "none" to disable a system for that chat.
 
-**ContextVars:** Thread/async-safe isolation. Each chat execution context gets its own scope values via `function_manager.set_*_scope()`.
+**ContextVars:** Thread/async-safe isolation. Core scopes use `set_rag_scope()` / `set_private_chat()`; all scopes (including plugin-registered ones) are applied per execution context via `apply_scopes_from_settings()`.
 
 ---
 
@@ -77,7 +78,6 @@ user/
 ├── continuity/
 │   ├── tasks.json          # Scheduled task definitions
 │   └── activity.json       # Task execution log
-├── story_presets/           # Custom story presets
 ├── webui/
 │   └── plugins/            # Plugin settings (HA, email, etc.)
 ├── functions/              # Legacy custom tools (most moved to plugins/memory/)
@@ -120,7 +120,7 @@ Runtime config
 | identity | `DEFAULT_USERNAME`, `DEFAULT_AI_NAME` |
 | network | `SOCKS_ENABLED`, `SOCKS_HOST`, `SOCKS_PORT` |
 | privacy | `START_IN_PRIVACY_MODE`, `PRIVACY_NETWORK_WHITELIST` |
-| features | `MODULES_ENABLED`, `PLUGINS_ENABLED` |
+| features | `ALLOW_UNSIGNED_PLUGINS`, `STORE_ENABLED`, `METRICS_ENABLED` |
 | wakeword | `WAKE_WORD_ENABLED`, `WAKEWORD_MODEL`, `WAKEWORD_THRESHOLD` |
 | stt | `STT_ENABLED`, `STT_MODEL_SIZE`, `STT_ENGINE` |
 | tts | `TTS_ENABLED`, `TTS_VOICE_NAME`, `TTS_SPEED`, `TTS_PITCH_SHIFT` |
@@ -168,7 +168,7 @@ Core providers (claude, openai, gemini) live in `LLM_PROVIDERS`. Custom/user-add
 - Sapphire automatically caches system prompt + tools + full conversation history
 - Per-turn variations (spice, datetime) ride the **ghost-message rail** outside the cached prefix — they don't break cache and don't need to be disabled
 
-**The only thing that disables system-prompt caching:** plugins registering a `prompt_inject` hook (story-state injectors, Vanta-class plugins). Most plugins use the safer `ghost_inject` hook (see `core/ghost_messages.py`) which has zero caching impact.
+**The only thing that disables system-prompt caching:** plugins registering a `prompt_inject` hook (RAG/context injectors, Vanta-class plugins). Most plugins use the safer `ghost_inject` hook (see `core/ghost_messages.py`) which has zero caching impact.
 
 Cache TTL can be 5m (default) or 1h for longer sessions with idle gaps.
 
@@ -390,7 +390,7 @@ SQLite database `user/history/sapphire_history.db` (WAL mode):
 Schema: chats(name TEXT PRIMARY KEY, settings JSON, messages JSON, updated_at TEXT)
 ```
 
-Each session has message history, per-chat settings (prompt, voice, toolset, LLM, spice, scopes), and metadata. Story engine state stored in `state_current` and `state_log` tables in the same database.
+Each session has message history, per-chat settings (prompt, voice, toolset, LLM, spice, scopes), and metadata.
 
 ---
 
@@ -401,7 +401,7 @@ Each session has message history, per-chat settings (prompt, voice, toolset, LLM
 | `main.py` | Runner with restart loop |
 | `sapphire.py` | VoiceChatSystem entry point |
 | `config.py` | Settings proxy |
-| `core/api_fastapi.py` + `core/routes/` | FastAPI server (~280 endpoints across 12 route modules) |
+| `core/api_fastapi.py` + `core/routes/` | FastAPI server (~250 endpoints across 13 route modules) |
 | `core/auth.py` | Session auth, CSRF, rate limiting |
 | `core/ssl_utils.py` | Self-signed certificate generation |
 | `core/settings_manager.py` | Settings merge, file watcher, restart tiers |
@@ -415,9 +415,8 @@ Each session has message history, per-chat settings (prompt, voice, toolset, LLM
 | `core/hooks.py` | Plugin hook runner (pre_chat, prompt_inject, ghost_inject, etc.) |
 | `core/provider_registry.py` | Base registry for TTS, STT, Embedding, LLM |
 | `core/agents/` | Agent spawning, registry, lifecycle |
-| `core/chat/function_manager.py` | Tool loading, scopes, story tools |
+| `core/chat/function_manager.py` | Tool loading, scopes |
 | `core/chat/history.py` | Session management |
-| `core/story_engine/engine.py` | Story state, presets, custom tools |
 | `core/continuity/scheduler.py` | Cron-based task scheduler |
 | `core/audio/device_manager.py` | Audio device handling |
 | `plugins/memory/tools/knowledge_tools.py` | Knowledge base + people |
@@ -433,7 +432,7 @@ Sapphire architecture for troubleshooting and development.
 PROCESSES:
 - main.py: Runner with restart loop (exit 42 = restart)
 - sapphire.py: Core VoiceChatSystem
-- core/api_fastapi.py + core/routes/: FastAPI server (port 8073, HTTPS, ~280 endpoints)
+- core/api_fastapi.py + core/routes/: FastAPI server (port 8073, HTTPS, ~250 endpoints)
 - TTS server: Kokoro HTTP subprocess (port 5012, if enabled)
 - STT: Faster-whisper thread in main process
 
@@ -442,7 +441,7 @@ PORTS:
 - 5012: TTS server (if enabled)
 - 1234: Default LLM (LM Studio)
 
-SCOPES (11 types, ContextVar-based):
+SCOPES (ContextVar-based; only rag/private hardcoded, the rest plugin-registered):
 - scope_memory, scope_goal, scope_knowledge, scope_people: global overlay
 - scope_email, scope_bitcoin, scope_gcal, scope_telegram, scope_discord: no overlay
 - scope_rag: strict per-chat isolation
@@ -471,10 +470,10 @@ HOT RELOAD:
 - LLM settings, SOCKS, privacy: immediate
 - Ports, models, code: require restart
 
-API: See docs/API.md for all ~280 endpoints
+API: See docs/API.md for all ~250 endpoints
 
 DATABASES:
-- user/history/sapphire_history.db: chats, state_current, state_log
+- user/history/sapphire_history.db: chats
 - user/memory.db: memories, memories_fts, memory_scopes
 - user/knowledge.db: people, knowledge_tabs, knowledge_entries, knowledge_fts
 - user/goals.db: goals, progress_journal

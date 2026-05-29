@@ -2,7 +2,7 @@
 
 Sapphire runs a single FastAPI server on port 8073 (HTTPS). Every endpoint below requires authentication — either a browser session or an API key.
 
-Routes are split across multiple modules under `core/routes/` — this doc covers all ~280 endpoints.
+Routes are split across multiple modules under `core/routes/` — this doc covers all ~250 endpoints.
 
 ## Authentication
 
@@ -85,6 +85,7 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | POST | `/api/tts` | Generate TTS audio |
+| POST | `/api/tts/stream` | Streaming TTS — per-chunk OGG over chunked transfer (v2.7.0) |
 | POST | `/api/tts/preview` | Preview voice sample |
 | GET | `/api/tts/status` | TTS server status |
 | POST | `/api/tts/stop` | Stop TTS playback |
@@ -92,6 +93,8 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 | GET | `/api/tts/voices` | List voices for active TTS provider |
 | POST | `/api/tts/voices` | List voices (with optional api_key for pre-save browsing) |
 | POST | `/api/transcribe` | Transcribe audio file |
+| GET | `/api/stt/vad-status` | Silero VAD warmup status |
+| POST | `/api/stt/vad-test` | Test mic input against the VAD threshold |
 | POST | `/api/mic/active` | Set web mic active state (suppresses wakeword) |
 | POST | `/api/upload/image` | Upload image for chat |
 | GET | `/api/audio/devices` | List audio devices |
@@ -155,6 +158,11 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | POST | `/api/embedding/test` | Test embedding provider |
+| GET | `/api/embedding/providers` | List available embedding providers |
+| GET | `/api/embedding/integrity` | Check embedding dimension/integrity across stores |
+| POST | `/api/embedding/reembed` | Re-embed all stored vectors (after provider/model change) |
+| GET | `/api/embedding/reembed/status` | Re-embed progress |
+| POST | `/api/embedding/reembed/cancel` | Cancel an in-progress re-embed |
 
 ### Privacy
 
@@ -282,6 +290,8 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 | DELETE | `/api/knowledge/entries/{id}` | Delete entry |
 | GET | `/api/knowledge/tabs/{id}/export` | Export knowledge tab as JSON |
 | POST | `/api/knowledge/tabs/import` | Import knowledge tab from JSON |
+| GET | `/api/knowledge/dedup` | Find near-duplicate knowledge entries |
+| DELETE | `/api/knowledge/dedup/resolve` | Resolve/remove a duplicate entry |
 
 ### People
 
@@ -318,20 +328,6 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 | POST | `/api/chats/{name}/documents` | Upload document to chat |
 | GET | `/api/chats/{name}/documents` | List chat documents |
 | DELETE | `/api/chats/{name}/documents/{file}` | Remove document |
-
-### Story Engine
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| GET | `/api/story/presets` | List available presets |
-| POST | `/api/story/start` | Start story on a chat |
-| GET | `/api/story/{chat}` | Get current state |
-| POST | `/api/story/{chat}/set` | Update state variable |
-| POST | `/api/story/{chat}/reset` | Reset to preset defaults |
-| GET | `/api/story/{chat}/history` | State transition log |
-| GET | `/api/story/saves/{preset}` | List saved games |
-| POST | `/api/story/{chat}/save` | Save game state |
-| POST | `/api/story/{chat}/load` | Load saved game |
 
 ### Heartbeat (Scheduled Tasks)
 
@@ -388,6 +384,8 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 | PUT | `/api/webui/plugins/toggle/{name}` | Enable/disable a plugin (live load/unload) |
 | POST | `/api/plugins/rescan` | Discover newly added plugins without restart |
 | POST | `/api/plugins/{name}/reload` | Hot-reload a plugin (unload + load) |
+| GET | `/api/plugins/{name}/check-deps` | Check a plugin's pip dependencies |
+| POST | `/api/plugins/{name}/install-deps` | Install a plugin's declared pip dependencies |
 
 ### Plugins — Install & Uninstall
 
@@ -463,6 +461,14 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 | DELETE | `/api/email/accounts/{scope}` | Remove email account for scope |
 | POST | `/api/email/accounts/{scope}/test` | Test email account |
 
+### GitHub Plugin
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/github/accounts` | List GitHub accounts (multi-scope) |
+| PUT | `/api/github/accounts/{scope}` | Set GitHub account (PAT) for scope |
+| DELETE | `/api/github/accounts/{scope}` | Remove GitHub account for scope |
+
 ### Bitcoin Plugin
 
 | Method | Endpoint | Purpose |
@@ -498,6 +504,14 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 | GET | `/api/avatar/check/{role}` | Check if avatar exists for role |
 | GET | `/api/avatar/{filename}` | Serve avatar file |
 
+### Body (Multi-Body Runtime)
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/body/wake` | Trigger a wake event on a registered body |
+| GET | `/api/body/health` | Body runtime health/status |
+| GET | `/api/body/events` | SSE stream of body/avatar events |
+
 ### Setup Wizard
 
 | Method | Endpoint | Purpose |
@@ -526,6 +540,14 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 | POST | `/api/system/restart` | Restart Sapphire |
 | POST | `/api/system/shutdown` | Shutdown Sapphire |
 
+### API Tokens
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/system/api-tokens` | List programmatic API tokens |
+| POST | `/api/system/api-tokens` | Create a named API token |
+| DELETE | `/api/system/api-tokens/{token_id}` | Revoke an API token |
+
 ### Media (Tool-Generated Images)
 
 | Method | Endpoint | Purpose |
@@ -552,7 +574,7 @@ CSRF tokens are required for browser sessions on POST/PUT/DELETE requests. API k
 
 ## Reference for AI
 
-Sapphire API reference for programmatic access. ~280 endpoints across 12 route modules.
+Sapphire API reference for programmatic access. ~250 endpoints across 13 route modules.
 
 AUTH:
 - Browser: Session cookie via /login
@@ -564,14 +586,16 @@ ROUTE MODULES (core/routes/):
 - chat.py: chat, history, sessions, events, health, status, init
 - content.py: prompts, prompt components, toolsets, functions, spices, spice sets, personas (incl export/import)
 - settings.py: settings CRUD, credentials, SOCKS proxy, LLM providers, custom providers, privacy, TTS/STT provider registry
-- system.py: backup, audio devices, continuity/tasks, setup wizard, avatars, restart/shutdown, update, metrics, daemon events
-- plugins.py: plugin listing/toggle/rescan/reload, install/uninstall/check-update, apps, themes, plugin settings, HA/email/bitcoin/gcal/ssh
-- knowledge.py: embedding test, memory, goals, knowledge tabs/entries, people, RAG documents, export/import
-- tts.py: TTS generate/preview/stop/test, voices, transcribe, mic, image upload
-- story_engine.py: story presets/start/state/reset/history/save/load
+- system.py: backup, audio devices, continuity/tasks, setup wizard, avatars, restart/shutdown, update, metrics, api-tokens, daemon events
+- plugins.py: plugin listing/toggle/rescan/reload, install/uninstall/check-update, check/install-deps, apps, themes, plugin settings, HA/email/bitcoin/gcal/github/ssh
+- knowledge.py: embedding test/providers/integrity/reembed, memory, goals, knowledge tabs/entries, knowledge dedup, people, RAG documents, export/import
+- tts.py: TTS generate/preview/stop/test/stream, voices, transcribe, mic, STT VAD status/test, image upload
 - agents.py: agent status/providers/dismiss, workspace run/stop/status
 - media.py: tool-image, sdxl-image serving
 - docs.py: doc tree, search, markdown content
+- store.py: plugin store proxy (status, categories, list, detail)
+- dashboard.py: system-info, component-status, dashboard widgets
+- body.py: multi-body runtime (wake, health, events)
 
 KEY ENDPOINTS:
 - GET /api/status — unified UI state (prompt, context, spice, streaming, TTS/STT readiness)

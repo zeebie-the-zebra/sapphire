@@ -69,11 +69,10 @@ Create new scopes with the **+** button next to the People scope dropdown in the
 
 ## Search
 
-The AI searches people using the same cascading strategy as knowledge:
+The AI searches people by semantic similarity and substring match (people have no full-text index — only knowledge entries do):
 
-1. Full-text search (name, relationship, notes)
-2. Vector similarity (threshold: 0.55 — stricter than knowledge)
-3. Substring fallback
+1. Vector similarity (threshold: 0.55 — stricter than knowledge)
+2. Substring fallback (LIKE on name, relationship, notes)
 
 When the AI calls `search_knowledge`, it searches both people AND knowledge entries, returning combined results.
 
@@ -86,9 +85,9 @@ People system for contact management with privacy-first email integration.
 TOOLS:
 - save_person(name, relationship?, phone?, email?, address?, notes?) — upsert by name per scope
 - search_knowledge(query) — searches people + knowledge combined
-- delete_knowledge(entry_id?) — can delete people entries
-- get_recipients() — returns [{id, name}] of email-whitelisted contacts (no addresses)
-- send_email(recipient_id, subject, body) — sends to whitelisted contact by ID
+- delete_knowledge(entry_id?, category?) — deletes AI-created knowledge entries only (cannot delete people)
+- get_recipients() — [email plugin] returns [{id, name}] of email-whitelisted contacts (no addresses)
+- send_email(recipient_id, subject, body) — [email plugin] sends to a whitelisted contact by ID
 
 FIELDS:
 - name (required, unique per scope case-insensitive)
@@ -113,6 +112,6 @@ VCF IMPORT:
 - Deduplicates by (name, email) per scope
 
 SEARCH:
-- FTS on name, relationship, notes
-- Vector similarity threshold: 0.55 (stricter than knowledge at 0.40)
-- Combined with knowledge results in search_knowledge tool
+- Vector similarity (threshold 0.55, stricter than knowledge at 0.40) + LIKE substring on name/relationship/notes
+- People have NO full-text index (only knowledge entries do)
+- Combined with knowledge results in the search_knowledge tool

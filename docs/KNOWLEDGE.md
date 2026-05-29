@@ -2,7 +2,7 @@
 
 Sapphire can remember facts about your world — people you know, topics you care about, reference documents, and goals you're working toward. The Knowledge system organizes all of this and makes it searchable by the AI during conversations.
 
-Everything lives in the **Mind** view (brain icon in the nav bar), which has five tabs: Memories, People, Knowledge, AI Notes, and Goals.
+Everything lives in the **Mind** view (brain icon in the nav bar), which has five tabs: Memories, People, Human Knowledge, AI Knowledge, and Goals.
 
 <img width="50%" alt="sapphire-memories" src="https://github.com/user-attachments/assets/348f1628-5f0c-4ce3-948e-2e0c1385bc75" />
 
@@ -25,7 +25,7 @@ Knowledge is organized into **tabs** (categories). Each tab holds entries — ch
 ### Adding Knowledge (Web UI)
 
 1. Open the **Mind** view (brain icon)
-2. Click the **Knowledge** tab
+2. Click the **Human Knowledge** tab
 3. Click **+ New Tab** to create a category (e.g., "Cooking Recipes", "Work Projects")
 4. Add entries manually, or upload files
 
@@ -36,9 +36,9 @@ You can upload text files to a knowledge tab. Sapphire automatically:
 - Generates vector embeddings for semantic search
 - Stores with the source filename for reference
 
-### AI Notes
+### AI Knowledge
 
-The **AI Notes** tab shows knowledge tabs the AI created itself using the `save_knowledge` tool. These are marked as `type: ai` and can be deleted by the AI. User-created tabs are protected — the AI can't delete them.
+The **AI Knowledge** tab shows knowledge tabs the AI created itself using the `save_knowledge` tool. These are marked as `type: ai` and can be deleted by the AI. User-created tabs are protected — the AI can't delete them.
 
 ---
 
@@ -122,8 +122,8 @@ Knowledge base system for storing and searching structured information.
 
 TOOLS:
 - save_person(name, relationship?, phone?, email?, address?, notes?) — upsert contact
-- save_knowledge(category, content, entry_title?) — store info in category (auto-chunks long content)
-- search_knowledge(query, search_type?) — search people + knowledge + RAG docs
+- save_knowledge(category, content, description?) — store info in category (auto-chunks long content)
+- search_knowledge(query?, category?, entry_id?, limit?) — search people + knowledge + RAG docs
 - delete_knowledge(category?, entry_id?) — delete AI-created content only
 
 DATABASES:

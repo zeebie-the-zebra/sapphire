@@ -34,13 +34,20 @@ TOOLS = [
     }
 ]
 
-def execute(function_name, arguments, config):
+def execute(function_name, arguments, config, plugin_settings=None, credentials=None):
     """Called by function manager.
+
+    The function manager inspects your signature and passes what you accept:
+    3 args (function_name, arguments, config), or add a 4th (plugin_settings —
+    this plugin's stored settings dict) and/or a 5th (credentials — the
+    credentials manager). Declare only what you need; 3-arg is the minimum.
 
     Args:
         function_name: Which function was called
         arguments: Dict of parameters
         config: System config
+        plugin_settings: This plugin's saved settings (4th arg, optional)
+        credentials: Credentials manager for resolving secrets (5th arg, optional)
 
     Returns:
         (message: str, success: bool) tuple
@@ -104,7 +111,7 @@ def execute(function_name, arguments, config):
     # ... use account-specific credentials
 ```
 
-Available scope ContextVars: `scope_email`, `scope_bitcoin`, `scope_knowledge`, `scope_memory`, `scope_people`, `scope_rag`, `scope_goal`.
+Available scope ContextVars: `scope_rag` and `scope_private` are always present (core). The rest — `scope_email`, `scope_bitcoin`, `scope_knowledge`, `scope_memory`, `scope_people`, `scope_goal`, `scope_github`, etc. — resolve via `__getattr__` against the scope registry and only exist while the owning plugin (memory, email, bitcoin, github…) is loaded, so importing one is safe from a tool in that same plugin.
 
 ---
 
