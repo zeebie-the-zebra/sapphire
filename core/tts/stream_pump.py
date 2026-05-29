@@ -64,9 +64,12 @@ class StreamingTTSPump:
             `boundary`, `pause_after_ms`, `stream_id`. `skip_tts` skips
             this single chunk.
         tts_chunk_audio:  once per chunk, after synth returns, before
-            SSE emission. `event.metadata['audio_bytes']` is mutable so
-            plugins can transform or replace. metadata: `chunk_index`,
-            `chunk_text`, `content_type`, `stream_id`.
+            SSE emission. The audio carrier is a dict at
+            `event.metadata['audio']` == {'audio_bytes', 'content_type'};
+            mutate `metadata['audio']['audio_bytes']` (and optionally
+            'content_type') to transform or replace the audio. metadata
+            also has: `chunk_index`, `chunk_text`, `boundary`,
+            `pause_after_ms`, `stream_id`.
         tts_stream_end:   once per turn. metadata: `chunk_count`,
             `total_chars`, `interrupted`, `stream_id`. Observational.
     """

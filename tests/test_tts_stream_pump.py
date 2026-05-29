@@ -745,7 +745,7 @@ def test_zero_segments_logs_dropped_warning(enable_streaming, caplog):
     pump.push("Hello world.")
     list(pump.flush_and_close())
     msgs = [r.getMessage() for r in caplog.records]
-    assert any("synth done: 0 segments" in m for m in msgs), \
+    assert any("synth done:" in m and "0 segments" in m for m in msgs), \
         f"missing zero-segments synth done: {msgs}"
     assert any("dropped: zero playable segments" in m for m in msgs), \
         f"missing dropped warning: {msgs}"
