@@ -44,7 +44,7 @@ Some items let you choose what to include:
 ### Name Collisions
 
 If you import something with the same name as an existing item, Sapphire prompts you:
-- **Rename** — adds `-imported` suffix
+- **Rename** — a name prompt pre-filled with `-imported` (edit it to whatever you want)
 - **Overwrite** — replaces the existing item
 
 ## File Format
@@ -80,7 +80,7 @@ Since exports are just JSON files, you can share them however you like:
 
 ## Reference for AI
 
-Client-side import/export system for Sapphire configurations.
+Import/export system for Sapphire configurations — mostly client-side, personas via server endpoints.
 
 SUPPORTED TYPES:
 - Personas (.persona.json) — prompt, voice, model, tools, mind, spices, optional avatar
@@ -99,10 +99,10 @@ FORMAT:
 IMPORT FLOW:
 - Paste clipboard or upload .json file
 - Validates JSON structure and type marker
-- Name collision → rename (suffix -imported) or overwrite
+- Name collision → rename (prompt pre-filled with -imported, editable) or overwrite
 - Immediate availability, no restart
 
 IMPLEMENTATION:
-- Client-side only (shared/import-export.js)
-- No server endpoints — each view handles its own serialization
+- Mostly client-side (shared/import-export.js) — toolsets, prompts, spices, knowledge serialize in the browser
+- Personas DO round-trip the server (`/api/personas/{name}/export` + `POST /api/personas/import`) — needed for the avatar image
 - Entity APIs handle persistence (persona-api.js, prompt-api.js, etc.)

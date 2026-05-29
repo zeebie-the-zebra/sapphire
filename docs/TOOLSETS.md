@@ -4,7 +4,7 @@ Named groups of tools so you don't have to switch between memory and web for exa
 
 ## Usage
 
-Use the UI to edit tool sets. Look in the sidebar for Toolset Editor. You can use the built-in toolsets (essentials, setup), or create your own that combine tools from various files. 
+Use the UI to edit tool sets. Look in the sidebar for Toolset Editor. You can use the built-in toolsets (default, work, smarthome, personality), or create your own that combine tools from various files. 
 
 ## Quick switch
 
@@ -18,9 +18,10 @@ You can quick-switch the active toolset below the user chat input. Each chat/per
 Toolsets are named groups of tools/functions the AI can access.
 
 BUILT-IN TOOLSETS:
-- setup: System configuration tools (prompt editing, name changes, TTS voice)
-- essentials: Core tools (memory, prompt editing, help docs)
-- user_new: Empty template for new custom toolsets
+- default: Web search, memory, and general-purpose tools — the standard set
+- work: Web, research, and productivity tools
+- smarthome: Home Assistant control (scenes, lights, climate, areas)
+- personality: Self-modification — prompt editing, prompt pieces, reset
 
 HOW IT WORKS:
 - Each chat stores its active toolset in chat history
@@ -30,7 +31,7 @@ HOW IT WORKS:
 MANAGE TOOLSETS:
 - UI: Sidebar > Toolset Editor
 - Files: core/toolsets/toolsets.json (defaults), user/toolsets/toolsets.json (custom)
-- User file completely overrides defaults if present
+- Built-in defaults seed `user/toolsets/toolsets.json` on first run; your edits live in the user file thereafter
 
 CREATE CUSTOM TOOLSET:
 1. Open Toolset Editor in sidebar

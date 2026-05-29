@@ -245,7 +245,7 @@ Remove-Item "$env:APPDATA\Sapphire\secret_key"
 
 **Docker:**
 ```bash
-docker exec sapphire rm /root/.config/sapphire/secret_key
+docker exec sapphire rm /home/sapphire/.config/sapphire/secret_key
 docker restart sapphire
 ```
 
@@ -285,7 +285,7 @@ docker compose down
 rm -rf ~/sapphire/user/
 docker compose up -d
 ```
-The Docker container's config dir is ephemeral — password resets automatically when the container is recreated.
+The config dir is a **persistent** volume (`sapphire-config` → `/home/sapphire/.config/sapphire`), so recreating the container does NOT reset the password. To reset it, delete the `secret_key` (the Docker command above) or remove the `sapphire-config` volume.
 
 You'll need to re-run setup and reconfigure settings.
 

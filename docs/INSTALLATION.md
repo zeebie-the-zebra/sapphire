@@ -9,13 +9,6 @@
 
 ---
 
-## Untested One-line installers (please report bugs if you try)
-### Linux
-  curl -sL https://raw.githubusercontent.com/ddxfish/sapphire/main/install/install.sh | bash
-### Windows (PowerShell)                
-  irm https://raw.githubusercontent.com/ddxfish/sapphire/main/install/install.ps1 | iex 
-
-
 ## Prerequisites
 
 ### Linux

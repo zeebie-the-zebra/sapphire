@@ -77,7 +77,7 @@ All `/api/*` endpoints work with the same session auth. No extra setup.
 const res = await fetch('/api/status');
 
 // Use the shared fetch wrapper (adds CSRF + timeout)
-import { fetchWithTimeout } from '../../shared/fetch.js';
+import { fetchWithTimeout } from '/static/shared/fetch.js';  // absolute — apps load from /plugin-web/{name}/app/, so relative ../../ paths miss
 const data = await fetchWithTimeout('/api/init');
 ```
 
@@ -85,7 +85,7 @@ const data = await fetchWithTimeout('/api/init');
 Get real-time events from Sapphire:
 
 ```js
-import * as eventBus from '../../core/event-bus.js';
+import * as eventBus from '/static/core/event-bus.js';
 
 eventBus.on('message_added', (data) => {
     console.log('New message in chat:', data);
@@ -114,7 +114,7 @@ await fetch('/api/webui/plugins/my-plugin/settings', {
 ### Show Toasts
 ```js
 // Import Sapphire's UI module
-import * as ui from '../../ui.js';
+import * as ui from '/static/ui.js';
 ui.showToast('Operation complete', 'success');
 ```
 
@@ -159,7 +159,7 @@ With `"nav": true`:
 
 - Use `cleanup()` to stop intervals, close WebSockets, remove event listeners
 - Use CSS variables from Sapphire's theme (`var(--bg)`, `var(--text)`, `var(--accent)`, etc.)
-- Import from `../../shared/fetch.js` for CSRF-aware API calls
+- For CSRF-aware API calls: import `fetchWithTimeout` from `/static/shared/fetch.js` (absolute path — relative `../../` won't reach Sapphire's modules), or just use plain `fetch()` with an `X-CSRF-Token` header from `meta[name="csrf-token"]` (the dependency-free pattern the bundled `status` app uses)
 - Your app inherits Sapphire's dark theme automatically
 - Keep your app self-contained — don't modify the nav rail or other views
 - Prefer `"nav": true` over DOM manipulation — it's cleaner and survives Sapphire updates

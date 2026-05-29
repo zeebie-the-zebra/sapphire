@@ -18,8 +18,8 @@ Add themes to your plugin manifest and provide CSS + optional JS files.
         "name": "Cyberpunk",
         "icon": "⚡",
         "description": "Neon city vibes with rain effects",
-        "css": "web/themes/cyberpunk/cyberpunk.css",
-        "scripts": ["web/themes/cyberpunk/rain.js"],
+        "css": "themes/cyberpunk/cyberpunk.css",
+        "scripts": ["themes/cyberpunk/rain.js"],
         "preview": {
           "bg": "#0a0a1a",
           "accent": "#ff00ff",
@@ -59,10 +59,13 @@ plugins/my-theme-pack/
 
 ## Theme CSS
 
-Theme CSS files override Sapphire's CSS variables. Wrap everything in a `[data-theme="your-id"]` selector:
+Theme CSS files override Sapphire's CSS variables. **Two runtime behaviors you must account for:**
+
+1. **Paths are relative to your plugin's `web/` directory.** Manifest `css`/`scripts` values are served from `/plugin-web/{plugin}/`, which already points at `web/` — so write `themes/cyberpunk/cyberpunk.css`, NOT `web/themes/...` (the latter resolves to `web/web/...` and 404s).
+2. **Your theme id is namespaced.** The runtime sets `data-theme="plugin-{plugin-name}-{theme-id}"`, not your bare `id`. Wrap your CSS in that prefixed selector — a bare `[data-theme="cyberpunk"]` will never match. For id `cyberpunk` in a plugin named `neon-pack`:
 
 ```css
-[data-theme="cyberpunk"] {
+[data-theme="plugin-neon-pack-cyberpunk"] {
     --bg: #0a0a1a;
     --bg-secondary: #12122a;
     --text: #e0e0ff;
@@ -132,17 +135,19 @@ Theme scripts are loaded as `<script>` tags when the theme is activated and remo
 })();
 ```
 
-### Reacting to Sapphire Events
+### Reacting to theme-setting changes
 
-Your background JS can react to AI activity:
+Theme JS can react when the user changes one of your theme's settings live:
 
 ```js
-// Sapphire publishes these on the event bus (SSE)
-window.addEventListener('sapphire-theme-event', e => {
-    const { type } = e.detail;
-    // type: 'thinking', 'speaking', 'idle', 'tool_call'
+// Fired when a theme setting changes in the appearance panel
+window.addEventListener('sapphire-theme-setting', e => {
+    const { key, value } = e.detail;
+    // re-apply your effect with the new value
 });
 ```
+
+(There is no AI-activity event for themes — `thinking`/`speaking`/`idle`/`tool_call` hooks are not exposed to theme JS.)
 
 ## Theme Settings
 
