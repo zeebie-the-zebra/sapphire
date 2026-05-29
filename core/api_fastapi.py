@@ -443,6 +443,7 @@ async def security_headers(request: Request, call_next):
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob: https:; "
         "media-src 'self' blob:; "
+        "frame-src https://www.youtube-nocookie.com; "
         "font-src 'self' data:; "
         "connect-src 'self' blob:; "
         "worker-src 'self' blob:; "
@@ -832,6 +833,7 @@ from core.routes.docs import router as docs_router
 from core.routes.store import router as store_router
 from core.routes.dashboard import router as dashboard_router
 from core.routes.body import router as body_router
+from core.routes.videos import router as videos_router
 
 app.include_router(chat_router)
 app.include_router(tts_router)
@@ -846,4 +848,5 @@ app.include_router(docs_router)
 app.include_router(store_router)
 app.include_router(dashboard_router)
 app.include_router(body_router)
+app.include_router(videos_router)
 

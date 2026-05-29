@@ -273,6 +273,11 @@
     "STORE_CACHE_TTL_SECONDS": 300
   },
 
+  "video_guide": {
+    "VIDEO_GUIDE_CACHE_TTL_SECONDS": 43200,
+    "VIDEO_GUIDE_CHANNELS_DISABLED": []
+  },
+
   "setup": {
     "SETUP_WIZARD_STEP": 0,
     "_wizard_steps": "0=not started, 1=voice done, 2=audio done, 3=llm done, 4=complete"
