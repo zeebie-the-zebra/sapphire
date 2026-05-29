@@ -86,7 +86,7 @@ function renderContent() {
     </div>`;
     const latest = ch.latest || [];
     const grid = latest.length
-        ? `<div class="vg-grid">${latest.map(v => cardHTML(v)).join('')}</div>`
+        ? `<div class="vg-grid">${latest.map(v => cardHTML(v, { showDur: true })).join('')}</div>`
         : '<p class="vg-empty">No recent videos.</p>';
     return header + grid;
 }

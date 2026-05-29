@@ -147,6 +147,34 @@ def _parse_playlist(html: str) -> list:
     return vids
 
 
+def _parse_channel_videos(html: str) -> list:
+    """Latest uploads from a channel's /videos tab. The current YouTube layout
+    uses lockupViewModel (not videoRenderer), and crucially includes the video
+    duration — the one thing the RSS feed lacks. Newest first."""
+    data = _extract_initial_data(html)
+    if not data:
+        return []
+    out, seen = [], set()
+    for r in _walk(data, "lockupViewModel"):
+        if r.get("contentType") != "LOCKUP_CONTENT_TYPE_VIDEO":
+            continue
+        vid = r.get("contentId")
+        if not vid or vid in seen:
+            continue
+        title = (((r.get("metadata") or {}).get("lockupMetadataViewModel") or {})
+                 .get("title") or {}).get("content") or ""
+        # The duration overlay lives in the thumbnail (contentImage) as the only
+        # M:SS string there; the exact key path churns, so match the value.
+        dur = None
+        m = re.search(r'(\d{1,2}:\d{2}(?::\d{2})?)', json.dumps(r.get("contentImage", {})))
+        if m:
+            dur = m.group(1)
+        seen.add(vid)
+        out.append({"id": vid, "title": title, "dur": dur,
+                    "thumb": f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg"})
+    return out
+
+
 def _parse_rss(xml_text: str) -> list:
     """Channel RSS (Atom) → latest videos. Newest first (YouTube's order)."""
     vids = []
@@ -206,22 +234,27 @@ async def _build() -> dict:
                 "key": ch["key"], "name": ch["name"], "kind": ch["kind"],
                 "url": f"https://www.youtube.com/{ch['handle']}",
             }
-            # Channel header (best-effort) — manifest name wins (curated);
-            # the scrape only supplies the avatar.
+            # One fetch of the channel's /videos tab supplies BOTH the header
+            # (og: meta) and the latest uploads WITH durations.
+            page = None
             try:
-                hdr = _parse_channel_header(
-                    await _get(client, f"https://www.youtube.com/channel/{ch['channel_id']}"))
+                page = await _get(client, f"https://www.youtube.com/channel/{ch['channel_id']}/videos")
+            except Exception as e:
+                logger.warning(f"[videos] channel page {ch['key']} failed: {e}")
+            if page:
+                hdr = _parse_channel_header(page)
                 entry["avatar"] = hdr.get("avatar")
                 entry["desc"] = hdr.get("desc")
-            except Exception as e:
-                logger.warning(f"[videos] header {ch['key']} failed: {e}")
-            # Latest (RSS)
-            try:
-                entry["latest"] = _parse_rss(
-                    await _get(client, f"https://www.youtube.com/feeds/videos.xml?channel_id={ch['channel_id']}"))
-            except Exception as e:
-                logger.warning(f"[videos] rss {ch['key']} failed: {e}")
-                entry["latest"] = []
+            # Latest — from the /videos scrape (has durations); RSS is the
+            # fallback if YouTube's markup shifts (no durations there).
+            latest = _parse_channel_videos(page) if page else []
+            if not latest:
+                try:
+                    latest = _parse_rss(
+                        await _get(client, f"https://www.youtube.com/feeds/videos.xml?channel_id={ch['channel_id']}"))
+                except Exception as e:
+                    logger.warning(f"[videos] rss {ch['key']} failed: {e}")
+            entry["latest"] = latest
             # Course (primary only) — playlist scrape, seeded fallback
             if ch["kind"] == "primary" and ch.get("playlist_id"):
                 course = []
