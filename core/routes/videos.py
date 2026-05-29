@@ -173,15 +173,18 @@ def _parse_channel_header(html: str) -> dict:
     """Channel name + avatar + sub count for the mini-YouTube header strip.
     Best-effort — YouTube has two header layouts; missing fields degrade
     gracefully (the manifest name is the fallback)."""
-    hdr = {"name": None, "avatar": None}
+    hdr = {"name": None, "avatar": None, "desc": None}
     m = re.search(r'<meta property="og:title" content="([^"]+)"', html)
     if m:
         hdr["name"] = _htmllib.unescape(m.group(1))
     m = re.search(r'<meta property="og:image" content="([^"]+)"', html)
     if m:
         hdr["avatar"] = m.group(1)
-    # Sub count intentionally omitted — no reliable keyless source (a naive
-    # "N subscribers" regex grabs the wrong number). Revisit in a later pass.
+    m = re.search(r'<meta property="og:description" content="([^"]*)"', html)
+    if m:
+        hdr["desc"] = _htmllib.unescape(m.group(1)).strip()
+    # Sub count omitted — no reliable keyless source (the channel page also
+    # shows OTHER channels' counts, so a naive match grabs the wrong number).
     return hdr
 
 
@@ -209,6 +212,7 @@ async def _build() -> dict:
                 hdr = _parse_channel_header(
                     await _get(client, f"https://www.youtube.com/channel/{ch['channel_id']}"))
                 entry["avatar"] = hdr.get("avatar")
+                entry["desc"] = hdr.get("desc")
             except Exception as e:
                 logger.warning(f"[videos] header {ch['key']} failed: {e}")
             # Latest (RSS)

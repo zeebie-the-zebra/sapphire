@@ -7,7 +7,7 @@ let currentView = null;
 // View groups: views that share a nav parent
 const VIEW_GROUPS = {
     personas: ['personas', 'prompts', 'toolsets', 'spices'],
-    settings: ['settings', 'help']
+    settings: ['settings', 'help', 'video-guide']
 };
 
 // Reverse lookup: view -> group parent
