@@ -1,7 +1,7 @@
 // views/daemons.js - Triggers › Daemons. Event-driven listeners (Discord,
 // Telegram, …) that wake Sapphire when something happens. Single column.
 // Per-daemon activity history is deferred to the notification-history system.
-import { renderTriggerTabs, bindTriggerTabs } from '../shared/trigger-tabs.js';
+import { renderSectionHeader, bindSectionHeader } from '../shared/section-header.js';
 import { helpPills } from '../features/video-link.js';
 import * as TR from '../shared/trigger-common.js';
 import { fetchTasksByType, fetchStatus } from '../shared/continuity-api.js';
@@ -32,8 +32,7 @@ async function refresh() { await load(); update(); }
 function render() {
     if (!container) return;
     container.innerHTML = `
-        ${renderTriggerTabs('daemons', helpPills('Daemons', { video: '1DiQ4oUC6R0', doc: 'DAEMONS-WEBHOOKS.md', inline: true }))}
-        <div id="d-status"></div>
+        ${renderSectionHeader({ tabs: TR.TRIGGER_TABS, active: 'daemons', help: helpPills('Daemons', { video: '1DiQ4oUC6R0', doc: 'DAEMONS-WEBHOOKS.md', inline: true }), status: '' })}
         <div class="view-body view-scroll">
             <div class="trigger-single">
                 <div class="sched-col-header">
@@ -44,7 +43,7 @@ function render() {
                 <div id="d-list"></div>
             </div>
         </div>`;
-    bindTriggerTabs(container);
+    bindSectionHeader(container);
     container.querySelector('#d-new')?.addEventListener('click', () => TR.openEditor(null, 'daemon', refresh));
     container.querySelector('#d-import')?.addEventListener('click', () => TR.importTask('daemon', daemons, refresh));
     TR.bindActions(container.querySelector('.view-body'), () => daemons, refresh);
@@ -60,7 +59,7 @@ function update() {
     if (scrollEl) scrollEl.scrollTop = scrollTop;
 
     const enabled = daemons.filter(d => d.enabled).length;
-    const statusEl = container?.querySelector('#d-status');
+    const statusEl = container?.querySelector('.section-status');
     if (statusEl) statusEl.innerHTML = TR.statusRow({
         enabled, total: daemons.length, running: status.running,
         desc: 'Event-driven listeners that wake Sapphire when something happens.'

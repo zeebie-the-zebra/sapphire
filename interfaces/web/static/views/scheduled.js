@@ -1,7 +1,7 @@
 // views/scheduled.js - Triggers › Scheduled. One-off & recurring tasks at set
 // times. Two columns: what YOU scheduled vs what Sapphire scheduled herself
 // (source === "ai_scheduled"). + scheduled timeline.
-import { renderTriggerTabs, bindTriggerTabs } from '../shared/trigger-tabs.js';
+import { renderSectionHeader, bindSectionHeader } from '../shared/section-header.js';
 import { helpPills } from '../features/video-link.js';
 import * as TR from '../shared/trigger-common.js';
 import { fetchNonHeartbeatTasks, fetchStatus, fetchMergedTimeline } from '../shared/continuity-api.js';
@@ -35,8 +35,7 @@ async function refresh() { await load(); update(); }
 function render() {
     if (!container) return;
     container.innerHTML = `
-        ${renderTriggerTabs('scheduled', helpPills('Scheduled', { video: '-XGqK8MsIK8', doc: 'CONTINUITY.md', inline: true }))}
-        <div id="sc-status"></div>
+        ${renderSectionHeader({ tabs: TR.TRIGGER_TABS, active: 'scheduled', help: helpPills('Scheduled', { video: '-XGqK8MsIK8', doc: 'CONTINUITY.md', inline: true }), status: '' })}
         <div class="view-body view-scroll">
             <div id="sc-timeline"></div>
             <div class="sched-layout trigger-2col">
@@ -54,7 +53,7 @@ function render() {
                 </div>
             </div>
         </div>`;
-    bindTriggerTabs(container);
+    bindSectionHeader(container);
     container.querySelector('#sc-new')?.addEventListener('click', () => TR.openEditor(null, 'task', refresh));
     container.querySelector('#sc-import')?.addEventListener('click', () => TR.importTask('task', tasks, refresh));
     TR.bindActions(container.querySelector('.view-body'), () => tasks, refresh);
@@ -78,7 +77,7 @@ function update() {
     if (scrollEl) scrollEl.scrollTop = scrollTop;
 
     const enabled = tasks.filter(t => t.enabled).length;
-    const statusEl = container?.querySelector('#sc-status');
+    const statusEl = container?.querySelector('.section-status');
     if (statusEl) statusEl.innerHTML = TR.statusRow({
         enabled, total: tasks.length, running: status.running,
         desc: 'Tasks at set times — yours, and the ones Sapphire sets for herself.'

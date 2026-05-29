@@ -1,7 +1,7 @@
 // views/webhooks.js - Triggers › Webhooks. External HTTP triggers that let
 // other services poke Sapphire via a URL. Single column. Per-webhook activity
 // history is deferred to the notification-history system.
-import { renderTriggerTabs, bindTriggerTabs } from '../shared/trigger-tabs.js';
+import { renderSectionHeader, bindSectionHeader } from '../shared/section-header.js';
 import { helpPills } from '../features/video-link.js';
 import * as TR from '../shared/trigger-common.js';
 import { fetchTasksByType, fetchStatus } from '../shared/continuity-api.js';
@@ -32,8 +32,7 @@ async function refresh() { await load(); update(); }
 function render() {
     if (!container) return;
     container.innerHTML = `
-        ${renderTriggerTabs('webhooks', helpPills('Webhooks', { video: '1DiQ4oUC6R0', doc: 'DAEMONS-WEBHOOKS.md', inline: true }))}
-        <div id="w-status"></div>
+        ${renderSectionHeader({ tabs: TR.TRIGGER_TABS, active: 'webhooks', help: helpPills('Webhooks', { video: '1DiQ4oUC6R0', doc: 'DAEMONS-WEBHOOKS.md', inline: true }), status: '' })}
         <div class="view-body view-scroll">
             <div class="trigger-single">
                 <div class="sched-col-header">
@@ -44,7 +43,7 @@ function render() {
                 <div id="w-list"></div>
             </div>
         </div>`;
-    bindTriggerTabs(container);
+    bindSectionHeader(container);
     container.querySelector('#w-new')?.addEventListener('click', () => TR.openEditor(null, 'webhook', refresh));
     container.querySelector('#w-import')?.addEventListener('click', () => TR.importTask('webhook', webhooks, refresh));
     TR.bindActions(container.querySelector('.view-body'), () => webhooks, refresh);
@@ -60,7 +59,7 @@ function update() {
     if (scrollEl) scrollEl.scrollTop = scrollTop;
 
     const enabled = webhooks.filter(w => w.enabled).length;
-    const statusEl = container?.querySelector('#w-status');
+    const statusEl = container?.querySelector('.section-status');
     if (statusEl) statusEl.innerHTML = TR.statusRow({
         enabled, total: webhooks.length, running: status.running,
         desc: 'External HTTP triggers — let other services poke Sapphire via a URL.'

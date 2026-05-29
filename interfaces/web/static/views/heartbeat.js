@@ -1,6 +1,6 @@
 // views/heartbeat.js - Triggers › Heartbeat. Recurring self-pulses Sapphire
 // runs on her own rhythm. Vitals grid + heartbeat-scoped timeline.
-import { renderTriggerTabs, bindTriggerTabs } from '../shared/trigger-tabs.js';
+import { renderSectionHeader, bindSectionHeader } from '../shared/section-header.js';
 import { helpPills } from '../features/video-link.js';
 import * as TR from '../shared/trigger-common.js';
 import { fetchHeartbeats, fetchStatus, fetchMergedTimeline } from '../shared/continuity-api.js';
@@ -34,8 +34,7 @@ async function refresh() { await load(); update(); }
 function render() {
     if (!container) return;
     container.innerHTML = `
-        ${renderTriggerTabs('heartbeat', helpPills('Heartbeat', { video: '-XGqK8MsIK8', doc: 'CONTINUITY.md', inline: true }))}
-        <div id="hb-status"></div>
+        ${renderSectionHeader({ tabs: TR.TRIGGER_TABS, active: 'heartbeat', help: helpPills('Heartbeat', { video: '-XGqK8MsIK8', doc: 'CONTINUITY.md', inline: true }), status: '' })}
         <div class="view-body view-scroll">
             <div class="trigger-single">
                 <div class="sched-col-header">
@@ -47,7 +46,7 @@ function render() {
                 <div id="hb-vitals"></div>
             </div>
         </div>`;
-    bindTriggerTabs(container);
+    bindSectionHeader(container);
     container.querySelector('#hb-new')?.addEventListener('click', () => TR.openEditor(null, 'heartbeat', refresh));
     container.querySelector('#hb-import')?.addEventListener('click', () => TR.importTask('heartbeat', heartbeats, refresh));
     TR.bindActions(container.querySelector('.view-body'), () => heartbeats, refresh);
@@ -79,7 +78,7 @@ function update() {
     if (scrollEl) scrollEl.scrollTop = scrollTop;
 
     const enabled = heartbeats.filter(h => h.enabled).length;
-    const statusEl = container?.querySelector('#hb-status');
+    const statusEl = container?.querySelector('.section-status');
     if (statusEl) statusEl.innerHTML = TR.statusRow({
         enabled, total: heartbeats.length, running: status.running,
         desc: 'Recurring self-pulses — Sapphire checks in on her own rhythm.'

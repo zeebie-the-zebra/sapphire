@@ -13,6 +13,14 @@ import { getInitData } from './init-data.js';
 import { fetchScopeData } from './scope-dropdowns.js';
 import * as ui from '../ui.js';
 
+// Tab config for the Triggers section (consumed by section-tabs/section-header).
+export const TRIGGER_TABS = [
+    { id: 'heartbeat', label: 'Heartbeat', icon: '💓' },
+    { id: 'scheduled', label: 'Scheduled', icon: '📅' },
+    { id: 'daemons', label: 'Daemons', icon: '📡' },
+    { id: 'webhooks', label: 'Webhooks', icon: '🔗' },
+];
+
 // ── Formatters ───────────────────────────────────────────────────────
 
 export function esc(str) {
