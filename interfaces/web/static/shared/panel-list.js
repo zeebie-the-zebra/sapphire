@@ -48,7 +48,7 @@ export function renderPanelList({
         <div class="panel-left panel-list${listClass ? ' ' + listClass : ''}">
             <div class="panel-list-header">
                 <span class="panel-list-title">${esc(title)}</span>
-                ${extraHeader}${add}${del}
+                <div class="panel-list-actions">${extraHeader}${add}${del}</div>
             </div>
             <div class="panel-list-items">${rows}</div>
         </div>`;

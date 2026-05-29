@@ -1184,6 +1184,14 @@ body {
     font-size: var(--font-md);
 }
 
+/* Header action buttons (import / new / delete) grouped tight on the right */
+.panel-list-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+}
+
 .panel-list-items {
     flex: 1;
     overflow-y: auto;
