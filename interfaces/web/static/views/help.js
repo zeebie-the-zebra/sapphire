@@ -168,6 +168,26 @@ function renderWelcome() {
 
 /* ── Navigation ──────────────────────────────────────────────────────── */
 
+// Resolve a markdown link target (data-doc) to an API doc path. Bare/relative
+// links resolve against the CURRENT doc's directory, so a link like `hooks.md`
+// inside `plugin-author/README.md` correctly points at `plugin-author/hooks.md`
+// (not the docs root). `docs/X` is treated as docs-root-absolute (root-README
+// style); `../` steps up a directory. 2026-05-29 — fixes "Document not found"
+// on the plugin-author overview's relative links.
+function resolveDocLink(href, fromPath) {
+    let h = (href || '').replace(/^\.\//, '');
+    if (h.startsWith('docs/')) return h.slice(5);          // docs-root absolute
+    if (h.startsWith('/')) return h.replace(/^\/+/, '');
+    const fromDir = (fromPath && fromPath.includes('/'))
+        ? fromPath.slice(0, fromPath.lastIndexOf('/')) : '';
+    const stack = fromDir ? fromDir.split('/') : [];
+    for (const seg of h.split('/')) {
+        if (seg === '..') stack.pop();
+        else if (seg && seg !== '.') stack.push(seg);
+    }
+    return stack.join('/');
+}
+
 async function navigateTo(path) {
     if (!path) { renderWelcome(); return; }
     // Resolve relative links — strip docs/ prefix (README style) and ../ (cross-references)
@@ -219,7 +239,7 @@ export default {
             const docLink = e.target.closest('.help-doc-link');
             if (docLink) {
                 e.preventDefault();
-                navigateTo(docLink.dataset.doc);
+                navigateTo(resolveDocLink(docLink.dataset.doc, activePath));
                 return;
             }
         });
