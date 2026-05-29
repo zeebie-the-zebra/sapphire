@@ -1636,7 +1636,9 @@ body {
     .pr-editor { overflow: hidden; }
     .pr-body { flex: 1; overflow-y: auto; }
     .pr-preview { border-top: none; border-left: 1px solid var(--border); overflow: hidden; }
-    .pr-preview-body { flex: 1; overflow-y: auto; }
+    /* Accordion wrapper must pass the flex height through so the body can scroll */
+    .pr-preview-accordion { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .pr-preview-body { flex: 1; min-height: 0; overflow-y: auto; }
 }
 
 /* Mobile: stack layout */
