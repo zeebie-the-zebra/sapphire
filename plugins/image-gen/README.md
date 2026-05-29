@@ -47,7 +47,7 @@ REQUIREMENTS:
 - generate_scene_image tool in active toolset
 
 HOW TO USE:
-- Call generate_scene_image(prompt) with scene description
+- Call generate_scene_image(scene_description) with the scene description
 - Use "me" for AI character, "you" for user - auto-replaced with configured descriptions
 - Image appears inline in chat
 

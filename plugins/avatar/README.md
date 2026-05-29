@@ -1,10 +1,30 @@
 # Avatar Plugin
 
-3D avatar for Sapphire with animation states and ARKit face blendshapes.
+3D avatar for Sapphire — an animated presence that reacts to her state in real time (listening, thinking, speaking, tool use) and can be deliberately animated by the AI via inline tags. Supports ARKit face blendshapes.
+
+## How Sapphire Drives the Avatar
+
+Once an avatar is selected, it animates on its own in two ways:
+
+**1. Automatic reactions to Sapphire's state.** The avatar reacts in real time to what's happening — `listening` while you speak (STT), `processing` while she thinks, `speaking` during TTS, `toolcall` while a tool runs, `wakeword` on detection, `user_typing` while you type, plus `agent` and `cron` states for background activity. This is wired to the event bus; you don't configure it.
+
+**2. Deliberate animations the AI triggers.** Sapphire can play a specific track by emitting an inline tag in her reply:
+
+- `<<avatar: wave>>` — plays the track **once**, then returns to normal behavior
+- `<<avatar: sleep loop>>` — **holds** the pose until she emits another `<<avatar: ...>>` tag (good for sustained moods: sleep, dance, meditate)
+- `<<avatar: nod 2.5s>>` — plays for a set **duration**
+
+She only uses track names that exist in your model — the plugin injects the available list into her prompt so she can't invent one. The tags show in the chat as part of her expression.
+
+**Priority rails.** Competing animation requests resolve through a priority stack rather than fighting: a deliberate AI `loop` tag and a passing one-shot reaction sit on different rails, so an intentional pose isn't stomped by a routine state change, and when a higher rail clears, the avatar falls back to the rail below it (down to idle).
+
+**Idle behavior.** With nothing else happening, the avatar plays from a weighted **idle pool** and occasionally overlays a "variety" animation for liveliness. Idle is **time-of-day aware** — buckets (e.g. day/night) can use different resting poses, and a bucket can be marked **quiet** to suppress variety overlays (calmer at night). All of this is configurable in **Settings → Avatar**.
 
 ## Building Your Avatar
 
 Get a character from Mixamo, grab some animations, run the build tool — done. This requires Blender on your computer, but it is done automatically and you don't ever have to see it.
+
+**Already have a rigged `.glb` with animation tracks?** Skip the build entirely — upload it directly in **Settings → Avatar** (the plugin auto-maps its tracks to states; you can adjust the mapping there). The Mixamo → Blender pipeline below is only for building a GLB from separate character + animation FBX files.
 
 ### Step 1: Create Your Avatar Folder
 
@@ -93,16 +113,21 @@ Animation tracks are automatically mapped to avatar states by their filename. Na
 
 | Avatar State | Keywords (filename contains) |
 |---|---|
-| idle | idle, stand, standing |
-| thinking | thinking, think, plotting |
-| typing | typing, texting, keyboard |
-| listening | listening, listen, lookaround |
-| speaking | speaking, talk, talking |
-| happy | happy, celebrate, excited, laughing |
-| wakeword | greeting, alert, surprise |
-| wave | wave, greet, hello, bye |
+| idle | idle, stand, standing, rest, default, breathe, breathing |
+| processing (thinking) | thinking, think, ponder, concentrate, focus, plotting |
+| typing | typing, type, keyboard, defaultanim, compose, writing, texting |
+| listening | listening, listen, hear, attentive, look, lookaround, listening_nod |
+| speaking | speaking, speak, talk, talking, say, attention |
+| toolcall | action, use, grab, reach, attention2, interact, typing |
+| happy | happy, joy, celebrate, cheer, smile, excited, victory, clapping, laughing |
+| wakeword | alert, surprise, startle, notice, greeting, wave |
+| wave | wave, greet, greeting, hello, hi, bye, farewell, blow_kiss |
+| user_typing | curious, notice, perk, attentive, idle_curious, lookaround |
+| reading | read, reading, look_down, study, typing_phone |
 
-Example: download an animation called "Thinking" from Mixamo, save it as `Thinking.fbx` — it automatically becomes the animation that plays when Sapphire is thinking.
+The `agent` and `cron` states (shown during background agent / scheduled activity) have no filename keywords — assign them manually in the Avatar settings UI if you have suitable tracks.
+
+Example: download an animation called "Thinking" from Mixamo, save it as `Thinking.fbx` and combine it using the GLB maker in tools — it automatically becomes the animation that plays when Sapphire is thinking.
 
 You can also manually assign tracks to states in the Avatar settings UI.
 

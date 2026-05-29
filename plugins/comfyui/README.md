@@ -117,6 +117,7 @@ Load the Qwen Image 2512 template in ComfyUI to download these automatically.
 | ComfyUI Server URL | `http://127.0.0.1:8188` | Where ComfyUI is running |
 | Poll Interval | 2 seconds | How often to check for completion |
 | Timeout | 300 seconds | Max wait time for generation |
+| Default Workflow | _(first alphabetically)_ | Workflow used when the AI doesn't name one |
 
 ## Troubleshooting
 

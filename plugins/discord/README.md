@@ -62,7 +62,9 @@ All filters are AND'd — every condition must match.
 |--------|----------------|
 | `mentioned` | `"true"` or `"false"` — was the bot @mentioned |
 | `guild_name` | Server name |
+| `guild_id` | Server ID (exact match, advanced) |
 | `channel_name` | Channel name |
+| `channel_id` | Channel ID (exact match, advanced) |
 | `username` | Message author |
 | `content_contains` | Substring in message text |
 | `channel_name_not` | Exclude a channel |

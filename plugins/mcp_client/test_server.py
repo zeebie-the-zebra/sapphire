@@ -2,7 +2,7 @@
 
 Usage in Sapphire MCP settings:
   Command: python
-  Args: tools/test_mcp_server.py
+  Args: plugins/mcp_client/test_server.py
 """
 
 from mcp.server.fastmcp import FastMCP

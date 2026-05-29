@@ -47,6 +47,8 @@ The AI **never sees email addresses** — only display names. This is intentiona
 
 To allow the AI to email someone, add them as a contact in **Knowledge → People** with their email address.
 
+**Escape hatch (off by default):** a plugin setting, `allow_all_recipients`, lets `send_email` accept a raw `address` argument so the AI can email arbitrary addresses directly. It's gated behind a danger-confirm in the email plugin settings. Leave it **off** to keep the address-blind guarantee above — turning it on trades that guarantee for convenience.
+
 ## Multi-Account
 
 Multiple email accounts are supported via scopes.

@@ -74,6 +74,11 @@ All tools work identically for both account types:
 | `telegram_send` | Send a message to a chat by ID or @username |
 | `telegram_get_chats` | List recent chats with unread counts and previews |
 | `telegram_read_messages` | Read recent messages from a specific chat |
+| `telegram_send_image` | Send an image to a chat |
+| `telegram_send_voice` | Send a voice note to a chat |
+| `telegram_add_contact` | Add a Telegram contact |
+
+Daemon auto-replies support a `reply_format` of `text` / `markdown` / `html` / `text+voice` / `voice` — set it per task to have Sapphire reply with a synthesized voice note.
 
 ## Daemon Events
 

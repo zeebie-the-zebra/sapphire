@@ -118,7 +118,7 @@ Browse available servers at [mcp.so](https://mcp.so) or [smithery.ai](https://sm
 | Server | Type | What it does |
 |--------|------|-------------|
 | Filesystem | stdio (npx) | Read, write, search files in a directory |
-| GitHub | stdio (npx) | Issues, PRs, repos, code search |
+| GitHub | stdio (docker) | Issues, PRs, repos, code search |
 | PostgreSQL | stdio (npx) | Query databases, inspect schemas |
 | Brave Search | stdio (npx) | Web search |
 | Fetch | stdio (npx) | HTTP requests, web scraping |

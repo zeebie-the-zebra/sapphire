@@ -35,6 +35,7 @@ The AI can call these automatically when you ask for smart home control:
 | `ha_set_switch` | Turn a switch on or off |
 | `ha_notify` | Send notification to your phone |
 | `ha_house_status` | Get snapshot of home (presence, climate, sensors) |
+| `ha_get_camera_image` | Get a snapshot from a camera entity (for visual analysis) |
 
 ## Phone Notifications
 
