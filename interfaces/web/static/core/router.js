@@ -8,12 +8,13 @@ let currentView = null;
 const VIEW_GROUPS = {
     personas: ['personas', 'prompts', 'toolsets', 'spices'],
     triggers: ['heartbeat', 'scheduled', 'daemons', 'webhooks'],
+    mind: ['memories', 'people', 'knowledge', 'ai-knowledge', 'goals'],
     settings: ['settings', 'help', 'video-guide']
 };
 
 // Legacy id redirects: old #schedule bookmarks and the Triggers group parent
 // (which has no view of its own) both land on Scheduled.
-const VIEW_ALIASES = { schedule: 'scheduled', triggers: 'scheduled' };
+const VIEW_ALIASES = { schedule: 'scheduled', triggers: 'scheduled', mind: 'memories', 'ai-notes': 'ai-knowledge' };
 
 // Reverse lookup: view -> group parent
 const VIEW_TO_GROUP = {};

@@ -119,10 +119,17 @@
                 <div class="nav-flyout-item" data-view="webhooks" role="button" tabindex="0">&#x1F517; Webhooks</div>
             </div>
         </div>
-        <button class="nav-item" data-view="mind">
+        <div class="nav-item nav-group-parent" data-view="mind" role="button" tabindex="0">
             <span class="nav-icon">&#x1F9E0;</span>
             <span class="nav-label">Mind</span>
-        </button>
+            <div class="nav-flyout">
+                <div class="nav-flyout-item" data-view="memories" role="button" tabindex="0">&#x1F9E0; Memories</div>
+                <div class="nav-flyout-item" data-view="people" role="button" tabindex="0">&#x1F465; People</div>
+                <div class="nav-flyout-item" data-view="knowledge" role="button" tabindex="0">&#x1F4DA; Human Knowledge</div>
+                <div class="nav-flyout-item" data-view="ai-knowledge" role="button" tabindex="0">&#x1F916; AI Knowledge</div>
+                <div class="nav-flyout-item" data-view="goals" role="button" tabindex="0">&#x1F3AF; Goals</div>
+            </div>
+        </div>
         <div class="nav-item nav-group-parent" data-view="settings" role="button" tabindex="0">
             <span class="nav-icon">&#x2699;&#xFE0F;</span>
             <span class="nav-label">Settings</span>
@@ -422,12 +429,11 @@
         <div id="view-webhooks" class="view" style="display:none">
             <div class="view-placeholder"><h2>Webhooks</h2><p>Loading...</p></div>
         </div>
-        <div id="view-mind" class="view" style="display:none">
-            <div class="view-placeholder">
-                <h2>Mind</h2>
-                <p>Knowledge base - loading...</p>
-            </div>
-        </div>
+        <div id="view-memories" class="view" style="display:none"><div class="view-placeholder"><h2>Memories</h2><p>Loading...</p></div></div>
+        <div id="view-people" class="view" style="display:none"><div class="view-placeholder"><h2>People</h2><p>Loading...</p></div></div>
+        <div id="view-knowledge" class="view" style="display:none"><div class="view-placeholder"><h2>Human Knowledge</h2><p>Loading...</p></div></div>
+        <div id="view-ai-knowledge" class="view" style="display:none"><div class="view-placeholder"><h2>AI Knowledge</h2><p>Loading...</p></div></div>
+        <div id="view-goals" class="view" style="display:none"><div class="view-placeholder"><h2>Goals</h2><p>Loading...</p></div></div>
         <div id="view-settings" class="view" style="display:none">
             <div class="view-placeholder">
                 <h2>Settings</h2>

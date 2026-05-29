@@ -1901,16 +1901,22 @@ body {
 }
 
 /* Triggers section (Heartbeat / Scheduled / Daemons / Webhooks) */
-.trigger-status {
-    display: flex;
-    align-items: center;
-    gap: 14px;
+/* Generic section status/description row (under the tab strip). Mind views put
+   plain text here; Triggers wraps a .trigger-status inside it. */
+.section-status {
     padding: 8px 20px;
     border-bottom: 1px solid var(--border);
     font-size: var(--font-sm);
     color: var(--text-muted);
-    flex-wrap: wrap;
     flex-shrink: 0;
+}
+.trigger-status {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+    flex-wrap: wrap;
 }
 .trigger-status-count { color: var(--text); font-weight: 600; }
 .trigger-status-desc { flex: 1; min-width: 0; }

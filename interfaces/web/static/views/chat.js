@@ -674,15 +674,14 @@ async function loadSidebar() {
                 idPrefix: 'sb-',
                 enabledPlugins,
                 onNavigate: (navTarget, scopeValue) => {
-                    // navTarget is e.g. "mind:memories" — split into view and tab
-                    const [view, tab] = navTarget.split(':');
-                    if (tab) window._mindTab = tab;
-                    // Carry the currently-selected scope value into the Mind view
-                    // so it lands on the same scope the user was looking at.
+                    // navTarget is e.g. "mind:memories" — the part after ':' is
+                    // now its own view (Mind split into sibling views). Carry the
+                    // selected scope so the view lands on the same scope.
+                    const [group, tab] = navTarget.split(':');
                     if (scopeValue && scopeValue !== 'none') {
                         window._mindScope = scopeValue;
                     }
-                    if (view) switchView(view);
+                    switchView(tab || group);
                 },
             };
             renderScopeDropdowns(scopeContainer, scopeDeclarations, settings, rendererOptions);
