@@ -31,8 +31,6 @@ Tasks can run in the foreground (switches to that chat) or background (invisible
 | **Name** | Label for the task. Shows in the list and activity log. |
 | **Schedule** | When to run (cron format—see below). |
 | **Chance %** | Probability the task actually fires. 100 = always, 50 = coin flip. Good for random variety. |
-| **Cooldown** | Minutes to wait between iterations when using multiple iterations. Controls pacing within a single run. |
-| **Iterations** | How many back-and-forth exchanges. 1 = single response. Higher = conversation with itself. |
 | **Initial Message** | What gets sent to the AI when the task triggers. "Good morning!" or "Continue the story." |
 | **Chat Name** | Which chat to use. Blank = new dated chat each time. Filled = reuse same chat (keeps history). |
 | **Prompt** | Which persona/prompt preset to use. |
@@ -61,11 +59,11 @@ Use `*` for "any value". Use `*/N` for "every N". Use `1-5` for ranges (1=Monday
 
 ## The UI
 
-**Tasks tab** — List of all tasks. Toggle enabled/disabled, edit, run manually, delete.
+The **Triggers** view (sidebar) has two tabs:
 
-**Timeline tab** — Shows what's scheduled for the next 24 hours. Chance percentages shown.
+**⏰ Time** — schedule-driven triggers: **Tasks** (cron-fired prompts) and **Heartbeats**. Toggle enabled/disabled, edit, run manually (▶), or delete. A timeline strip shows what's coming up next, with chance percentages.
 
-**Activity tab** — Log of recent task runs. See what fired, what was queued (overlapping runs), and any errors.
+**⚡ Events** — event-driven triggers: **Daemons** (long-running plugin event sources like Discord/email/Telegram) and **Webhooks** (external HTTP triggers). These fire on incoming events rather than the clock — see [Daemons & Webhooks](DAEMONS-WEBHOOKS.md).
 
 ## Tips
 
@@ -77,19 +75,18 @@ Use `*` for "any value". Use `*/N` for "every N". Use `1-5` for ranges (1=Monday
 
 ## Reference for AI
 
-Continuity runs scheduled autonomous tasks. Access via sidebar clock icon.
+Continuity runs scheduled autonomous tasks. Access via the Triggers view in the sidebar.
 
 TASK CREATION:
-- Open Continuity from sidebar
+- Open the Triggers view from the sidebar (⏰ Time tab)
 - Click "+ Add Task"
 - Set schedule (cron), initial message, prompt, toolset
 - Enable/disable TTS and background mode
 
 KEY FIELDS:
-- schedule: cron format (minute hour day month weekday)
+- type: task | heartbeat | daemon | webhook
+- schedule: cron format (minute hour day month weekday) — for time-based types
 - chance: 1-100 probability to actually run
-- cooldown_minutes: delay between iterations within a single run
-- iterations: number of AI responses per trigger
 - chat_target: blank = ephemeral, named = persistent chat
 - background: blank chat_target = background (no UI switching)
 - memory_scope: which memory slot to use
@@ -104,5 +101,4 @@ MANUAL TRIGGER:
 
 TROUBLESHOOTING:
 - Task not running: check enabled toggle, check cron syntax
-- Skipped (cooldown): wait for cooldown to expire
 - Skipped (chance): random roll failed, will try next scheduled time

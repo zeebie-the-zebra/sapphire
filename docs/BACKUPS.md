@@ -1,6 +1,6 @@
 # Backups
 
-Sapphire automatically backs up your data so you can recover from mistakes, corruption, or bad updates. Backups are managed through Settings > Plugins > Backup, or via the API.
+Sapphire automatically backs up your data so you can recover from mistakes, corruption, or bad updates. Backups are managed through Settings > Backup, or via the API.
 
 ## What's Backed Up
 
@@ -65,7 +65,7 @@ Set any retention value to `0` to disable that tier.
 
 ## Manual Backups
 
-Create a backup anytime from Settings > Plugins > Backup, or via API:
+Create a backup anytime from Settings > Backup, or via API:
 
 ```bash
 curl -X POST https://localhost:8073/api/backup/create \
@@ -90,7 +90,7 @@ For Docker installs, this maps to your `sapphire-backups/` volume.
 
 ## Downloading Backups
 
-You can download any backup from the UI (Settings > Plugins > Backup) or via API:
+You can download any backup from the UI (Settings > Backup) or via API:
 
 ```
 GET /api/backup/download/{filename}

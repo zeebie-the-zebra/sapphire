@@ -32,7 +32,7 @@ A tool is a single function the AI can call. A plugin is an autonomous package t
 | Guide | What's Inside |
 |-------|--------------|
 | [Manifest](manifest.md) | `plugin.json` reference — fields, priority bands, directory structure |
-| [Hooks](hooks.md) | All 11 hook points (incl. `ghost_inject`), HookEvent fields, system access, examples |
+| [Hooks](hooks.md) | All 16 hook points (incl. `ghost_inject`, streaming-TTS, `provider_switched`), HookEvent fields, system access, examples |
 | [Voice Commands](voice-commands.md) | Keyword triggers that bypass the LLM — match modes, handlers, macros |
 | [Tools](tools.md) | Tool file format, schema flags, scopes, reading settings, privacy patterns |
 | [Routes](routes.md) | Custom HTTP endpoints — path params, auth enforcement, handler signature |

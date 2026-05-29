@@ -370,13 +370,13 @@ Daemon events trigger continuity tasks. Users create a task with the daemon even
 ```python
 import json
 
-def get_status(path_params, body, settings):
+def get_status(body=None, settings=None, **_):
     """GET /api/plugin/my-routes/status — auto-authenticated, CSRF-protected."""
     return {"status": "ok", "uptime": 12345}
 
-def do_action(path_params, body, settings):
+def do_action(body=None, settings=None, **_):
     """POST /api/plugin/my-routes/action"""
-    action = body.get("action", "default")
+    action = (body or {}).get("action", "default")
     return {"result": f"Did {action}"}
 ```
 

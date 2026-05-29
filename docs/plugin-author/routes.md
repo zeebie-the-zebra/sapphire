@@ -32,13 +32,18 @@ For the example above: `POST /api/plugin/webcam/capture/abc123`
 
 ## Handler Signature
 
+The framework calls your handler with **keyword arguments**: every `{name}` path param, plus `body`, `settings`, `credentials`, `query`, and `request`. Always end your signature with `**_` to absorb the ones you don't use — otherwise the call raises `TypeError` on the first request (the framework always passes all of them).
+
 ```python
-def handle_capture(request_id: str, body: dict, settings: dict) -> dict:
+def handle_capture(request_id, body=None, settings=None, **_) -> dict:
     """
-    Args:
-        request_id: Extracted from {request_id} in the path
-        body: Parsed JSON body (POST/PUT only, empty dict for GET/DELETE)
-        settings: Plugin settings from user/webui/plugins/{name}.json
+    Injected keyword args (declare only what you need, then **_):
+        request_id:  path param extracted from {request_id}
+        body:        parsed JSON body (POST/PUT; empty dict for GET/DELETE)
+        settings:    plugin settings from user/webui/plugins/{name}.json
+        credentials: the credentials manager (resolve secrets server-side)
+        query:       dict of URL query-string params
+        request:     the raw Starlette Request object
 
     Returns:
         dict (auto-serialized to JSON) or a FastAPI Response object
@@ -46,7 +51,7 @@ def handle_capture(request_id: str, body: dict, settings: dict) -> dict:
     return {"status": "ok"}
 ```
 
-Path parameters are passed as keyword arguments matching the `{name}` in your path pattern. `body` and `settings` are always provided.
+Path parameters arrive as keyword arguments matching the `{name}` in your path pattern. Because `body`, `settings`, `credentials`, `query`, and `request` are **always** passed, your handler must accept them by name or swallow them with `**_`.
 
 ## Security
 
@@ -54,7 +59,8 @@ All of the following are enforced automatically — you cannot disable them:
 
 - **Authentication**: `require_login` dependency — session or API key required
 - **CSRF**: Middleware validates tokens on POST/PUT/DELETE from browser sessions
-- **Rate limiting**: 30 requests per 60 seconds per session per plugin
+- **Rate limiting**: 60 GET / 30 non-GET requests per minute, per plugin (bucketed by session — or by bearer-token hash when bearer auth is used)
+- **Bearer-token auth (opt-in)**: a plugin may *add* (never weaken) a bearer path by writing `user/plugin_state/{plugin}_mcp_key.json` (`{"key": "..."}`). A request whose `Authorization: Bearer <key>` matches then bypasses session login — used by MCP clients. Session CSRF still cannot be disabled.
 
 ## Example: Webcam Capture Endpoint
 
