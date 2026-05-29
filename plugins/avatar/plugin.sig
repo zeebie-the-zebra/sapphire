@@ -2,7 +2,7 @@
   "plugin": "avatar",
   "version": "1.1.0",
   "files": {
-    "README.md": "sha256:c3898bd85316845fce19824579183ea022f83ae0f30741395f107cbf36159ba3",
+    "README.md": "sha256:8666a799a6241ba50482b3fb2637d235ebec328e0e42c8c167c7160bec32966c",
     "bone_mapper.py": "sha256:57aa0dc284effd5cc50d771550c8977aa81532ef1d5d0745ac9c7809f211784d",
     "build_avatar.py": "sha256:4eee73a9cc27beb0ea76113e7f13c877da86bbe699be1e62138d460c8e1baf91",
     "build_avatar_sapphire.py": "sha256:0f407c4ea52a28a540574611d3d075a8de3991b2422ce3db29d893782d42a4f8",
@@ -25,5 +25,5 @@
     "web/sidebar.html": "sha256:c0d25cc097f997c3413abd941e6bbbde238cb6c65e35a0d19885d75b40fc5e25",
     "web/sidebar.js": "sha256:fea441013e433a5faaf45858db9d94c578b7a8d1636733805f7e034ed2ce432f"
   },
-  "signature": "B4BQC0fl/HdbapB/03MZPQn8gAxu0KMwajlTTxsoMBBYi9qgEN+t0/BfrusSlurQtX0hAsFYnHDlR4WDSVNGCw=="
+  "signature": "cGVWGfdGxkhyaDuzemaIKxcIehN6k3oSitoUIpsBDxPUClS4Lqoi/kh39hqVfQNSvmGtqofUa/buopibD0guDA=="
 }
