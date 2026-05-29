@@ -3,6 +3,7 @@ import { listPrompts, getPrompt, getComponents, savePrompt, deletePrompt,
          saveComponent, deleteComponent, loadPrompt } from '../shared/prompt-api.js';
 import { PERSONA_TABS } from '../shared/persona-tabs.js';
 import { renderSectionTabs, bindSectionTabs } from '../shared/section-tabs.js';
+import { renderPanelList, bindPanelList } from '../shared/panel-list.js';
 import { showExportDialog, showImportDialog } from '../shared/import-export.js';
 import { setupModalClose } from '../shared/modal.js';
 import * as ui from '../ui.js';
@@ -78,53 +79,49 @@ function render() {
 
     container.innerHTML = `
         ${renderSectionTabs(PERSONA_TABS, 'prompts', helpPills('Prompts', { video: 'JxgNAk4Y2qI', doc: 'PROMPTS.md', inline: true }))}
-        <div class="prompts-layout">
-            <div class="pr-content">
-                <div class="pr-editor">
-                    ${selected ? renderEditor() : '<div class="view-placeholder"><p>Select a prompt</p></div>'}
+        <div class="two-panel">
+            ${renderPanelList({
+                title: 'Prompts',
+                items: prompts,
+                selectedId: selected,
+                idKey: 'name',
+                listClass: 'pr-roster',
+                itemClass: p => p.name === activePromptName ? 'active-prompt' : '',
+                renderItem: p => {
+                    const d = promptDetails[p.name];
+                    const tokens = d?.token_count || p.token_count;
+                    const tokenStr = tokens ? formatCount(tokens) + ' tokens' : '';
+                    const typeName = p.type === 'monolith' ? 'Monolith' : 'Assembled';
+                    const character = d?.components?.character;
+                    const meta = [typeName, character ? '👤 ' + character : ''].filter(Boolean).join(' · ');
+                    const isActive = p.name === activePromptName;
+                    return `<div class="pr-item-info">
+                        <span class="pr-item-name">${p.privacy_required ? '🔒 ' : ''}${p.name}${isActive ? ' (Active)' : ''}</span>
+                        ${tokenStr ? `<span class="pr-item-tokens">${tokenStr}</span>` : ''}
+                        <span class="pr-item-meta">${meta}</span>
+                    </div>`;
+                },
+                addTitle: 'New prompt',
+                extraHeader: '<button class="btn-sm" id="pr-import" title="Import prompt">⬇</button>',
+                showDelete: true,
+                deletable: !!selected,
+                deleteTitle: `Delete "${selected || ''}"`,
+            })}
+            <div class="panel-right">
+                <div class="pr-content">
+                    <div class="pr-editor">
+                        ${selected ? renderEditor() : '<div class="view-placeholder"><p>Select a prompt</p></div>'}
+                    </div>
+                    <div class="pr-preview">
+                        ${selected ? renderPreview() : ''}
+                    </div>
                 </div>
-                <div class="pr-preview">
-                    ${selected ? renderPreview() : ''}
-                </div>
-
-            </div>
-            <div class="pr-roster">
-                ${renderRoster()}
             </div>
         </div>
     `;
     bindEvents();
 }
 
-function renderRoster() {
-    return `
-        <div class="panel-list-header">
-            <span class="panel-list-title">Prompts</span>
-            <button class="btn-sm" id="pr-import" title="Import prompt">\u2B07</button>
-            <button class="btn-sm" id="pr-new" title="New prompt">+</button>
-        </div>
-        <div class="panel-list-items" id="pr-list">
-            ${prompts.map(p => {
-                const d = promptDetails[p.name];
-                const tokens = d?.token_count || p.token_count;
-                const tokenStr = tokens ? formatCount(tokens) + ' tokens' : '';
-                const typeName = p.type === 'monolith' ? 'Monolith' : 'Assembled';
-                const character = d?.components?.character;
-                const meta = [typeName, character ? '\u{1F464} ' + character : ''].filter(Boolean).join(' \u00B7 ');
-                const isActive = p.name === activePromptName;
-                return `
-                    <button class="panel-list-item${p.name === selected ? ' selected' : ''}${isActive ? ' active-prompt' : ''}" data-name="${p.name}">
-                        <div class="pr-item-info">
-                            <span class="pr-item-name">${p.privacy_required ? '\u{1F512} ' : ''}${p.name}${isActive ? ' (Active)' : ''}</span>
-                            ${tokenStr ? `<span class="pr-item-tokens">${tokenStr}</span>` : ''}
-                            <span class="pr-item-meta">${meta}</span>
-                        </div>
-                    </button>
-                `;
-            }).join('')}
-        </div>
-    `;
-}
 
 function renderEditor() {
     if (!selectedData) return '<div class="view-placeholder"><p>Loading...</p></div>';
@@ -145,7 +142,6 @@ function renderEditor() {
                 ${!isActive ? '<button class="btn-primary" id="pr-activate">Activate</button>' : '<span class="badge badge-active">Active</span>'}
                 <button class="btn-sm" id="pr-dup">Duplicate</button>
                 <button class="btn-sm" id="pr-export">Export</button>
-                <button class="btn-sm danger" id="pr-delete" title="Delete prompt">\u2715</button>
             </div>
         </div>
         <div class="pr-body">
@@ -291,27 +287,25 @@ function renderPreview() {
 function bindEvents() {
     if (!container) return;
     bindSectionTabs(container);
-    const layout = container.querySelector('.prompts-layout');
+    const layout = container.querySelector('.two-panel');
     if (!layout) return;
 
-    // --- Roster ---
-    layout.querySelector('#pr-list')?.addEventListener('click', async e => {
-        const item = e.target.closest('.panel-list-item');
-        if (!item) return;
-        selected = item.dataset.name;
-        openAccordion = null;
-        editTarget = {};
-        try { selectedData = await getPrompt(selected); } catch { selectedData = null; }
-        render();
+    // --- Roster (shared panel-list) ---
+    bindPanelList(container, {
+        onSelect: async (name) => {
+            selected = name;
+            openAccordion = null;
+            editTarget = {};
+            try { selectedData = await getPrompt(selected); } catch { selectedData = null; }
+            render();
+        },
+        onAdd: createPrompt,
+        onDelete: deleteCurrentPrompt,
     });
-
-    // New prompt
-    layout.querySelector('#pr-new')?.addEventListener('click', createPrompt);
 
     // --- Header actions ---
     layout.querySelector('#pr-activate')?.addEventListener('click', activateCurrentPrompt);
     layout.querySelector('#pr-dup')?.addEventListener('click', duplicatePrompt);
-    layout.querySelector('#pr-delete')?.addEventListener('click', deleteCurrentPrompt);
 
     // Rename prompt
     layout.querySelector('#pr-rename-prompt')?.addEventListener('click', () => {

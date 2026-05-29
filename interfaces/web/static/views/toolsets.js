@@ -2,6 +2,7 @@
 import { getToolsets, getCurrentToolset, getFunctions, activateToolset, saveCustomToolset, deleteToolset, enableFunctions, setToolsetEmoji } from '../shared/toolset-api.js';
 import { PERSONA_TABS } from '../shared/persona-tabs.js';
 import { renderSectionTabs, bindSectionTabs } from '../shared/section-tabs.js';
+import { renderPanelList, bindPanelList } from '../shared/panel-list.js';
 import { helpPills } from '../features/video-link.js';
 import { showExportDialog, showImportDialog } from '../shared/import-export.js';
 import * as ui from '../ui.js';
@@ -99,21 +100,18 @@ function render() {
     container.innerHTML = `
         ${renderSectionTabs(PERSONA_TABS, 'toolsets', helpPills('Toolsets', { video: '9noDUc6bWss', doc: 'TOOLSETS.md', inline: true }))}
         <div class="two-panel">
-            <div class="panel-left panel-list">
-                <div class="panel-list-header">
-                    <span class="panel-list-title">Toolsets</span>
-                    <button class="btn-sm" id="ts-import" title="Import toolset">\u2B07</button>
-                    <button class="btn-sm" id="ts-new" title="Save current as new">+</button>
-                </div>
-                <div class="panel-list-items" id="ts-list">
-                    ${toolsets.map(t => `
-                        <button class="panel-list-item${t.name === selectedName ? ' active' : ''}" data-name="${t.name}">
-                            <span class="ts-item-name">${getEmoji(t) ? getEmoji(t) + ' ' : ''}${t.name}</span>
-                            <span class="ts-item-count">${t.function_count}</span>
-                        </button>
-                    `).join('')}
-                </div>
-            </div>
+            ${renderPanelList({
+                title: 'Toolsets',
+                items: toolsets,
+                selectedId: selectedName,
+                idKey: 'name',
+                renderItem: t => `<span class="ts-item-name">${getEmoji(t) ? getEmoji(t) + ' ' : ''}${t.name}</span><span class="ts-item-count">${t.function_count}</span>`,
+                addTitle: 'Save current as new',
+                extraHeader: '<button class="btn-sm" id="ts-import" title="Import toolset">\u2B07</button>',
+                showDelete: true,
+                deletable: isEditable,
+                deleteTitle: `Delete "${selectedName}"`,
+            })}
             <div class="panel-right">
                 <div class="view-header ts-header">
                     <div class="ts-header-left">
@@ -133,7 +131,6 @@ function render() {
                             `<span class="badge badge-active">Active</span>`
                         }
                         ${selected?.type !== 'builtin' ? `<button class="btn-sm" id="ts-export">Export</button>` : ''}
-                        ${isEditable ? `<button class="btn-sm danger" id="ts-delete">Delete</button>` : ''}
                     </div>
                 </div>
                 <div class="view-body view-scroll">
@@ -261,12 +258,31 @@ function renderFunctions(selected, isEditable) {
 function bindEvents() {
     bindSectionTabs(container);
 
-    // Toolset list selection
-    container.querySelector('#ts-list')?.addEventListener('click', e => {
-        const item = e.target.closest('.panel-list-item');
-        if (!item) return;
-        selectedName = item.dataset.name;
-        render();
+    // Roster select / add / delete via the shared panel-list
+    bindPanelList(container, {
+        onSelect: (name) => { selectedName = name; render(); },
+        onAdd: async () => {
+            const name = prompt('New toolset name:');
+            if (!name?.trim()) return;
+            const enabled = collectEnabled();
+            try {
+                await saveCustomToolset(name.trim(), enabled);
+                ui.showToast(`Created: ${name.trim()}`, 'success');
+                selectedName = name.trim();
+                await loadData();
+                render();
+            } catch (e) { ui.showToast(e.message || 'Failed', 'error'); }
+        },
+        onDelete: async () => {
+            if (!confirm(`Delete toolset "${selectedName}"?`)) return;
+            try {
+                await deleteToolset(selectedName);
+                ui.showToast(`Deleted: ${selectedName}`, 'success');
+                selectedName = 'all';
+                await loadData();
+                render();
+            } catch (e) { ui.showToast('Failed to delete', 'error'); }
+        },
     });
 
     // Emoji picker
@@ -289,32 +305,6 @@ function bindEvents() {
             updateScene();
             render();
         } catch (e) { ui.showToast('Failed to activate', 'error'); }
-    });
-
-    // New
-    container.querySelector('#ts-new')?.addEventListener('click', async () => {
-        const name = prompt('New toolset name:');
-        if (!name?.trim()) return;
-        const enabled = collectEnabled();
-        try {
-            await saveCustomToolset(name.trim(), enabled);
-            ui.showToast(`Created: ${name.trim()}`, 'success');
-            selectedName = name.trim();
-            await loadData();
-            render();
-        } catch (e) { ui.showToast(e.message || 'Failed', 'error'); }
-    });
-
-    // Delete
-    container.querySelector('#ts-delete')?.addEventListener('click', async () => {
-        if (!confirm(`Delete toolset "${selectedName}"?`)) return;
-        try {
-            await deleteToolset(selectedName);
-            ui.showToast(`Deleted: ${selectedName}`, 'success');
-            selectedName = 'all';
-            await loadData();
-            render();
-        } catch (e) { ui.showToast('Failed to delete', 'error'); }
     });
 
     // Export

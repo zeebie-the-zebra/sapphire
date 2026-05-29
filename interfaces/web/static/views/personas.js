@@ -5,6 +5,7 @@ import { listPersonas, getPersona, createPersona, updatePersona, deletePersona,
          avatarUrl, avatarImg, avatarFallback } from '../shared/persona-api.js';
 import { PERSONA_TABS } from '../shared/persona-tabs.js';
 import { renderSectionTabs, bindSectionTabs } from '../shared/section-tabs.js';
+import { renderPanelList, bindPanelList } from '../shared/panel-list.js';
 import { helpPills } from '../features/video-link.js';
 import { getInitData } from '../shared/init-data.js';
 import {
@@ -132,25 +133,24 @@ function render() {
     container.innerHTML = `
         ${renderSectionTabs(PERSONA_TABS, 'personas', helpPills('Personas', { video: '5kqW-o35OU4', doc: 'PERSONAS.md', inline: true }))}
         <div class="two-panel">
-            <div class="panel-left panel-list">
-                <div class="panel-list-header">
-                    <span class="panel-list-title">Personas</span>
-                    <button class="btn-sm" id="pa-import" title="Import persona">\u2B07</button>
-                    <button class="btn-sm" id="pa-new" title="New from current chat">+</button>
-                </div>
-                <div class="panel-list-items" id="pa-list">
-                    ${personas.map(p => `
-                        <button class="panel-list-item${p.name === selectedName ? ' active' : ''}" data-name="${p.name}">
-                            ${avatarImg(p.name, p.trim_color, 'pa-list-avatar', p.avatar)}
-                            <div class="pa-list-info">
-                                <span class="pa-list-name">${esc(p.name)}${p.name === defaultPersona ? ' <span class="pa-default-star" title="Default persona">&#x2B50;</span>' : ''}</span>
-                                ${p.tagline ? `<span class="pa-list-tagline">${esc(p.tagline)}</span>` : ''}
-                            </div>
-                        </button>
-                    `).join('')}
-                    ${personas.length === 0 ? '<div class="text-muted" style="padding:16px;font-size:var(--font-sm)">No personas yet. Click + to create one from your current chat settings.</div>' : ''}
-                </div>
-            </div>
+            ${renderPanelList({
+                title: 'Personas',
+                items: personas,
+                selectedId: selectedName,
+                idKey: 'name',
+                renderItem: p => `
+                    ${avatarImg(p.name, p.trim_color, 'pa-list-avatar', p.avatar)}
+                    <div class="pa-list-info">
+                        <span class="pa-list-name">${esc(p.name)}${p.name === defaultPersona ? ' <span class="pa-default-star" title="Default persona">&#x2B50;</span>' : ''}</span>
+                        ${p.tagline ? `<span class="pa-list-tagline">${esc(p.tagline)}</span>` : ''}
+                    </div>`,
+                emptyHTML: '<div class="text-muted" style="padding:16px;font-size:var(--font-sm)">No personas yet. Click + to create one from your current chat settings.</div>',
+                addTitle: 'New from current chat',
+                extraHeader: '<button class="btn-sm" id="pa-import" title="Import persona">\u2B07</button>',
+                showDelete: true,
+                deletable: !!selectedName,
+                deleteTitle: `Delete "${selectedName || ''}"`,
+            })}
             <div class="panel-right">
                 ${selectedData ? renderDetail(selectedData, isActive) : '<div class="view-placeholder"><p>Select a persona</p></div>'}
             </div>
@@ -218,7 +218,6 @@ function renderDetail(p, isActive) {
                             : '<button class="btn-sm" id="pa-set-default" title="Set as default for new chats">Set Default</button>'}
                         <button class="btn-sm" id="pa-duplicate">Duplicate</button>
                         <button class="btn-sm" id="pa-export">Export</button>
-                        <button class="btn-sm danger" id="pa-delete">Delete</button>
                     </div>
                 </div>
             </div>
@@ -488,26 +487,35 @@ function bindEvents() {
         });
     });
 
-    // List selection
-    container.querySelector('#pa-list')?.addEventListener('click', async e => {
-        const item = e.target.closest('.panel-list-item');
-        if (!item) return;
-        selectedName = item.dataset.name;
-        try { selectedData = await getPersona(selectedName); } catch { selectedData = null; }
-        render();
-    });
-
-    // New persona from chat
-    container.querySelector('#pa-new')?.addEventListener('click', async () => {
-        const name = prompt('New persona name (from current chat settings):');
-        if (!name?.trim()) return;
-        try {
-            await createFromChat(name.trim());
-            selectedName = name.trim().replace(/\s+/g, '_').toLowerCase();
-            await loadData();
+    // Roster select / add / delete via the shared panel-list
+    bindPanelList(container, {
+        onSelect: async (name) => {
+            selectedName = name;
+            try { selectedData = await getPersona(selectedName); } catch { selectedData = null; }
             render();
-            ui.showToast(`Created: ${name.trim()}`, 'success');
-        } catch (e) { ui.showToast(e.message || 'Failed', 'error'); }
+        },
+        onAdd: async () => {
+            const name = prompt('New persona name (from current chat settings):');
+            if (!name?.trim()) return;
+            try {
+                await createFromChat(name.trim());
+                selectedName = name.trim().replace(/\s+/g, '_').toLowerCase();
+                await loadData();
+                render();
+                ui.showToast(`Created: ${name.trim()}`, 'success');
+            } catch (e) { ui.showToast(e.message || 'Failed', 'error'); }
+        },
+        onDelete: async () => {
+            if (!confirm(`Delete persona "${selectedName}"?`)) return;
+            try {
+                await deletePersona(selectedName);
+                selectedName = null;
+                selectedData = null;
+                await loadData();
+                render();
+                ui.showToast('Deleted', 'success');
+            } catch (e) { ui.showToast(e.message || 'Failed', 'error'); }
+        },
     });
 
     // Load persona
@@ -629,19 +637,6 @@ function bindEvents() {
         });
     });
 
-    // Delete
-    container.querySelector('#pa-delete')?.addEventListener('click', async () => {
-        if (!confirm(`Delete persona "${selectedName}"?`)) return;
-        try {
-            await deletePersona(selectedName);
-            selectedName = null;
-            selectedData = null;
-            await loadData();
-            render();
-            ui.showToast('Deleted', 'success');
-        } catch (e) { ui.showToast(e.message || 'Failed', 'error'); }
-    });
-
     // Avatar upload
     const avatarUpload = container.querySelector('#pa-avatar-upload');
     const avatarInput = container.querySelector('#pa-avatar-input');
@@ -657,7 +652,7 @@ function bindEvents() {
                 const img = container.querySelector('#pa-avatar');
                 if (img) { img.src = avatarUrl(selectedName) + bust; img.style.visibility = ''; }
                 // Refresh list thumbnail
-                const listItem = container.querySelector(`.panel-list-item[data-name="${selectedName}"] .pa-list-avatar`);
+                const listItem = container.querySelector(`.panel-list-item[data-pl-id="${selectedName}"] .pa-list-avatar`);
                 if (listItem) { listItem.src = avatarUrl(selectedName) + bust; listItem.style.visibility = ''; }
                 ui.showToast('Avatar updated', 'success');
             } catch (e) { ui.showToast(e.message || 'Upload failed', 'error'); }

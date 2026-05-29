@@ -1374,7 +1374,7 @@ body {
     overflow: hidden;
 }
 
-.pr-content { grid-area: content; overflow-y: auto; min-height: 0; }
+.pr-content { grid-area: content; overflow-y: auto; min-height: 0; flex: 1; }
 .pr-editor { display: flex; flex-direction: column; min-width: 0; }
 .pr-preview { display: flex; flex-direction: column; border-top: 1px solid var(--border); }
 .pr-roster { grid-area: roster; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
@@ -1403,11 +1403,11 @@ body {
 
 /* Override panel-list-item for prompt roster (two-line layout) */
 .pr-roster .panel-list-item { flex-direction: column; align-items: stretch; gap: 0; padding: 10px 12px; }
-.pr-roster .panel-list-item.selected {
+.pr-roster .panel-list-item.active {
     background: var(--trim-light, rgba(74,158,255,0.1));
     color: var(--trim, #4a9eff);
 }
-.pr-roster .panel-list-item.selected .pr-item-name { color: var(--trim, #4a9eff); }
+.pr-roster .panel-list-item.active .pr-item-name { color: var(--trim, #4a9eff); }
 .pr-roster .panel-list-item.active-prompt .pr-item-name { font-weight: 700; }
 
 /* Header */

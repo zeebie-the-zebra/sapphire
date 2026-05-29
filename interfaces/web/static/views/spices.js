@@ -3,6 +3,7 @@ import { getSpices, addSpice, updateSpice, deleteSpice, addCategory, renameCateg
          getSpiceSets, getCurrentSpiceSet, activateSpiceSet, saveCustomSpiceSet, deleteSpiceSet, setSpiceSetEmoji, setCategoryEmoji } from '../shared/spice-api.js';
 import { PERSONA_TABS } from '../shared/persona-tabs.js';
 import { renderSectionTabs, bindSectionTabs } from '../shared/section-tabs.js';
+import { renderPanelList, bindPanelList } from '../shared/panel-list.js';
 import { helpPills } from '../features/video-link.js';
 import { showExportDialog, showImportDialog } from '../shared/import-export.js';
 import * as ui from '../ui.js';
@@ -67,21 +68,18 @@ function render() {
     container.innerHTML = `
         ${renderSectionTabs(PERSONA_TABS, 'spices', helpPills('Spices', { video: 'pu0dauGBhgY', doc: 'SPICE.md', inline: true }))}
         <div class="two-panel">
-            <div class="panel-left panel-list">
-                <div class="panel-list-header">
-                    <span class="panel-list-title">Spice Sets</span>
-                    <button class="btn-sm" id="ss-import" title="Import spice set">\u2B07</button>
-                    <button class="btn-sm" id="ss-new" title="Save current as new">+</button>
-                </div>
-                <div class="panel-list-items" id="ss-list">
-                    ${spiceSets.map(s => `
-                        <button class="panel-list-item${s.name === selectedSetName ? ' active' : ''}" data-name="${s.name}">
-                            <span class="ts-item-name">${getEmoji(s) ? getEmoji(s) + ' ' : ''}${s.name}</span>
-                            <span class="ts-item-count">${s.category_count}</span>
-                        </button>
-                    `).join('')}
-                </div>
-            </div>
+            ${renderPanelList({
+                title: 'Spice Sets',
+                items: spiceSets,
+                selectedId: selectedSetName,
+                idKey: 'name',
+                renderItem: s => `<span class="ts-item-name">${getEmoji(s) ? getEmoji(s) + ' ' : ''}${s.name}</span><span class="ts-item-count">${s.category_count}</span>`,
+                addTitle: 'Save current as new',
+                extraHeader: '<button class="btn-sm" id="ss-import" title="Import spice set">\u2B07</button>',
+                showDelete: true,
+                deletable: true,
+                deleteTitle: `Delete "${selectedSetName}"`,
+            })}
             <div class="panel-right">
                 <div class="view-header ts-header">
                     <div class="ts-header-left">
@@ -99,7 +97,6 @@ function render() {
                             `<span class="badge badge-active">Active</span>`
                         }
                         <button class="btn-sm" id="ss-export">Export</button>
-                        <button class="btn-sm danger" id="ss-delete">Delete</button>
                     </div>
                 </div>
                 <div class="view-body view-scroll">
@@ -215,11 +212,30 @@ function bindEvents() {
     bindSectionTabs(container);
 
     // Set list selection
-    container.querySelector('#ss-list')?.addEventListener('click', e => {
-        const item = e.target.closest('.panel-list-item');
-        if (!item) return;
-        selectedSetName = item.dataset.name;
-        render();
+    bindPanelList(container, {
+        onSelect: (name) => { selectedSetName = name; render(); },
+        onAdd: async () => {
+            const name = prompt('New spice set name:');
+            if (!name?.trim()) return;
+            const categories = collectEnabledCategories();
+            try {
+                await saveCustomSpiceSet(name.trim(), categories);
+                ui.showToast(`Created: ${name.trim()}`, 'success');
+                selectedSetName = name.trim();
+                await loadData();
+                render();
+            } catch (e) { ui.showToast(e.message || 'Failed', 'error'); }
+        },
+        onDelete: async () => {
+            if (!confirm(`Delete spice set "${selectedSetName}"?`)) return;
+            try {
+                await deleteSpiceSet(selectedSetName);
+                ui.showToast(`Deleted: ${selectedSetName}`, 'success');
+                selectedSetName = 'default';
+                await loadData();
+                render();
+            } catch (e) { ui.showToast('Failed to delete', 'error'); }
+        },
     });
 
     // Emoji picker
@@ -235,32 +251,6 @@ function bindEvents() {
             updateScene();
             render();
         } catch (e) { ui.showToast('Failed to activate', 'error'); }
-    });
-
-    // New set
-    container.querySelector('#ss-new')?.addEventListener('click', async () => {
-        const name = prompt('New spice set name:');
-        if (!name?.trim()) return;
-        const categories = collectEnabledCategories();
-        try {
-            await saveCustomSpiceSet(name.trim(), categories);
-            ui.showToast(`Created: ${name.trim()}`, 'success');
-            selectedSetName = name.trim();
-            await loadData();
-            render();
-        } catch (e) { ui.showToast(e.message || 'Failed', 'error'); }
-    });
-
-    // Delete set
-    container.querySelector('#ss-delete')?.addEventListener('click', async () => {
-        if (!confirm(`Delete spice set "${selectedSetName}"?`)) return;
-        try {
-            await deleteSpiceSet(selectedSetName);
-            ui.showToast(`Deleted: ${selectedSetName}`, 'success');
-            selectedSetName = 'default';
-            await loadData();
-            render();
-        } catch (e) { ui.showToast('Failed to delete', 'error'); }
     });
 
     // Export
@@ -467,7 +457,7 @@ function debouncedSaveSet() {
             const s = spiceSets.find(s => s.name === selectedSetName);
             if (s) { s.categories = categories; s.category_count = categories.length; }
             // Update count in left panel
-            const countEl = container.querySelector(`#ss-list .panel-list-item.active .ts-item-count`);
+            const countEl = container.querySelector(`.panel-list-item.active .ts-item-count`);
             if (countEl) countEl.textContent = categories.length;
             // Update subtitle
             const subtitle = container.querySelector('.view-subtitle');
