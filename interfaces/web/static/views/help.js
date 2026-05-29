@@ -44,6 +44,14 @@ function md(src) {
         .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        // raw <video> (e.g. GitHub user-attachment demos) — not embeddable
+        // in-app: CSP media-src is 'self' blob:, and GitHub asset videos are
+        // short-lived signed redirects with x-frame-options:deny. Render a
+        // link that opens on GitHub instead of a dead player. 2026-05-29.
+        .replace(/<video\b[^>]*>(?:[\s\S]*?<\/video>)?/gi, (m) => {
+            const sm = m.match(/src="([^"]+)"/i);
+            return sm ? `<p class="help-video"><a href="${sm[1]}" target="_blank" rel="noopener">🎥 Watch the demo video on GitHub</a> <span class="help-muted">(embedded video isn't available in-app)</span></p>` : '';
+        })
         // images (before links)
         .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img alt="$1" src="$2" class="help-img">')
         // links
@@ -57,8 +65,11 @@ function md(src) {
         .replace(/^(\s*)[-*] (.+)$/gm, '$1<li>$2</li>')
         // ordered lists
         .replace(/^(\s*)\d+\. (.+)$/gm, '$1<li>$2</li>')
-        // blockquote
-        .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+        // blockquote — allow empty `>` lines (multi-paragraph quotes) so they
+        // don't leave a stray `>`; the empties get merged below. Note: the
+        // separator must be [ \t] not \s — \s matches the newline and would
+        // swallow the next line. 2026-05-29.
+        .replace(/^>[ \t]?(.*)$/gm, '<blockquote>$1</blockquote>')
         // paragraphs — wrap remaining loose lines
         .replace(/^(?!<[huplitbod]|<hr|<pre|<blockquote)(.+)$/gm, '<p>$1</p>');
 
@@ -277,17 +288,24 @@ export default {
         if (!tree) tree = await fetchTree();
         renderSidebar();
 
-        // Check for deep-link: #help/AGENTS or #help/integrations/DISCORD
-        const hash = location.hash.replace(/^#help\/?/, '').replace(/^#/, '');
-        // Check for _viewSelect (other views linking here)
-        const target = window._viewSelect || (hash ? `${hash}.md` : null);
-        if (window._viewSelect) delete window._viewSelect;
-
-        if (target) {
-            await navigateTo(target);
-        } else if (!activePath) {
-            await navigateTo('_root/README.md');
+        // Resolve a deep-link target, in priority order:
+        //   1. window._viewSelect — another view linked us here with a doc
+        //   2. a genuine #help/<path> sub-route in the hash
+        // A bare #help, or a STALE non-help hash (e.g. #settings left from the
+        // view we came from — show() runs before the router rewrites the hash),
+        // is NOT a doc path. In every other case fall back to the Sapphire
+        // overview (root README) so re-entry always lands somewhere real
+        // instead of 404ing on a stale path. 2026-05-29.
+        let target = null;
+        if (window._viewSelect) {
+            target = window._viewSelect;
+            delete window._viewSelect;
+        } else {
+            const m = location.hash.match(/^#help\/(.+)$/);
+            if (m && m[1]) target = `${m[1]}.md`;
         }
+
+        await navigateTo(target || '_root/README.md');
     },
 
     hide() {}
