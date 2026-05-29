@@ -6,6 +6,7 @@ import { showExportDialog, showImportDialog } from '../shared/import-export.js';
 import { setupModalClose } from '../shared/modal.js';
 import * as ui from '../ui.js';
 import { updateScene } from '../features/scene.js';
+import { helpPills } from '../features/video-link.js';
 
 // ── State ──
 let container = null;
@@ -75,7 +76,7 @@ function render() {
     if (!container) return;
 
     container.innerHTML = `
-        ${renderPersonaTabs('prompts')}
+        ${renderPersonaTabs('prompts', helpPills('Prompts', { video: 'JxgNAk4Y2qI', doc: 'PROMPTS.md', inline: true }))}
         <div class="prompts-layout">
             <div class="pr-content">
                 <div class="pr-editor">

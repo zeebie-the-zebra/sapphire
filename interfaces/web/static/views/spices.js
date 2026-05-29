@@ -2,6 +2,7 @@
 import { getSpices, addSpice, updateSpice, deleteSpice, addCategory, renameCategory, deleteCategory, toggleCategory, reloadSpices,
          getSpiceSets, getCurrentSpiceSet, activateSpiceSet, saveCustomSpiceSet, deleteSpiceSet, setSpiceSetEmoji, setCategoryEmoji } from '../shared/spice-api.js';
 import { renderPersonaTabs, bindPersonaTabs } from '../shared/persona-tabs.js';
+import { helpPills } from '../features/video-link.js';
 import { showExportDialog, showImportDialog } from '../shared/import-export.js';
 import * as ui from '../ui.js';
 import { updateScene } from '../features/scene.js';
@@ -63,7 +64,7 @@ function render() {
     const enabledSet = new Set(selected?.categories || []);
 
     container.innerHTML = `
-        ${renderPersonaTabs('spices')}
+        ${renderPersonaTabs('spices', helpPills('Spices', { video: 'pu0dauGBhgY', doc: 'SPICE.md', inline: true }))}
         <div class="two-panel">
             <div class="panel-left panel-list">
                 <div class="panel-list-header">

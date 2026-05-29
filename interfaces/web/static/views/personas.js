@@ -4,6 +4,7 @@ import { listPersonas, getPersona, createPersona, updatePersona, deletePersona,
          exportPersona, importPersona,
          avatarUrl, avatarImg, avatarFallback } from '../shared/persona-api.js';
 import { renderPersonaTabs, bindPersonaTabs } from '../shared/persona-tabs.js';
+import { helpPills } from '../features/video-link.js';
 import { getInitData } from '../shared/init-data.js';
 import {
     renderScopeDropdowns,
@@ -128,7 +129,7 @@ function render() {
     const isActive = selectedData?.name === getCurrentPersona();
 
     container.innerHTML = `
-        ${renderPersonaTabs('personas')}
+        ${renderPersonaTabs('personas', helpPills('Personas', { video: '5kqW-o35OU4', doc: 'PERSONAS.md', inline: true }))}
         <div class="two-panel">
             <div class="panel-left panel-list">
                 <div class="panel-list-header">

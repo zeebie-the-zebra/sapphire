@@ -1,3 +1,8 @@
+# 2.7.1 - Video Help
+- Help guide in video form
+- Clickable help links from each page
+- Links to docs and video
+- Support for community folks making their own sapphire channels
 # 2.7.0 - TTS Stream
 - Milestone 1/3 for true voice mode
 - Added ability to use old non-stream TTS

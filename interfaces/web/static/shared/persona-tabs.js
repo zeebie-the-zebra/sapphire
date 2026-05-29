@@ -13,9 +13,10 @@ const TABS = [
  * @param {string} activeId - Currently active tab ID
  * @returns {string} HTML string
  */
-export function renderPersonaTabs(activeId) {
+export function renderPersonaTabs(activeId, rightSlot = '') {
     return `<div class="persona-tabs">
         ${TABS.map(t => `<button class="persona-tab${t.id === activeId ? ' active' : ''}" data-view="${t.id}">${t.icon} ${t.label}</button>`).join('')}
+        ${rightSlot}
     </div>`;
 }
 

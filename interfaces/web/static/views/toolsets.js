@@ -1,6 +1,7 @@
 // views/toolsets.js - Toolset manager view
 import { getToolsets, getCurrentToolset, getFunctions, activateToolset, saveCustomToolset, deleteToolset, enableFunctions, setToolsetEmoji } from '../shared/toolset-api.js';
 import { renderPersonaTabs, bindPersonaTabs } from '../shared/persona-tabs.js';
+import { helpPills } from '../features/video-link.js';
 import { showExportDialog, showImportDialog } from '../shared/import-export.js';
 import * as ui from '../ui.js';
 import { updateScene } from '../features/scene.js';
@@ -95,7 +96,7 @@ function render() {
     const hasEmoji = !!emoji;
 
     container.innerHTML = `
-        ${renderPersonaTabs('toolsets')}
+        ${renderPersonaTabs('toolsets', helpPills('Toolsets', { video: '9noDUc6bWss', doc: 'TOOLSETS.md', inline: true }))}
         <div class="two-panel">
             <div class="panel-left panel-list">
                 <div class="panel-list-header">
