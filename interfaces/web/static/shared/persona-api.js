@@ -66,7 +66,16 @@ export function avatarFallback(name, color) {
     return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-export const exportPersona = (name) => fetchWithTimeout(`/api/personas/${encodeURIComponent(name)}/export`);
+export const importPersonaCard = async (file, { overwrite_prompt = false, overwrite_avatar = false } = {}) => {
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('overwrite_prompt', overwrite_prompt ? 'true' : 'false');
+    formData.append('overwrite_avatar', overwrite_avatar ? 'true' : 'false');
+    const res = await fetch('/api/personas/import-card', { method: 'POST', headers: { 'X-CSRF-Token': csrf }, body: formData });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Import failed'); }
+    return res.json();
+};
 
 export const importPersona = (data) => fetchWithTimeout('/api/personas/import', {
     method: 'POST',

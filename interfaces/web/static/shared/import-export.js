@@ -87,7 +87,7 @@ export function showImportDialog(opts) {
             <div class="io-buttons">
                 <button class="btn-sm" id="io-paste">Paste from Clipboard</button>
                 <button class="btn-sm" id="io-upload">Upload File</button>
-                <input type="file" id="io-file" accept=".json" style="display:none">
+                <input type="file" id="io-file" accept="${opts.fileAccept || '.json'}" style="display:none">
             </div>
             <div id="io-status" class="io-status"></div>
         </div>
@@ -133,9 +133,27 @@ export function showImportDialog(opts) {
     });
 
     modal.querySelector('#io-upload').addEventListener('click', () => modal.querySelector('#io-file').click());
-    modal.querySelector('#io-file').addEventListener('change', e => {
+    modal.querySelector('#io-file').addEventListener('change', async e => {
         const file = e.target.files[0];
         if (!file) return;
+        // Binary file (e.g. a PNG character card) → hand the raw File to the
+        // caller's onImportFile instead of parsing as JSON text.
+        const isJson = file.name.toLowerCase().endsWith('.json') || file.type === 'application/json';
+        if (!isJson && opts.onImportFile) {
+            const status = modal.querySelector('#io-status');
+            const overwrites = {};
+            (opts.overwrites || []).forEach(o => {
+                overwrites[o.key] = modal.querySelector(`[data-ow="${o.key}"]`)?.checked ?? false;
+            });
+            status.textContent = `Importing ${file.name}...`;
+            try {
+                const name = await opts.onImportFile(file, { overwrites });
+                modal.remove();
+                opts.onDone?.();
+                ui.showToast(`Imported: ${name || file.name}`, 'success');
+            } catch (err) { status.textContent = `Error: ${err.message}`; }
+            return;
+        }
         const reader = new FileReader();
         reader.onload = () => doImport(reader.result);
         reader.readAsText(file);

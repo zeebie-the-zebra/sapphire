@@ -3,8 +3,8 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Request, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse, Response
 
 import config
 from core.auth import require_login
@@ -624,6 +624,36 @@ def _process_avatar(raw: bytes, size: int = 512) -> bytes:
     return buf.getvalue()
 
 
+def _hex_to_rgb(s):
+    s = (s or "").strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(c * 2 for c in s)
+    if len(s) != 6:
+        return None
+    try:
+        return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+def _color_from_name(name):
+    """Deterministic pleasant color from a name (stable across re-exports)."""
+    import colorsys
+    h = 0
+    for ch in (name or "?"):
+        h = (h * 31 + ord(ch)) % 360
+    r, g, b = colorsys.hls_to_rgb(h / 360.0, 0.45, 0.55)
+    return (int(r * 255), int(g * 255), int(b * 255))
+
+
+def _render_fallback_avatar(name, trim_color="", size=512):
+    """Solid-color 512² card image for personas with no avatar — trim color if
+    set, else a deterministic color from the name."""
+    from PIL import Image
+    color = _hex_to_rgb(trim_color) or _color_from_name(name)
+    return Image.new("RGBA", (size, size), color + (255,))
+
+
 @router.delete("/api/personas/{name}/avatar")
 async def delete_persona_avatar(name: str, request: Request, _=Depends(require_login)):
     """Delete avatar for a persona, reverting to fallback."""
@@ -694,11 +724,17 @@ async def create_persona_from_chat(request: Request, _=Depends(require_login), s
 # PERSONA IMPORT/EXPORT
 # =============================================================================
 
-@router.get("/api/personas/{name}/export")
-async def export_persona(name: str, request: Request, _=Depends(require_login)):
-    """Export persona as a portable JSON bundle (persona + prompt + avatar)."""
+@router.get("/api/personas/{name}/export.png")
+async def export_persona_card(name: str, request: Request, _=Depends(require_login)):
+    """Export persona as a PNG character card. The image is the avatar (or a
+    generated fallback); the persona bundle (prompt + components + voice + meta,
+    minus the avatar — the pixels ARE the avatar) rides in a `sapphire_persona`
+    tEXt chunk as base64 JSON."""
     import base64
+    import io
+    import json
     from datetime import datetime, timezone
+    from PIL import Image, PngImagePlugin
     from core.personas import persona_manager
     from core.prompt_crud import get_prompt
     from core.prompt_manager import prompt_manager
@@ -709,7 +745,7 @@ async def export_persona(name: str, request: Request, _=Depends(require_login)):
 
     settings = persona.get("settings", {})
 
-    # Build export bundle
+    # Build the bundle — same schema as before MINUS the avatar field.
     bundle = {
         "sapphire_export": True,
         "type": "persona",
@@ -725,13 +761,11 @@ async def export_persona(name: str, request: Request, _=Depends(require_login)):
         },
     }
 
-    # Include prompt data (same shape as prompt export)
     prompt_name = settings.get("prompt", "")
     if prompt_name and prompt_name != "__story__":
         prompt_data = get_prompt(prompt_name)
         if prompt_data:
             prompt_export = dict(prompt_data)
-            # Strip computed fields
             for k in ("content", "compiled", "char_count", "token_count"):
                 if prompt_export.get("type") == "assembled" and k == "content":
                     prompt_export.pop(k, None)
@@ -739,7 +773,6 @@ async def export_persona(name: str, request: Request, _=Depends(require_login)):
                     prompt_export.pop(k, None)
             bundle["prompt"] = {"name": prompt_name, "data": prompt_export}
 
-            # Include components used by assembled prompts
             if prompt_data.get("type") == "assembled" and prompt_data.get("components"):
                 used = {}
                 for comp_type, comp_key in prompt_data["components"].items():
@@ -755,28 +788,38 @@ async def export_persona(name: str, request: Request, _=Depends(require_login)):
                 if used:
                     bundle["components"] = used
 
-    # Include avatar as base64
+    # The card image = the avatar (re-encoded to PNG), or a generated fallback.
     avatar_path = persona_manager.get_avatar_path(name)
     if avatar_path and avatar_path.exists():
-        avatar_data = avatar_path.read_bytes()
-        ext = avatar_path.suffix.lstrip('.')
-        mime = {'webp': 'image/webp', 'png': 'image/png', 'jpg': 'image/jpeg', 'gif': 'image/gif'}.get(ext, 'image/webp')
-        bundle["avatar"] = f"data:{mime};base64,{base64.b64encode(avatar_data).decode()}"
+        img = Image.open(io.BytesIO(avatar_path.read_bytes())).convert("RGBA")
     else:
-        bundle["avatar"] = None
+        img = _render_fallback_avatar(name, settings.get("trim_color", ""))
 
-    return bundle
+    meta = PngImagePlugin.PngInfo()
+    meta.add_text("sapphire_persona", base64.b64encode(json.dumps(bundle).encode("utf-8")).decode("ascii"))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", pnginfo=meta)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{name}.png"'},
+    )
 
 
 @router.post("/api/personas/import")
 async def import_persona(request: Request, _=Depends(require_login)):
-    """Import a persona from a portable JSON bundle."""
+    """Import a persona from a portable JSON bundle (legacy format)."""
+    data = await request.json()
+    return await _import_persona_from_bundle(data)
+
+
+async def _import_persona_from_bundle(data):
+    """Shared persona-import logic. `data` is the bundle dict; a data-URI
+    `avatar` (if present) is stored as the persona's avatar (→ webp)."""
     import base64
     from core.personas import persona_manager
     from core.prompt_crud import get_prompt, save_prompt
     from core.prompt_manager import prompt_manager
-
-    data = await request.json()
 
     # Validate
     if not data.get("sapphire_export") or data.get("type") != "persona":
@@ -876,6 +919,44 @@ async def import_persona(request: Request, _=Depends(require_login)):
 
     sanitized = persona_manager._sanitize_name(name)
     return {"status": "success", "name": sanitized}
+
+
+@router.post("/api/personas/import-card")
+async def import_persona_card(request: Request, file: UploadFile = File(...),
+                              overwrite_prompt: bool = Form(False),
+                              overwrite_avatar: bool = Form(False),
+                              _=Depends(require_login)):
+    """Import a persona from a PNG character card — reads the bundle from the
+    `sapphire_persona` chunk and uses the PNG's pixels as the avatar."""
+    import base64
+    import io
+    import json
+    from PIL import Image
+
+    raw = await file.read()
+    if len(raw) > 6 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Card too large (max 6MB)")
+    try:
+        img = Image.open(io.BytesIO(raw))
+        chunk = (getattr(img, "text", None) or {}).get("sapphire_persona") \
+            or (img.info or {}).get("sapphire_persona")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Not a valid PNG")
+    if not chunk:
+        raise HTTPException(status_code=400, detail="PNG has no embedded persona data")
+    try:
+        data = json.loads(base64.b64decode(chunk))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Corrupt persona data in PNG")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Invalid persona data in PNG")
+
+    # The card's pixels ARE the avatar — feed them through the existing import
+    # path as a data-URI so they're stored (→ webp).
+    data["avatar"] = f"data:image/png;base64,{base64.b64encode(raw).decode('ascii')}"
+    data["overwrite_prompt"] = overwrite_prompt
+    data["overwrite_avatar"] = overwrite_avatar
+    return await _import_persona_from_bundle(data)
 
 
 # =============================================================================

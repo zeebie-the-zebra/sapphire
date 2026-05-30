@@ -1,7 +1,7 @@
 // views/personas.js - Persona manager view
 import { listPersonas, getPersona, createPersona, updatePersona, deletePersona,
          duplicatePersona, loadPersona, createFromChat, uploadAvatar, deleteAvatar,
-         exportPersona, importPersona,
+         importPersona, importPersonaCard,
          avatarUrl, avatarImg, avatarFallback } from '../shared/persona-api.js';
 import { PERSONA_TABS } from '../shared/persona-tabs.js';
 import { renderSectionTabs, bindSectionTabs } from '../shared/section-tabs.js';
@@ -569,24 +569,22 @@ function bindEvents() {
         } catch (e) { ui.showToast(e.message || 'Failed', 'error'); }
     });
 
-    // Export
-    container.querySelector('#pa-export')?.addEventListener('click', async () => {
+    // Export — downloads a PNG character card (avatar pixels + embedded bundle)
+    container.querySelector('#pa-export')?.addEventListener('click', () => {
         if (!selectedName) return;
-        try {
-            const bundle = await exportPersona(selectedName);
-            showExportDialog({
-                type: 'Persona',
-                name: selectedName,
-                data: bundle,
-                filename: `${selectedName}.persona.json`,
-            });
-        } catch (e) { ui.showToast(e.message || 'Export failed', 'error'); }
+        const a = document.createElement('a');
+        a.href = `/api/personas/${encodeURIComponent(selectedName)}/export.png`;
+        a.download = `${selectedName}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
     });
 
     // Import (accepts both persona bundles and plain prompt exports)
     container.querySelector('#pa-import')?.addEventListener('click', () => {
         showImportDialog({
             type: 'Persona or Prompt',
+            fileAccept: '.json,.png',
             overwrites: [
                 { key: 'prompt', label: 'Overwrite prompt if it already exists' },
                 { key: 'avatar', label: 'Overwrite avatar if it already exists' },
@@ -629,6 +627,14 @@ function bindEvents() {
                 bundle.overwrite_avatar = overwrites.avatar || false;
                 await importPersona(bundle);
                 selectedName = name.replace(/\s+/g, '_').toLowerCase();
+            },
+            onImportFile: async (file, { overwrites }) => {
+                const r = await importPersonaCard(file, {
+                    overwrite_prompt: overwrites.prompt,
+                    overwrite_avatar: overwrites.avatar,
+                });
+                selectedName = r.name;
+                return r.name;
             },
             onDone: async () => {
                 await loadData();
