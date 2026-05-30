@@ -1,3 +1,8 @@
+# 2.7.2 - Refactor UI
+- Persona, Triggers, Mind all use unified layout
+- Scopes for Mind are sidebar now
+- Export Persona exports PNG with embedded prompt data
+- Most of those pages have a link to help videos AND docs
 # 2.7.1 - Video Help
 - Help guide in video form
 - Clickable help links from each page
