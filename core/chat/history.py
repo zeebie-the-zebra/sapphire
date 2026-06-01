@@ -117,7 +117,9 @@ def count_tokens(text: str) -> int:
     """Accurate token count."""
     if not text:
         return 0
-    return len(get_tokenizer().encode(text))
+    # disallowed_special=() -> count special-token strings like '<|endoftext|>'
+    # as normal text instead of raising. We only use the length, never the IDs.
+    return len(get_tokenizer().encode(text, disallowed_special=()))
 
 
 def count_message_tokens(content, include_images: bool = False) -> int:
