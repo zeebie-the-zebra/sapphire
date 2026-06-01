@@ -114,12 +114,17 @@ def get_tokenizer():
     return _tokenizer
 
 def count_tokens(text: str) -> int:
-    """Accurate token count."""
+    """Token count for budgeting. Soft-fails to an estimate rather than raising —
+    counting is telemetry, never worth crashing a chat turn over."""
     if not text:
         return 0
-    # disallowed_special=() -> count special-token strings like '<|endoftext|>'
-    # as normal text instead of raising. We only use the length, never the IDs.
-    return len(get_tokenizer().encode(text, disallowed_special=()))
+    try:
+        # disallowed_special=() -> count special-token strings like '<|endoftext|>'
+        # as normal text instead of raising. We only use the length, never the IDs.
+        return len(get_tokenizer().encode(text, disallowed_special=()))
+    except Exception as e:
+        logger.warning(f"count_tokens fell back to estimate: {type(e).__name__}: {e}")
+        return max(1, len(str(text)) // 3)
 
 
 def count_message_tokens(content, include_images: bool = False) -> int:
