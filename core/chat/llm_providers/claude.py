@@ -93,11 +93,14 @@ class ClaudeProvider(BaseProvider):
         try:
             response = self._client.messages.create(
                 model=self.model,
-                max_tokens=32,
+                max_tokens=1024,
                 messages=[{"role": "user", "content": "Say hello in exactly 5 words."}],
                 timeout=self.health_check_timeout
             )
-            text = response.content[0].text if response.content else ''
+            # Skip thinking blocks — reasoning models return a ThinkingBlock first,
+            # which has no `.text`. Grab the first text block.
+            text = next((b.text for b in (response.content or [])
+                         if getattr(b, 'type', None) == 'text'), '')
             return {"ok": True, "response": text}
         except anthropic.APIStatusError as e:
             return {"ok": False, "error": f"{e.status_code}: {e.message}"}

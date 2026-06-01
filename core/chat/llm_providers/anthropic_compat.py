@@ -99,11 +99,14 @@ class AnthropicCompatProvider(BaseProvider):
         try:
             response = self._client.messages.create(
                 model=self.model,
-                max_tokens=32,
+                max_tokens=1024,
                 messages=[{"role": "user", "content": "Say hello in exactly 5 words."}],
                 timeout=self.health_check_timeout
             )
-            text = response.content[0].text if response.content else ''
+            # Skip thinking blocks — reasoning models (e.g. MiniMax M3) return a
+            # ThinkingBlock first, which has no `.text`. Grab the first text block.
+            text = next((b.text for b in (response.content or [])
+                         if getattr(b, 'type', None) == 'text'), '')
             return {"ok": True, "response": text}
         except Exception as e:
             status = getattr(e, 'status_code', '')
