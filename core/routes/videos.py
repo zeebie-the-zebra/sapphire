@@ -245,6 +245,11 @@ async def _build() -> dict:
                 hdr = _parse_channel_header(page)
                 entry["avatar"] = hdr.get("avatar")
                 entry["desc"] = hdr.get("desc")
+                # Use the live channel name for the tab, truncated. Falls back to
+                # the manifest name (set above) if og:title was missing.
+                if hdr.get("name"):
+                    nm = hdr["name"]
+                    entry["name"] = nm if len(nm) <= 20 else nm[:20].rstrip() + "…"
             # Latest — from the /videos scrape (has durations); RSS is the
             # fallback if YouTube's markup shifts (no durations there).
             latest = _parse_channel_videos(page) if page else []
