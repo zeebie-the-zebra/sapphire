@@ -62,44 +62,47 @@ class OpenAICompatProvider(BaseProvider):
     
     def _supports_multimodal(self) -> bool:
         """
-        Check if this specific provider instance supports multimodal (image) inputs.
-        
-        Conservative approach: only enable for known vision-capable endpoints.
-        Local models (LM Studio, llama.cpp) typically don't support multimodal
-        unless running specific VLM models.
+        Whether this provider instance supports multimodal (image) inputs.
+
+        Priority:
+        1. Explicit per-provider override `supports_images` in the config (wins).
+        2. OpenAI official API → always.
+        3. Self-hosted endpoints (localhost OR private LAN IPs OR .local) and
+           known model marketplaces → detect by VLM model-name token.
+        4. Unknown public endpoint → conservative (off).
         """
+        import re as _re
         base_url = (self.base_url or '').lower()
         model = (self.model or '').lower()
-        
-        # OpenAI official API - supports vision with gpt-4-vision, gpt-4o, etc.
+
+        # 1. Explicit override — lets any vision-capable endpoint be declared
+        #    regardless of host/name heuristics. Set supports_images on the provider.
+        override = self.config.get('supports_images')
+        if override is not None:
+            return bool(override)
+
+        vision_indicators = ['llava', 'vision', 'vl', 'pixtral', 'bakllava', 'cogvlm',
+                             'minicpm-v', 'internvl', 'gemma-3', 'qwen2-vl', 'qwen2.5-vl',
+                             'qwen3-vl', 'gpt-4o', 'gpt-4-vision']
+
+        # 2. OpenAI official
         if 'api.openai.com' in base_url:
-            logger.debug(f"[MULTIMODAL] OpenAI API detected, enabling multimodal")
             return True
-        
-        # Fireworks - supports vision with specific VLM models
-        if 'fireworks.ai' in base_url:
-            # Check for known vision models
-            vision_indicators = ['llava', 'vision', 'vl', 'pixtral', 'qwen2-vl']
+
+        # 3. Self-hosted (user-run servers) + known marketplaces → detect by model name.
+        #    Private-LAN IPs are self-hosted too — a Qwen-VL on the box at 192.168.x.x
+        #    is just as vision-capable as one on localhost.
+        is_self_hosted = (
+            any(h in base_url for h in
+                ['localhost', '127.0.0.1', '0.0.0.0', '.local', 'host.docker.internal'])
+            or bool(_re.search(r'//(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)', base_url))
+        )
+        if is_self_hosted or 'fireworks.ai' in base_url or 'openrouter.ai' in base_url:
             supported = any(ind in model for ind in vision_indicators)
-            logger.debug(f"[MULTIMODAL] Fireworks: model={model}, multimodal={supported}")
+            logger.debug(f"[MULTIMODAL] endpoint={base_url} model={model} multimodal={supported}")
             return supported
-        
-        # OpenRouter - check model name for vision capability
-        if 'openrouter.ai' in base_url:
-            vision_indicators = ['vision', 'vl', 'llava', 'pixtral', 'gpt-4o']
-            supported = any(ind in model for ind in vision_indicators)
-            logger.debug(f"[MULTIMODAL] OpenRouter: model={model}, multimodal={supported}")
-            return supported
-        
-        # Local endpoints (LM Studio, llama.cpp, etc.) - check model name
-        if any(local in base_url for local in ['localhost', '127.0.0.1', '0.0.0.0']):
-            # Only enable if model name suggests vision capability
-            vision_indicators = ['llava', 'vision', 'vl', 'bakllava', 'cogvlm', 'minicpm-v']
-            supported = any(ind in model for ind in vision_indicators)
-            logger.debug(f"[MULTIMODAL] Local endpoint: model={model}, multimodal={supported}")
-            return supported
-        
-        # Unknown endpoint - be conservative, disable multimodal
+
+        # 4. Unknown public endpoint — conservative.
         logger.debug(f"[MULTIMODAL] Unknown endpoint {base_url}, disabling multimodal")
         return False
     

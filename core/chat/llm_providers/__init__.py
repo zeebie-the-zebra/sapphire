@@ -218,6 +218,9 @@ class ProviderRegistry(_BaseRegistry):
             # to inject chat_template_kwargs.enable_thinking=false + /no_think
             # token on the last user message. Opt-in per-provider.
             'disable_thinking_qwen': config.get('disable_thinking_qwen', False),
+            # Vision override — config-driven supports_images, read by openai_compat.
+            # None = fall through to heuristic; True/False = force on/off.
+            'supports_images': config.get('supports_images'),
         }
 
         try:

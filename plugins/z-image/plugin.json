@@ -1,0 +1,67 @@
+{
+  "name": "z-image",
+  "version": "1.0.0",
+  "description": "Z-Image Turbo — fast local image generation via sd-server (stable-diffusion.cpp). Generate several at once, see them in a labeled grid, and recreate any exactly by seed.",
+  "author": "sapphire",
+  "icon": "🖼️",
+  "priority": 50,
+  "default_enabled": false,
+  "settingsUI": "plugin",
+  "capabilities": {
+    "tools": ["tools/zimage_tools.py"],
+    "routes": [
+      {"method": "POST", "path": "test", "handler": "routes/api.py:test_connection"}
+    ],
+    "settings": [
+      {
+        "key": "api_url",
+        "type": "string",
+        "label": "sd-server URL",
+        "default": "http://127.0.0.1:7861",
+        "help": "Base URL of the sd-server (stable-diffusion.cpp) running Z-Image Turbo. Use the server's LAN IP if Sapphire runs elsewhere."
+      },
+      {
+        "key": "max_count",
+        "type": "number",
+        "label": "Max images per call",
+        "default": 6,
+        "help": "Upper limit on how many images one tool call can generate (protects VRAM/time)."
+      },
+      {
+        "key": "default_steps",
+        "type": "number",
+        "label": "Default steps",
+        "default": 8,
+        "help": "Z-Image Turbo is tuned for 8 steps."
+      },
+      {
+        "key": "default_cfg",
+        "type": "number",
+        "label": "Default CFG scale",
+        "default": 1.0,
+        "help": "Z-Image Turbo wants cfg ~1.0."
+      },
+      {
+        "key": "default_negative",
+        "type": "string",
+        "label": "Default negative prompt",
+        "default": "",
+        "help": "Applied when the model doesn't override it. Z-Image needs little-to-none."
+      },
+      {
+        "key": "static_keywords",
+        "type": "string",
+        "label": "Static keywords",
+        "default": "",
+        "help": "Always appended to the prompt (e.g. 'cinematic, wide shot')."
+      },
+      {
+        "key": "timeout",
+        "type": "number",
+        "label": "Per-image timeout (seconds)",
+        "default": 180,
+        "help": "Max wait for a single image from sd-server."
+      }
+    ]
+  }
+}

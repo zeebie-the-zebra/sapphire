@@ -53,6 +53,7 @@ export default {
                         <span class="custom-provider-detail">${_esc(model)} \u00B7 ${template}</span>
                     </div>
                     <div class="custom-provider-actions">
+                        <label title="Vision \u2014 this model can see images. Turn on for VLMs whose name doesn't include a vision token (e.g. Qwen3 27B without 'VL')." onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:3px;font-size:var(--font-sm);color:var(--text-muted);margin-right:8px;cursor:pointer">\ud83d\udc41<input type="checkbox" class="custom-provider-vision" data-provider="${k}" ${c.supports_images ? 'checked' : ''}></label>
                         <label class="toggle-switch toggle-sm" onclick="event.stopPropagation()">
                             <input type="checkbox" class="custom-provider-enabled" data-provider="${k}" ${enabled ? 'checked' : ''}>
                             <span class="toggle-slider"></span>
@@ -223,6 +224,21 @@ export default {
                     if (status) status.textContent = e.target.checked ? '\uD83D\uDFE2' : '\u26AB';
                 } catch (err) {
                     showToast('Failed to update provider', 'error');
+                    e.target.checked = !e.target.checked;
+                }
+            });
+        });
+
+        // Custom provider vision toggle — force image-input support on for VLMs
+        // whose model name can't be auto-detected (override wins in openai_compat).
+        el.querySelectorAll('.custom-provider-vision').forEach(t => {
+            t.addEventListener('change', async e => {
+                const key = e.target.dataset.provider;
+                try {
+                    await updateProvider(key, { supports_images: e.target.checked });
+                    showToast(`Vision ${e.target.checked ? 'ON' : 'OFF'} for ${key} — restart to apply`, 'success');
+                } catch (err) {
+                    showToast('Failed to update vision setting', 'error');
                     e.target.checked = !e.target.checked;
                 }
             });
