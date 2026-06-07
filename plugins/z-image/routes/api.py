@@ -1,8 +1,30 @@
-"""z-image plugin routes — connection test for the sd-server backend."""
+"""z-image plugin routes — connection test + a user-facing generate endpoint
+(powers the Z-Image Studio app page)."""
 
+import base64
+import importlib.util
 import logging
+import random
+import time
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# The route file is exec'd in an isolated namespace (not a package), so we can't
+# `import` the sibling tools module normally — load it by path from __file__ and
+# reuse its generation helpers so the app and the tool never drift.
+_ZT = None
+
+
+def _tools():
+    global _ZT
+    if _ZT is None:
+        p = Path(__file__).parent.parent / "tools" / "zimage_tools.py"
+        spec = importlib.util.spec_from_file_location("zimage_tools_routeload", p)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _ZT = mod
+    return _ZT
 
 
 # POST /api/plugin/z-image/test   body: {"url": "http://host:7861"}
@@ -36,3 +58,76 @@ async def test_connection(**kwargs):
         return {"success": False, "error": "Timed out reaching sd-server"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# POST /api/plugin/z-image/generate
+# body: {prompt, count, steps, cfg_scale, seed, width, height, negative_prompt, expand}
+def generate(**kwargs):
+    """User-driven one-off generation for the Studio app. Sync handler — the
+    dispatcher runs it in a threadpool, so the blocking sd-server call (~4s)
+    doesn't stall the event loop. Returns full-res images + the EXACT prompt
+    that was sent (after the me/you expansion) so the user can tune in real time."""
+    body = kwargs.get("body") or {}
+    zt = _tools()
+    cfg = zt._settings(kwargs.get("settings"))  # stored settings merged over defaults
+
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        return {"success": False, "error": "No prompt provided"}
+
+    def _num(key, default, cast):
+        v = body.get(key)
+        if v in (None, ""):
+            return default
+        try:
+            return cast(v)
+        except (TypeError, ValueError):
+            return default
+
+    expand = bool(body.get("expand", True))
+    final_prompt = zt._expand_prompt(prompt, cfg) if expand else prompt
+
+    width = _num("width", 1024, int)
+    height = _num("height", 1024, int)
+    steps = _num("steps", int(cfg.get("default_steps", 8)), int)
+    cfg_scale = _num("cfg_scale", float(cfg.get("default_cfg", 1.0)), float)
+    negative = body.get("negative_prompt")
+    if negative is None:
+        negative = cfg.get("default_negative", "")
+    max_count = _num("__maxc", int(cfg.get("max_count", 6)), int)
+    count = max(1, min(_num("count", 1, int), max_count))
+    api_url = cfg.get("api_url", "http://127.0.0.1:7861")
+    timeout = int(cfg.get("timeout", 180))
+
+    base_seed = body.get("seed")
+    if base_seed not in (None, ""):
+        try:
+            seeds = [int(base_seed) + i for i in range(count)]
+        except (TypeError, ValueError):
+            seeds = [random.randint(1, 2**31 - 1) for _ in range(count)]
+    else:
+        seeds = [random.randint(1, 2**31 - 1) for _ in range(count)]
+
+    images = []
+    t0 = time.time()
+    try:
+        for seed in seeds:
+            payload = {
+                "prompt": final_prompt, "negative_prompt": negative,
+                "steps": steps, "cfg_scale": cfg_scale,
+                "width": width, "height": height, "seed": seed, "batch_size": 1,
+            }
+            raw = zt._call_sdserver(api_url, payload, timeout)
+            images.append("data:image/png;base64," + base64.b64encode(raw).decode())
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    return {
+        "success": True,
+        "images": images,
+        "seeds": seeds,
+        "final_prompt": final_prompt,
+        "elapsed": round(time.time() - t0, 1),
+        "params": {"width": width, "height": height, "steps": steps,
+                   "cfg_scale": cfg_scale, "negative": negative, "expanded": expand},
+    }

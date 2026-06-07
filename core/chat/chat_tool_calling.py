@@ -202,6 +202,9 @@ def _extract_tool_images(result, history=None, provider=None):
             if isinstance(img, dict) and img.get("data")
         ]
         supports_vision = bool(provider and getattr(provider, 'supports_images', False))
+        logger.info(f"[VISION-DEBUG] tool returned {len(result['images'])} image(s); "
+                    f"provider={type(provider).__name__ if provider else None} "
+                    f"supports_vision={supports_vision} → {'LLM sees them' if supports_vision else 'CLIP fallback'}")
         # Save images to DB and embed markers in text
         # Images with display_only=True are saved for user gallery but not sent to LLM
         llm_images = []

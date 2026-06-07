@@ -106,6 +106,10 @@ export function bindAllEvents() {
     document.addEventListener('imageReady', handleImageReady);
 }
 
+// PATH 2 of 2 for tool images: clones each accordion tool-result image (rendered
+// in ui-parsing.js, the loop tagged "PATH 1 of 2") out into the reply body, right
+// after the accordion. This is what surfaces tool images into the visible reply.
+// Every createImageElement image that loads inside a .message hits this.
 function handleImageReady(event) {
     const loadedImg = event.target;
 

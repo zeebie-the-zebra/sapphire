@@ -8,9 +8,16 @@
   "default_enabled": false,
   "settingsUI": "plugin",
   "capabilities": {
+    "app": {
+      "label": "Z-Image Studio",
+      "icon": "🖼️",
+      "description": "Generate images directly — tune prompts, CFG, seed and steps in real time",
+      "nav": false
+    },
     "tools": ["tools/zimage_tools.py"],
     "routes": [
-      {"method": "POST", "path": "test", "handler": "routes/api.py:test_connection"}
+      {"method": "POST", "path": "test", "handler": "routes/api.py:test_connection"},
+      {"method": "POST", "path": "generate", "handler": "routes/api.py:generate"}
     ],
     "settings": [
       {

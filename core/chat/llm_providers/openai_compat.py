@@ -78,7 +78,9 @@ class OpenAICompatProvider(BaseProvider):
         # 1. Explicit override — lets any vision-capable endpoint be declared
         #    regardless of host/name heuristics. Set supports_images on the provider.
         override = self.config.get('supports_images')
+        logger.info(f"[VISION-DEBUG] supports_images: base_url={base_url!r} model={model!r} config_flag={override!r}")
         if override is not None:
+            logger.info(f"[VISION-DEBUG]   -> config override decides: {bool(override)}")
             return bool(override)
 
         vision_indicators = ['llava', 'vision', 'vl', 'pixtral', 'bakllava', 'cogvlm',
@@ -99,11 +101,11 @@ class OpenAICompatProvider(BaseProvider):
         )
         if is_self_hosted or 'fireworks.ai' in base_url or 'openrouter.ai' in base_url:
             supported = any(ind in model for ind in vision_indicators)
-            logger.debug(f"[MULTIMODAL] endpoint={base_url} model={model} multimodal={supported}")
+            logger.info(f"[VISION-DEBUG]   -> heuristic (self_hosted={is_self_hosted}) name-match = {supported}")
             return supported
 
         # 4. Unknown public endpoint — conservative.
-        logger.debug(f"[MULTIMODAL] Unknown endpoint {base_url}, disabling multimodal")
+        logger.info(f"[VISION-DEBUG]   -> unknown endpoint, defaulting OFF")
         return False
     
     def _is_deepseek_official(self) -> bool:

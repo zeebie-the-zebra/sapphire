@@ -256,15 +256,11 @@ def _exec_generate(arguments, plugin_settings=None):
     if len(raw_images) == 1:
         out_images = [{"data": _enc(raw_images[0]), "media_type": "image/jpeg",
                        "display_only": (not view)}]
-    elif view:
-        # labeled grid the model looks at, full-size individuals for the user
-        out_images = [{"data": base64.b64encode(_make_grid(raw_images)).decode(),
-                       "media_type": "image/jpeg"}]
-        out_images += [{"data": _enc(r), "media_type": "image/jpeg", "display_only": True}
-                       for r in raw_images]
     else:
-        # model doesn't look — just show the user each full-size (no grid needed)
-        out_images = [{"data": _enc(r), "media_type": "image/jpeg", "display_only": True}
-                      for r in raw_images]
+        # count>1: ONE clean image — the labeled grid (contact sheet). Individuals
+        # aren't rendered to avoid the grid+duplicates clutter; the recipe above
+        # gives each image's seed, so any single is a recreate-by-seed away.
+        out_images = [{"data": base64.b64encode(_make_grid(raw_images)).decode(),
+                       "media_type": "image/jpeg", "display_only": (not view)}]
 
     return {"text": recipe, "images": out_images}, True

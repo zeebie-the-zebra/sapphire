@@ -765,11 +765,11 @@ const renderToolResult = (el, part) => {
                   toolName === 'if_get_galleries' ? 2000 :
                   toolName === 'if_get_categories' ? 2000 : 500;
 
-    // Check for image markers
-    const imgMatch = fullResult.match(/<<IMG::([^>]+)>>/);
-    if (imgMatch) {
-        const imageId = imgMatch[1];
-        const textWithoutMarker = fullResult.replace(/<<IMG::[^>]+>>\n?/, '').trim();
+    // Check for image markers. A tool can return SEVERAL (e.g. z-image returns a
+    // grid + the individual full-size images), so match + strip ALL of them.
+    const imgIds = [...fullResult.matchAll(/<<IMG::([^>]+)>>/g)].map(m => m[1]);
+    if (imgIds.length) {
+        const textWithoutMarker = fullResult.replace(/<<IMG::[^>]+>>\n?/g, '').trim();
         const isTruncated = textWithoutMarker.length > maxLen;
         const truncatedText = isTruncated
             ? textWithoutMarker.substring(0, maxLen) + '...'
@@ -791,9 +791,16 @@ const renderToolResult = (el, part) => {
             addExpandToggle(content, inputsPrefix + 'Result:\n', truncatedText, textWithoutMarker);
         }
 
-        const img = Images.createImageElement(imageId, false, null);
-        img.className = 'tool-result-image';
-        content.insertBefore(img, content.firstChild);
+        // Render every returned image. Inserting each before firstChild in marker
+        // order yields the natural top-to-bottom order (grid first, then individuals).
+        // NOTE — PATH 1 of 2 for tool images: this renders them INSIDE the accordion.
+        // PATH 2 is the inline clone in core/events.js `handleImageReady`, which clones
+        // each of these into the reply body once it loads. A tool image shows in BOTH.
+        for (const imageId of imgIds) {
+            const img = Images.createImageElement(imageId, false, null);
+            img.className = 'tool-result-image';
+            content.insertBefore(img, content.firstChild);
+        }
 
         el.appendChild(acc);
         return;

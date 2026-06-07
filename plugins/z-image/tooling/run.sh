@@ -43,8 +43,13 @@ dl "https://huggingface.co/ffxvs/vae-flux/resolve/main/ae.safetensors" "$MODELS/
 dl "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507-Q4_K_M.gguf" "$MODELS/$LLM_FILE"
 
 echo "==> launching sd-server on $LISTEN_IP:$LISTEN_PORT (offload=$OFFLOAD)"
-# --diffusion-fa = flash attention. Gen params (steps=8, cfg=1.0, W/H) are sent
-# PER-REQUEST by the plugin, not here.
+# Speed/VRAM knobs:
+#   OFFLOAD=1    — weights in CPU RAM, STREAMED to GPU (compute still on GPU). Fast
+#                  (~4s) + tiny GPU footprint (~1GB). Best on a shared GPU. RECOMMENDED.
+#   VAE_TILING=1 — ONLY if OFFLOAD=0 and you OOM at the VAE decode. Tiles the decode
+#                  to shrink its buffer, but it's noticeably slower. Last resort, not speed.
+# --diffusion-fa = flash attention. Gen params (steps/cfg/W/H) are per-request.
+VAE_TILING="${VAE_TILING:-0}"
 FLAGS=(
     --diffusion-model "$MODELS/$ZIMG_GGUF"
     --vae             "$MODELS/$VAE_FILE"
@@ -54,4 +59,5 @@ FLAGS=(
     --listen-port "$LISTEN_PORT"
 )
 [ "$OFFLOAD" = "1" ] && FLAGS+=( --offload-to-cpu )
+[ "$VAE_TILING" = "1" ] && FLAGS+=( --vae-tiling )
 exec "$BIN" "${FLAGS[@]}"
