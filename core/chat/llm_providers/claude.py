@@ -233,49 +233,47 @@ class ClaudeProvider(BaseProvider):
         if cache_enabled:
             self._apply_history_cache_control(claude_messages, cache_ttl)
 
-        if "temperature" in params:
-            request_kwargs["temperature"] = params["temperature"]
+        # Sampling params (temperature/top_p/top_k) are removed on modern
+        # Claude models (Opus 4.7+, Fable 5) and return a 400 — never sent.
 
-        # Add extended thinking if enabled (unless explicitly disabled)
-        # Read from provider config first, fall back to global config
+        # Adaptive thinking (Opus 4.6+, Sonnet 4.6, Fable 5). The old
+        # {type: "enabled", budget_tokens: N} contract 400s on Opus 4.7+.
+        # Depth is steered via output_config.effort instead of a budget.
         thinking_enabled = self.config.get('thinking_enabled')
         if thinking_enabled is None:
             thinking_enabled = getattr(config, 'CLAUDE_THINKING_ENABLED', False)
-        thinking_budget = self.config.get('thinking_budget')
-        if thinking_budget is None:
-            thinking_budget = getattr(config, 'CLAUDE_THINKING_BUDGET', 10000)
         disable_thinking = params.get('disable_thinking', False)
-        
+
         # SAFETY: Auto-disable thinking if active tool cycle lacks thinking_raw
         if needs_thinking_disabled:
             if thinking_enabled and not disable_thinking:
                 logger.info("[THINK] Auto-disabling thinking for this request: active tool cycle started without thinking")
             disable_thinking = True
-        
+
         # SAFETY: Auto-disable thinking if last message is assistant (continue mode)
         if claude_messages and claude_messages[-1].get("role") == "assistant":
             if thinking_enabled and not disable_thinking:
                 logger.info("[THINK] Auto-disabling thinking: last message is assistant (continue mode)")
             disable_thinking = True
-        
+
         # CRITICAL: Strip thinking blocks from messages if thinking is disabled
         # Claude rejects thinking blocks in messages when thinking param is disabled
         if disable_thinking:
             claude_messages = self._strip_thinking_blocks(claude_messages)
             request_kwargs["messages"] = claude_messages  # Update reference!
-        
+
         if thinking_enabled and not disable_thinking:
-            if request_kwargs["max_tokens"] <= thinking_budget:
-                request_kwargs["max_tokens"] = thinking_budget + 8000
-                logger.info(f"[THINK] Bumped max_tokens to {request_kwargs['max_tokens']} (must exceed budget)")
-            
-            request_kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": thinking_budget
-            }
-            request_kwargs.pop("temperature", None)
-            logger.info(f"[THINK] Claude extended thinking enabled (budget: {thinking_budget})")
-        
+            # Thinking spends from the max_tokens pool — floor it so a small
+            # response cap doesn't truncate mid-thought.
+            if request_kwargs["max_tokens"] < 16000:
+                request_kwargs["max_tokens"] = 16000
+            # display defaults to "omitted" on Opus 4.7+ (empty thinking text);
+            # "summarized" restores the streamed thinking the UI shows.
+            request_kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
+            effort = self.config.get('reasoning_effort') or 'high'
+            request_kwargs["output_config"] = {"effort": effort}
+            logger.info(f"[THINK] Claude adaptive thinking enabled (effort: {effort})")
+
         if tools:
             request_kwargs["tools"] = self._convert_tools(tools, cache_enabled, cache_ttl)
         
@@ -328,17 +326,13 @@ class ClaudeProvider(BaseProvider):
         if cache_enabled:
             self._apply_history_cache_control(claude_messages, cache_ttl)
 
-        if "temperature" in params:
-            request_kwargs["temperature"] = params["temperature"]
+        # Sampling params (temperature/top_p/top_k) are removed on modern
+        # Claude models (Opus 4.7+, Fable 5) and return a 400 — never sent.
 
-        # Add extended thinking if enabled (unless explicitly disabled for this request)
-        # Read from provider config first, fall back to global config
+        # Adaptive thinking — see chat_completion() for rationale.
         thinking_enabled = self.config.get('thinking_enabled')
         if thinking_enabled is None:
             thinking_enabled = getattr(config, 'CLAUDE_THINKING_ENABLED', False)
-        thinking_budget = self.config.get('thinking_budget')
-        if thinking_budget is None:
-            thinking_budget = getattr(config, 'CLAUDE_THINKING_BUDGET', 10000)
         disable_thinking = params.get('disable_thinking', False)
         
         # SAFETY: Auto-disable thinking if active tool cycle lacks thinking_raw
@@ -361,16 +355,16 @@ class ClaudeProvider(BaseProvider):
             request_kwargs["messages"] = claude_messages  # Update reference!
         
         if thinking_enabled and not disable_thinking:
-            if request_kwargs["max_tokens"] <= thinking_budget:
-                request_kwargs["max_tokens"] = thinking_budget + 8000
-                logger.info(f"[THINK] Bumped max_tokens to {request_kwargs['max_tokens']} (must exceed budget)")
-            
-            request_kwargs["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": thinking_budget
-            }
-            request_kwargs.pop("temperature", None)
-            logger.info(f"[THINK] Claude extended thinking enabled (budget: {thinking_budget})")
+            # Thinking spends from the max_tokens pool — floor it so a small
+            # response cap doesn't truncate mid-thought.
+            if request_kwargs["max_tokens"] < 16000:
+                request_kwargs["max_tokens"] = 16000
+            # display defaults to "omitted" on Opus 4.7+ (empty thinking text);
+            # "summarized" restores the streamed thinking the UI shows.
+            request_kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
+            effort = self.config.get('reasoning_effort') or 'high'
+            request_kwargs["output_config"] = {"effort": effort}
+            logger.info(f"[THINK] Claude adaptive thinking enabled (effort: {effort})")
         elif thinking_enabled and disable_thinking:
             logger.info(f"[THINK] Extended thinking disabled for this request")
         

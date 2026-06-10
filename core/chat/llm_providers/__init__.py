@@ -69,11 +69,10 @@ class ProviderRegistry(_BaseRegistry):
                 'required_fields': ['api_key', 'model'],
                 'optional_fields': ['timeout'],
                 'model_options': {
+                    'claude-fable-5': 'Fable 5',
                     'claude-opus-4-8': 'Opus 4.8',
                     'claude-opus-4-7': 'Opus 4.7',
                     'claude-sonnet-4-6': 'Sonnet 4.6',
-                    'claude-sonnet-4-5': 'Sonnet 4.5',
-                    'claude-haiku-4-5': 'Haiku 4.5',
                 },
                 'is_local': False,
                 'default_timeout': 10.0,
@@ -203,13 +202,15 @@ class ProviderRegistry(_BaseRegistry):
             'model': model,
             'timeout': config.get('timeout', default_timeout),
             'enabled': True,
-            # Claude-specific
+            # Claude-specific (thinking_budget is anthropic_compat-only now —
+            # the main ClaudeProvider uses adaptive thinking + reasoning_effort)
             'thinking_enabled': config.get('thinking_enabled'),
             'thinking_budget': config.get('thinking_budget'),
             'cache_enabled': config.get('cache_enabled', False),
             'cache_ttl': config.get('cache_ttl', '5m'),
-            # Responses API / reasoning
-            'reasoning_effort': config.get('reasoning_effort', 'medium'),
+            # Responses API / reasoning (Claude adaptive thinking defaults to
+            # high — matches the API default and pre-adaptive thinking depth)
+            'reasoning_effort': config.get('reasoning_effort', 'high' if provider_type == 'claude' else 'medium'),
             'reasoning_summary': config.get('reasoning_summary', 'auto'),
             # Config hints from presets
             'session_affinity': config.get('session_affinity', False),

@@ -315,7 +315,7 @@ export function renderGenerationParams(providerKey, modelName, genProfiles = {})
 export function renderProviderToggles(key, config) {
   if (key === 'claude') {
     const thinkingEnabled = config.thinking_enabled !== false;
-    const thinkingBudget = config.thinking_budget || 10000;
+    const thinkingEffort = config.reasoning_effort || 'high';
     const cacheEnabled = config.cache_enabled || false;
     const cacheTtl = config.cache_ttl || '5m';
 
@@ -325,13 +325,17 @@ export function renderProviderToggles(key, config) {
           <label class="checkbox-inline toggle-label">
             <input type="checkbox" class="provider-field thinking-toggle" data-provider="${key}" data-field="thinking_enabled"
                    ${thinkingEnabled ? 'checked' : ''}>
-            <span>Extended Thinking</span>
+            <span>Adaptive Thinking</span>
           </label>
           <div class="toggle-value ${thinkingEnabled ? '' : 'hidden'}" data-toggle="thinking" data-provider="${key}">
-            <label>Budget</label>
-            <input type="number" class="provider-field thinking-budget" data-provider="${key}" data-field="thinking_budget"
-                   value="${thinkingBudget}" step="1000" min="1024" max="32000">
-            <span class="toggle-value-hint">tokens</span>
+            <label>Effort</label>
+            <select class="provider-field thinking-effort" data-provider="${key}" data-field="reasoning_effort">
+              <option value="low" ${thinkingEffort === 'low' ? 'selected' : ''}>Low</option>
+              <option value="medium" ${thinkingEffort === 'medium' ? 'selected' : ''}>Medium</option>
+              <option value="high" ${thinkingEffort === 'high' ? 'selected' : ''}>High</option>
+              <option value="xhigh" ${thinkingEffort === 'xhigh' ? 'selected' : ''}>X-High</option>
+              <option value="max" ${thinkingEffort === 'max' ? 'selected' : ''}>Max</option>
+            </select>
           </div>
         </div>
         <div class="toggle-row">

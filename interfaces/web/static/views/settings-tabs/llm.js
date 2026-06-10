@@ -136,7 +136,6 @@ export default {
                     let value = e.target.value;
                     if (field === 'timeout') value = parseFloat(value) || 5;
                     if (['use_as_fallback', 'thinking_enabled', 'cache_enabled', 'disable_thinking_qwen'].includes(field)) value = e.target.checked;
-                    if (field === 'thinking_budget') value = parseInt(value) || 10000;
                     await updateProvider(key, { [field]: value });
                     showToast('Provider settings saved', 'success', 2000);
                 } catch (err) {
