@@ -492,3 +492,77 @@ def test_inline_tool_image_base64_scrubbed_from_new_messages():
                 f"inline base64 image leaked into persisted {m.get('role')} message"
     assert any("Tool returned image" in str(m.get("content", "")) for m in new), \
         "injected image note should survive the scrub as text"
+
+
+def test_trim_never_deletes_current_user_turn_short_history():
+    """When history is short/empty, the trim's front-delete range can reach the
+    CURRENT turn's user message. Pre-fix, deleting it triggered the anchor
+    fallback and the user turn vanished from persisted history (#4 reopened).
+    The trim must structurally protect the live user_msg. 2026-06-13.
+
+    Empty history → user_msg sits right after system. count_tokens=100/msg,
+    0.9*800=720: tokens stay under until ~6 msgs accumulate across tool rounds,
+    then the trim fires with drop=1 → del messages[1:2] which (pre-fix) deleted
+    the user_msg at index 1."""
+    ctx, te = _build_ctx(
+        {"max_tool_rounds": 10, "context_limit": 800},
+        [_tool_call_response() for _ in range(5)] + [_text_response("done")],
+    )
+    with patch("core.chat.history.count_tokens", return_value=100):
+        ctx.run("LOOK AT THIS SPECIFIC THING", history_messages=[])
+    new = ctx.new_messages
+    assert new, "new_messages empty — current turn lost entirely"
+    assert any("LOOK AT THIS SPECIFIC THING" in str(m.get("content", "")) for m in new), \
+        "the current user turn was deleted by the trim and lost from persisted history"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. _scrub_inline_images unit coverage (the chaos-scout edge shapes, 2026-06-13)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_scrub_unit_text_plus_image_collapses_to_string():
+    from core.continuity.execution_context import _scrub_inline_images
+    img = {"type": "image", "data": "x", "media_type": "image/png"}
+    out = _scrub_inline_images({"role": "user", "content": [{"type": "text", "text": "hi"}, img]})
+    assert out == {"role": "user", "content": "hi"}
+
+
+def test_scrub_unit_preserves_tool_result_drops_image():
+    from core.continuity.execution_context import _scrub_inline_images
+    img = {"type": "image", "data": "x", "media_type": "image/png"}
+    tr = {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}
+    out = _scrub_inline_images({"role": "user", "content": [tr, img]})
+    assert out == {"role": "user", "content": [tr]}  # tool_result kept, image gone
+
+
+def test_scrub_unit_all_image_becomes_placeholder_not_empty():
+    from core.continuity.execution_context import _scrub_inline_images
+    img = {"type": "image", "data": "x", "media_type": "image/png"}
+    out = _scrub_inline_images({"role": "user", "content": [img]})
+    assert out["content"] == "[image]"  # never an empty-string user bubble
+
+
+def test_scrub_unit_non_string_text_does_not_crash():
+    from core.continuity.execution_context import _scrub_inline_images
+    img = {"type": "image", "data": "x", "media_type": "image/png"}
+    out = _scrub_inline_images({"role": "user", "content": [{"type": "text", "text": None}, img]})
+    assert isinstance(out["content"], str)  # coerced, no TypeError
+
+
+def test_scrub_unit_leaves_non_user_and_string_untouched():
+    from core.continuity.execution_context import _scrub_inline_images
+    img = {"type": "image", "data": "x", "media_type": "image/png"}
+    asst = {"role": "assistant", "content": [img]}
+    assert _scrub_inline_images(asst) is asst              # non-user untouched
+    s = {"role": "user", "content": "plain text"}
+    assert _scrub_inline_images(s) is s                    # string content untouched
+
+
+def test_scrub_unit_is_pure_does_not_mutate_input():
+    from core.continuity.execution_context import _scrub_inline_images
+    img = {"type": "image", "data": "x", "media_type": "image/png"}
+    orig_content = [{"type": "text", "text": "hi"}, img]
+    orig = {"role": "user", "content": orig_content}
+    _scrub_inline_images(orig)
+    assert orig["content"] == [{"type": "text", "text": "hi"}, img]  # input intact

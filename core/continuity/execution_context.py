@@ -44,8 +44,15 @@ def _scrub_inline_images(msg: Dict[str, Any]) -> Dict[str, Any]:
             if not (isinstance(b, dict) and b.get("type") == "image")]
     if len(kept) == len(msg["content"]):
         return msg  # no image blocks — untouched (e.g. tool_result messages)
+    if not kept:
+        # Content was image(s) only — never persist an empty-content user message
+        # (invisible-bubble hazard). Unreachable from current producers (they all
+        # prepend a text block) but guarded so a future one can't trip it.
+        return {**msg, "content": "[image]"}
     if all(isinstance(b, dict) and b.get("type") == "text" for b in kept):
-        return {**msg, "content": " ".join(b.get("text", "") for b in kept).strip()}
+        # str()-coerce defensively — a malformed text block (text=None/int) must
+        # collapse cleanly, never crash the persist with a join TypeError.
+        return {**msg, "content": " ".join(str(b.get("text") or "") for b in kept).strip()}
     return {**msg, "content": kept}
 
 
@@ -400,23 +407,33 @@ class ExecutionContext:
                     non_system = len(messages) - sys_idx
                     if non_system > 4:
                         drop = max(1, non_system // 4)
-                        del messages[sys_idx:sys_idx + drop]
-                        # Strip any orphaned tool-result messages now at the front
-                        while len(messages) > sys_idx and messages[sys_idx].get("role") == "tool":
-                            messages.pop(sys_idx)
-                        # Also strip an assistant that had tool_calls whose results
-                        # just got dropped (would become orphan at LLM call time)
-                        if len(messages) > sys_idx and messages[sys_idx].get("role") == "assistant" and messages[sys_idx].get("tool_calls"):
-                            messages.pop(sys_idx)
-                        new_msg_tokens = sum(count_tokens(str(m.get("content", ""))) for m in messages)
-                        new_total = new_msg_tokens + tool_schema_tokens
-                        logger.warning(
-                            f"[ExecCtx] Context trim: dropped ~{drop} oldest msgs "
-                            f"({total_tokens} → {new_total} tokens, "
-                            f"limit {context_limit}; tool schemas {tool_schema_tokens})"
-                        )
-                        total_tokens = new_total
-                        msg_tokens = new_msg_tokens
+                        # Trim is for OLD history ONLY — never delete the current
+                        # turn's user message or anything after it. On a short/empty
+                        # chat user_msg sits near the front and the raw drop range
+                        # would delete it, which loses the LLM's actual prompt AND
+                        # reopens the stale-anchor bug via the identity fallback
+                        # (next(...) misses → falls back to a stale msg_start_idx).
+                        # Clamp so the delete never reaches user_msg. 2026-06-13.
+                        protect_idx = next((i for i, m in enumerate(messages) if m is user_msg), len(messages))
+                        drop = min(drop, max(0, protect_idx - sys_idx))
+                        if drop > 0:
+                            del messages[sys_idx:sys_idx + drop]
+                            # Strip any orphaned tool-result messages now at the front
+                            while len(messages) > sys_idx and messages[sys_idx].get("role") == "tool":
+                                messages.pop(sys_idx)
+                            # Also strip an assistant that had tool_calls whose results
+                            # just got dropped (would become orphan at LLM call time)
+                            if len(messages) > sys_idx and messages[sys_idx].get("role") == "assistant" and messages[sys_idx].get("tool_calls"):
+                                messages.pop(sys_idx)
+                            new_msg_tokens = sum(count_tokens(str(m.get("content", ""))) for m in messages)
+                            new_total = new_msg_tokens + tool_schema_tokens
+                            logger.warning(
+                                f"[ExecCtx] Context trim: dropped ~{drop} oldest msgs "
+                                f"({total_tokens} → {new_total} tokens, "
+                                f"limit {context_limit}; tool schemas {tool_schema_tokens})"
+                            )
+                            total_tokens = new_total
+                            msg_tokens = new_msg_tokens
                     if total_tokens > context_limit * 0.9:
                         # Trim couldn't rescue this turn — give a specific reason
                         # that points at the actual lever to pull. With heavy
