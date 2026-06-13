@@ -178,6 +178,43 @@ def _run():
 
 The payload keys should include anything declared in your `filter_fields` so the scheduler can match filters. Include enough context for the LLM to understand what happened.
 
+### Sending images (vision)
+
+A daemon event can carry images so a vision-capable model *sees* them (e.g. a
+Discord message with an attached screenshot). Add an **`images`** key to the
+payload — a list of `{"data": <base64>, "media_type": ...}` objects:
+
+```python
+import base64
+
+payload = json.dumps({
+    "account": "main",
+    "sender": event.sender,
+    "text": event.text,
+    "images": [
+        {
+            "data": base64.b64encode(image_bytes).decode(),  # raw base64, NOT a data: URI
+            "media_type": "image/png",                        # png | jpeg | gif | webp
+        },
+    ],
+})
+_plugin_loader.emit_daemon_event("my_event", payload)
+```
+
+Contract and behavior:
+
+- **Field name must be exactly `images`**, each entry exactly `{"data", "media_type"}`.
+  `data` is plain base64 (no `data:image/...;base64,` prefix). Anything else is ignored.
+- **Validated at the boundary:** non-image `media_type`, undecodable base64, or images
+  over 10 MB are dropped with a log; max 8 images per event. Malformed entries never
+  reach the model or the chat — they're skipped, not stringified.
+- **Vision gate:** the image is sent to the model only if the task's provider supports
+  vision. For OpenAI-compatible / Anthropic-compatible custom providers, enable the
+  **👁 vision** checkbox on the provider (Settings → LLM). Non-vision providers get a
+  text description of the image instead (local, no network).
+- **Persistence:** the image is stored once in the chat DB and shown in history via a
+  marker — the base64 is *not* re-sent every turn, so it won't bloat the chat.
+
 ---
 
 ## Reply Handlers
@@ -256,3 +293,4 @@ DAEMON SYSTEM:
 - Filter fields: AND-matched against event payload
 - Task fields: per-task config (select with static/dynamic options, boolean)
 - Lifecycle: start on load, stop on unload, survives hot-reload
+- Images: add `"images": [{"data": <base64>, "media_type": "image/png"}]` to the payload — sent to vision-capable providers (gated on the provider's vision support), stored once in the chat DB via a marker (no per-turn replay bloat); max 8 images, 10 MB each, png/jpeg/gif/webp
