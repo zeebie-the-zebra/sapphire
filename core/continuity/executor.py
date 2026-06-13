@@ -29,6 +29,58 @@ logger = logging.getLogger(__name__)
 current_event_data: ContextVar[dict] = ContextVar("current_event_data", default={})
 
 
+# Contract for plugin-supplied images on an event payload:
+#   payload["images"] = [{"data": "<base64>", "media_type": "image/png"}, ...]
+# Plugin authors populate this; core validates strictly and routes through the
+# existing tool-image pipeline (DB blob + <<IMG::...>> marker + vision gate).
+# Malformed entries are dropped with a log — never stringified into the prompt.
+_MAX_EVENT_IMAGES = 8
+_MAX_EVENT_IMAGE_BYTES = 10 * 1024 * 1024  # 10MB decoded, per image
+_VALID_IMAGE_MEDIA = {"image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"}
+
+
+def _extract_event_images(obj) -> list:
+    """Pull validated images from an event payload dict.
+
+    Returns a list of {"data": <base64 str>, "media_type": <str>} that passed
+    validation, or [] if none/invalid. This is the trust boundary for
+    plugin-supplied binary data: a signed plugin can still be buggy, so we
+    decode-test every entry and cap count + size before anything reaches the
+    LLM context or the chat DB. 2026-06-13.
+    """
+    import base64
+    if not isinstance(obj, dict):
+        return []
+    raw = obj.get("images")
+    if not isinstance(raw, list) or not raw:
+        return []
+    out = []
+    for entry in raw[:_MAX_EVENT_IMAGES]:
+        if not isinstance(entry, dict):
+            logger.warning("[EVENT-IMG] Dropped non-dict image entry")
+            continue
+        data = entry.get("data")
+        media_type = (entry.get("media_type") or "image/jpeg").lower()
+        if not isinstance(data, str) or not data:
+            logger.warning("[EVENT-IMG] Dropped image entry with no base64 'data' string")
+            continue
+        if media_type not in _VALID_IMAGE_MEDIA:
+            logger.warning(f"[EVENT-IMG] Dropped image with unsupported media_type {media_type!r}")
+            continue
+        try:
+            decoded = base64.b64decode(data, validate=True)
+        except Exception:
+            logger.warning("[EVENT-IMG] Dropped image entry — 'data' is not valid base64")
+            continue
+        if len(decoded) > _MAX_EVENT_IMAGE_BYTES:
+            logger.warning(f"[EVENT-IMG] Dropped image — {len(decoded)} bytes exceeds cap")
+            continue
+        out.append({"data": data, "media_type": media_type})
+    if len(raw) > _MAX_EVENT_IMAGES:
+        logger.warning(f"[EVENT-IMG] Payload had {len(raw)} images; capped to {_MAX_EVENT_IMAGES}")
+    return out
+
+
 class ContinuityExecutor:
     """Executes continuity tasks with context isolation."""
 
@@ -175,6 +227,18 @@ class ContinuityExecutor:
                 task["initial_message"] = f"{instructions}\n\n{event_display}"
             else:
                 task["initial_message"] = event_display
+
+            # Plugin-supplied images (payload["images"]). Validated here at the
+            # trust boundary; saved to the chat DB + sent to vision models at the
+            # run site. Absent/invalid → [] → behavior identical to text-only. 2026-06-13.
+            try:
+                _img_obj = json.loads(event_data) if isinstance(event_data, str) else event_data
+                event_images = _extract_event_images(_img_obj)
+                if event_images:
+                    task["_event_images"] = event_images
+                    logger.info(f"[EVENT-IMG] {len(event_images)} image(s) attached from event payload")
+            except (json.JSONDecodeError, TypeError):
+                pass
 
             # Auto-set plugin scopes from event data (e.g. discord account)
             # Event source → scope key mapping for auto-fill.
@@ -330,9 +394,12 @@ class ContinuityExecutor:
                 tts_enabled = task.get("tts_enabled", True)
                 browser_tts = task.get("browser_tts", False)
                 msg = task.get("initial_message", "Hello.")
+                # Ephemeral path doesn't persist — images are turn-only, shown to
+                # the LLM (vision-gated in ctx), no DB save / marker needed.
+                _ev_images = task.get("_event_images")
 
                 try:
-                    response = ctx.run(msg)
+                    response = ctx.run(msg, images=_ev_images)
 
                     if response_cb and response:
                         try: response_cb(response)
@@ -384,6 +451,45 @@ class ContinuityExecutor:
 
         result["completed_at"] = datetime.now().isoformat()
         return result
+
+    @staticmethod
+    def _save_event_images(images, target_chat, session_manager) -> str:
+        """Save plugin event images to the chat DB keyed to target_chat and
+        return a marker suffix to append to the user message text.
+
+        Markers (`<<IMG::event:id>>`) match the UI strip pattern, so they're
+        stripped before the LLM and rehydrated from the DB by the frontend —
+        the same lifecycle as tool images. Bytes live in the DB; history holds
+        only the marker. 2026-06-13.
+        """
+        import base64
+        import uuid
+        if not images or not hasattr(session_manager, "save_tool_image"):
+            return ""
+        markers = []
+        for img in images:
+            try:
+                media_type = img.get("media_type", "image/jpeg")
+                ext = "png" if "png" in media_type else ("gif" if "gif" in media_type
+                      else ("webp" if "webp" in media_type else "jpg"))
+                img_id = f"{uuid.uuid4().hex[:12]}.{ext}"
+                img_bytes = base64.b64decode(img["data"])
+                # Use the SAME `tool:` marker namespace as tool images — the
+                # frontend (strips `tool:`), serve route, and orphan-pruner all
+                # only recognize `tool:`. A separate `event:` prefix rendered as
+                # a broken image AND got pruned as a false orphan. These ARE
+                # tool_images-table entries, just sourced from an event. 2026-06-13.
+                if session_manager.save_tool_image(img_id, img_bytes, media_type,
+                                                   chat_name=target_chat):
+                    markers.append(f"<<IMG::tool:{img_id}>>")
+                else:
+                    # DB write failed — don't append a marker pointing at a blob
+                    # that isn't there (would 404 on render). LLM still saw the
+                    # image this turn via the images= param; only history skips it.
+                    logger.warning(f"[EVENT-IMG] save_tool_image returned False for {img_id} — marker skipped")
+            except Exception as e:
+                logger.warning(f"[EVENT-IMG] Failed to persist event image: {e}")
+        return ("\n" + "\n".join(markers)) if markers else ""
 
     def _run_foreground(self, task: Dict[str, Any], result: Dict[str, Any],
                         progress_cb=None, response_cb=None) -> Dict[str, Any]:
@@ -473,6 +579,14 @@ class ContinuityExecutor:
             browser_tts = task.get("browser_tts", False)
             msg = task.get("initial_message", "Hello.")
 
+            # Plugin event images: save bytes to the chat DB (keyed to target_chat)
+            # and append <<IMG::event:id>> markers to the persisted text. The base64
+            # is handed to ctx separately for the LLM turn (vision-gated); history
+            # keeps only the marker. 2026-06-13.
+            _ev_images = task.get("_event_images")
+            if _ev_images:
+                msg = msg + self._save_event_images(_ev_images, target_chat, session_manager)
+
             # Read history from target chat WITHOUT switching active chat
             history_messages = session_manager.read_chat_messages(
                 target_chat, provider=task_settings.get("provider")
@@ -480,7 +594,7 @@ class ContinuityExecutor:
 
             try:
                 # Run through isolated ExecutionContext — no singleton contact
-                response = ctx.run(msg, history_messages=history_messages)
+                response = ctx.run(msg, history_messages=history_messages, images=_ev_images)
 
                 # If the run ended degraded (context overflow, tool exhaustion,
                 # empty LLM, hallucinated tools), the empty assistant message

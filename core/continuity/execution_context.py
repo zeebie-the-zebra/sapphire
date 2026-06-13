@@ -24,6 +24,31 @@ logger = logging.getLogger(__name__)
 current_task_persona: ContextVar[Optional[str]] = ContextVar('current_task_persona', default=None)
 
 
+def _scrub_inline_images(msg: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip inline base64 image blocks from a user message before persistence.
+
+    Tool-returned images are injected mid-loop as a base64 user message (for the
+    LLM to see THIS turn) by `_inject_tool_images`, and are separately saved to
+    the chat DB with a `<<IMG::tool:id>>` marker in the tool-result message. So
+    the base64 copy is turn-only — persisting it inline would replay the image
+    every turn and bloat the chat (the same hazard the event-image dual-form swap
+    guards). This drops only `type:image` blocks; `tool_result` and `text` blocks
+    are preserved untouched (so wire_to_canonical's tool-result handling is safe).
+    A text-only remainder collapses to a plain string — the safest persisted shape.
+    Pure function; returns the message unchanged when there's nothing to scrub.
+    2026-06-13.
+    """
+    if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
+        return msg
+    kept = [b for b in msg["content"]
+            if not (isinstance(b, dict) and b.get("type") == "image")]
+    if len(kept) == len(msg["content"]):
+        return msg  # no image blocks — untouched (e.g. tool_result messages)
+    if all(isinstance(b, dict) and b.get("type") == "text" for b in kept):
+        return {**msg, "content": " ".join(b.get("text", "") for b in kept).strip()}
+    return {**msg, "content": kept}
+
+
 class ExecutionContext:
     """Self-contained execution environment for a single task run.
 
@@ -218,7 +243,8 @@ class ExecutionContext:
 
     # ── Execution ──
 
-    def run(self, user_input: str, history_messages: List[Dict] = None) -> str:
+    def run(self, user_input: str, history_messages: List[Dict] = None,
+            images: List[Dict] = None) -> str:
         """Run LLM + tool loop in complete isolation. Returns response text.
 
         After run() completes, self.new_messages contains all messages generated
@@ -227,9 +253,15 @@ class ExecutionContext:
         tool calls — not just the final response.
 
         Args:
-            user_input: The user/event message
+            user_input: The user/event message. When images are passed, this is
+                        the PERSISTED form (text + <<IMG::...>> markers) — the
+                        marker is what lands in chat history, never base64.
             history_messages: Optional prior messages for foreground chat continuity.
                               If None, runs ephemeral (system + user only).
+            images: Optional plugin-supplied images [{"data": b64, "media_type": str}].
+                    Shown to the LLM as base64 blocks THIS turn only, gated on
+                    provider vision support; non-vision falls back to a CLIP vibe
+                    description. new_messages always persists the marker form.
         """
         from core.chat.chat import filter_to_thinking_only, _inject_tool_images
 
@@ -240,25 +272,69 @@ class ExecutionContext:
         _persona_token = current_task_persona.set(self.task_settings.get("prompt"))
         try:
             return self._run_inner(user_input, history_messages,
-                                   filter_to_thinking_only, _inject_tool_images)
+                                   filter_to_thinking_only, _inject_tool_images,
+                                   images)
         finally:
             current_task_persona.reset(_persona_token)
 
-    def _run_inner(self, user_input, history_messages, filter_to_thinking_only, _inject_tool_images):
-        # Build messages
+    def _build_user_message(self, user_input, images):
+        """Build the user message content the LLM sees this turn.
+
+        Returns (llm_content, persist_content). llm_content carries base64 image
+        blocks for vision models (or vibe-augmented text otherwise); persist_content
+        is always the marker-string `user_input` so chat history never stores base64.
+        """
+        if not images:
+            return user_input, user_input
+        from core.chat.chat_tool_calling import strip_ui_markers
+        clean_text = strip_ui_markers(user_input) if "<<" in user_input else user_input
+        if getattr(self.provider, "supports_images", False):
+            content = [{"type": "text", "text": clean_text}]
+            for img in images:
+                content.append({
+                    "type": "image",
+                    "data": img.get("data", ""),
+                    "media_type": img.get("media_type", "image/jpeg"),
+                })
+            return content, user_input
+        # No vision: describe the image(s) so the model gets the vibe, not a drop.
+        import base64
+        vibe_parts = []
+        for img in images:
+            try:
+                from core import vibes as _vibes
+                vibe_parts.append(_vibes.describe(base64.b64decode(img["data"])))
+            except Exception as e:
+                logger.warning(f"[EVENT-IMG] vibe describe failed: {e}")
+        augmented = user_input
+        if vibe_parts:
+            augmented = (user_input + "\n\n" + "\n\n".join(p for p in vibe_parts if p)).strip()
+        # Persist the marker form (user_input), but the LLM this turn sees the
+        # vibe-augmented text. Persisting the marker keeps replay clean.
+        return augmented, user_input
+
+    def _run_inner(self, user_input, history_messages, filter_to_thinking_only, _inject_tool_images,
+                   images=None):
+        # Build the user message. llm_content is what the model sees (may carry
+        # base64 image blocks); persist_content is the marker form for history.
+        llm_content, persist_content = self._build_user_message(user_input, images)
+        # Build messages. Hold a reference to the user-message OBJECT so its index
+        # can be re-derived by identity after the loop — the in-loop context trim
+        # deletes front messages, which would make a frozen msg_start_idx stale and
+        # silently drop the user turn from the persisted slice. 2026-06-13.
+        user_msg = {"role": "user", "content": llm_content}
         if history_messages is not None:
             # Foreground mode — use existing chat history
             messages = [{"role": "system", "content": self.system_prompt}] + history_messages
-            # Track where new messages start BEFORE adding the user message
-            msg_start_idx = len(messages)
-            messages.append({"role": "user", "content": user_input})
+            msg_start_idx = len(messages)  # initial position + fallback anchor
+            messages.append(user_msg)
         else:
             # Ephemeral — no history
             messages = [
                 {"role": "system", "content": self.system_prompt},
             ]
             msg_start_idx = len(messages)
-            messages.append({"role": "user", "content": user_input})
+            messages.append(user_msg)
 
         # The scheduler stores 0 as the "unset / use default" sentinel for
         # max_tool_rounds and max_parallel_tools (scheduler.py:320-321,
@@ -538,9 +614,33 @@ class ExecutionContext:
                 # of users.
                 messages.append({"role": "assistant", "content": ""})
 
-        # Expose messages generated during this run. Only include if we got a response —
+        # ANCHOR BY IDENTITY: re-derive the user message's CURRENT index — the
+        # in-loop context trim may have deleted messages before it, shifting it
+        # down. A frozen index would point past the real turn and drop it from
+        # the persisted slice. Derive ONCE here: the swap below replaces the
+        # object (so it can't be re-found afterward), but the swap doesn't change
+        # list length, so cur_idx stays valid for the slice. Multiple trims are
+        # handled for free — this reflects the final position. 2026-06-13.
+        cur_idx = next((i for i, m in enumerate(messages) if m is user_msg), msg_start_idx)
+
+        # DUAL-FORM SWAP: the LLM saw the image as base64 across this turn's
+        # rounds, but history must persist the MARKER form (text + <<IMG::...>>),
+        # never inline base64 — otherwise every replay re-sends the image and
+        # bloats the chat. Swap the anchored user message's content to the marker
+        # form. No-op when no images were passed (persist_content == llm_content).
+        if images and len(messages) > cur_idx:
+            _um = messages[cur_idx]
+            if _um.get("role") == "user":
+                messages[cur_idx] = {**_um, "content": persist_content}
+
+        # Expose messages generated during this run. Scrub inline base64 image
+        # blocks (appended mid-loop by _inject_tool_images for tool-returned
+        # images) down to text — those images are referenced by their own
+        # <<IMG::tool:id>> markers in the tool-result messages, so the base64 is
+        # turn-only and must not persist (same replay-bloat hazard the swap
+        # guards for event images). 2026-06-13. Only include if we got a response —
         # an orphaned user message with no assistant reply corrupts chat history.
-        new = messages[msg_start_idx:]
+        new = [_scrub_inline_images(m) for m in messages[cur_idx:]]
         has_assistant = any(m.get("role") == "assistant" for m in new)
         self.new_messages = new if has_assistant else []
 

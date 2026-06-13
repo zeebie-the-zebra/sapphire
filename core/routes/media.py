@@ -23,7 +23,11 @@ USER_PLUGIN_SETTINGS_DIR = PROJECT_ROOT / 'user' / 'webui' / 'plugins'
 async def serve_tool_image(image_id: str, request: Request, _=Depends(require_login)):
     """Serve tool-returned images from the chat history database."""
     import re
-    if not re.match(r'^[a-zA-Z0-9_-]+\.(jpg|png)$', image_id):
+    # jpg/png are the classic tool-image extensions; gif/webp arrive via the
+    # event-image path (validation allows them, vision models see them, and
+    # browsers render them in <img>). Strictly more permissive — existing
+    # jpg/png serving is unaffected. 2026-06-13.
+    if not re.match(r'^[a-zA-Z0-9_-]+\.(jpg|jpeg|png|gif|webp)$', image_id):
         raise HTTPException(status_code=400, detail="Invalid image ID")
 
     system = get_system()

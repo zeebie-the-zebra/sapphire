@@ -1769,15 +1769,24 @@ class ChatSessionManager:
         
         return False
 
-    def save_tool_image(self, image_id: str, data: bytes, media_type: str = "image/jpeg") -> bool:
-        """Save a tool-returned image blob to the database."""
+    def save_tool_image(self, image_id: str, data: bytes, media_type: str = "image/jpeg",
+                        chat_name: str = None) -> bool:
+        """Save a tool-returned image blob to the database.
+
+        chat_name defaults to the active chat. The continuity executor runs
+        against a target chat WITHOUT switching active, so it passes chat_name
+        explicitly — otherwise the blob keys to whatever chat happens to be
+        active and gets orphaned when that chat (not the target) is deleted.
+        Retrieval is by id alone, so a wrong key doesn't break rehydration —
+        it's a cascade-correctness fix. 2026-06-13.
+        """
         self._ensure_db()
         try:
             with self._get_connection() as conn:
                 conn.execute(
                     """INSERT OR REPLACE INTO tool_images (id, chat_name, data, media_type, created_at)
                        VALUES (?, ?, ?, ?, ?)""",
-                    (image_id, self.active_chat_name, data, media_type, datetime.now().isoformat())
+                    (image_id, chat_name or self.active_chat_name, data, media_type, datetime.now().isoformat())
                 )
                 conn.commit()
             return True

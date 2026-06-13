@@ -421,3 +421,74 @@ def test_scheduler_default_max_tool_rounds_is_zero_sentinel():
         "None — verify ExecutionContext still treats the new default as "
         "'use config.MAX_TOOL_ITERATIONS'."
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Context-trim must not corrupt the persisted slice (2026-06-13)
+#    The in-loop context trim deletes front messages but historically did NOT
+#    adjust msg_start_idx, so new_messages (= messages[msg_start_idx:]) went
+#    stale and dropped the user turn (and assistant). Fixed by anchoring the
+#    user message by object identity. These tests drive a real trim.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_context_trim_preserves_user_turn_in_new_messages():
+    """After the in-loop trim deletes oldest messages, the persisted slice must
+    still START at the user turn. Pre-fix, msg_start_idx was stale and the slice
+    came back empty (turn silently lost) or corrupt."""
+    ctx, te = _build_ctx(
+        {"max_tool_rounds": 3, "context_limit": 1300},
+        [_text_response("Final answer.")],
+    )
+    # 10 prior messages → non_system=11 (>4, trim has material). count_tokens=100
+    # each: pre-trim 12 msgs + 1 schema = 1300 > 0.9*1300=1170 → trim drops 2 →
+    # 1100 < 1170 → loop proceeds to the LLM and gets a real assistant reply.
+    history = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"}
+               for i in range(10)]
+    with patch("core.chat.history.count_tokens", return_value=100):
+        ctx.run("look at the latest", history_messages=history)
+    new = ctx.new_messages
+    assert new, "new_messages empty after trim — user turn was silently dropped"
+    assert new[0]["role"] == "user", f"slice must start at the user turn, got {new[0]['role']}"
+    assert "look at the latest" in str(new[0]["content"]), "user content lost in the slice"
+    assert any(m["role"] == "assistant" for m in new), "assistant reply missing from slice"
+
+
+def test_no_trim_unaffected_baseline():
+    """Sanity: with tokens well under the limit (no trim), the slice is correct.
+    Guards against the anchor fix breaking the common no-trim path."""
+    ctx, te = _build_ctx(
+        {"max_tool_rounds": 3, "context_limit": 100000},
+        [_text_response("Hi back.")],
+    )
+    history = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"}
+               for i in range(4)]
+    with patch("core.chat.history.count_tokens", return_value=10):
+        ctx.run("hello", history_messages=history)
+    new = ctx.new_messages
+    assert new and new[0]["role"] == "user" and "hello" in str(new[0]["content"])
+    assert any(m["role"] == "assistant" for m in new)
+
+
+def test_inline_tool_image_base64_scrubbed_from_new_messages():
+    """Tool-returned images are injected as base64 for the LLM THIS turn, but must
+    NOT persist inline (replay bloat). new_messages must carry no type:image block
+    — the image lives in the DB behind its tool-result marker. The injected text
+    note survives. 2026-06-13."""
+    ctx, te = _build_ctx(
+        {"max_tool_rounds": 3, "context_limit": 100000},
+        [_tool_call_response(), _text_response("Looked at it.")],
+    )
+    # Tool returns an image → _inject_tool_images appends a base64 user message.
+    te.execute_tool_calls.return_value = (1, [{"data": "aGVsbG8=", "media_type": "image/png"}])
+    with patch("core.chat.history.count_tokens", return_value=10):
+        ctx.run("see this", history_messages=[{"role": "user", "content": "prior"}])
+    new = ctx.new_messages
+    assert new, "new_messages should not be empty"
+    for m in new:
+        content = m.get("content")
+        if isinstance(content, list):
+            assert not any(isinstance(b, dict) and b.get("type") == "image" for b in content), \
+                f"inline base64 image leaked into persisted {m.get('role')} message"
+    assert any("Tool returned image" in str(m.get("content", "")) for m in new), \
+        "injected image note should survive the scrub as text"
