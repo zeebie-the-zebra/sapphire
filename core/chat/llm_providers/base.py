@@ -176,7 +176,17 @@ class BaseProvider(ABC):
     
     @property
     def supports_images(self) -> bool:
-        """Whether this provider supports image inputs. Override in subclasses."""
+        """Whether this provider supports image inputs.
+
+        The per-provider config override `supports_images` (the vision 👁
+        checkbox on custom providers) wins when set — True/False forces it;
+        None/unset falls through to the subclass default (False here).
+        Subclasses for known-vision APIs (claude, gemini, responses) override
+        with unconditional True; openai_compat layers name/host heuristics.
+        """
+        override = self.config.get('supports_images')
+        if override is not None:
+            return bool(override)
         return False
     
     @abstractmethod

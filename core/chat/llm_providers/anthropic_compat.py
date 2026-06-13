@@ -66,9 +66,11 @@ class AnthropicCompatProvider(BaseProvider):
     def provider_name(self) -> str:
         return 'anthropic'
 
-    @property
-    def supports_images(self) -> bool:
-        return False
+    # supports_images inherited from BaseProvider: the vision checkbox
+    # (config `supports_images`) decides; default False. Anthropic-compatible
+    # endpoints are a mixed bag (MiniMax M3 sees, many don't) — the user
+    # declares it per provider. Was hardcoded False, which silently discarded
+    # tool images even when the endpoint had vision. Fixed 2026-06-12.
 
     def _clamp_temperature(self, temp: float) -> float:
         """Clamp temperature to (0.0, 1.0] — some endpoints reject exactly 0.0."""
