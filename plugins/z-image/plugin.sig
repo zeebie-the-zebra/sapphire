@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "files": {
     "README.md": "sha256:14dee04fa541f77ff49529e06b2d6c65f47e5dcfb65a1caf37d0cdd758fc8940",
-    "app/index.js": "sha256:f820550df98347d7506abede92735e422edbee101ba5f9a38cc1a10404e6171f",
-    "plugin.json": "sha256:af939c9c95adc4cdf878dbd7e83034c3e97680220dada70fda5df8edba589c6d",
+    "app/index.js": "sha256:1af786583fcf194552850247830e52173071b966033ca752a5072f01c57aac6e",
+    "plugin.json": "sha256:6d302d159df8b1f3259e9b5a68f738a96fab5bc3e71921b8f984ef77defde793",
     "routes/api.py": "sha256:284803b1121514aefc8952b967ce507e7cc67a0f2ff4702043adadb36db2063f",
-    "tools/zimage_tools.py": "sha256:731ba2a7c222f3d78da99699f01616ca5b2e42432e07ec42fd181f99957f4990",
-    "web/index.js": "sha256:ef4135dfe14676eca3053a8e083f62043f5c3eefe0443639452f7838b9cd8872"
+    "tools/zimage_tools.py": "sha256:985fa9b69fa1334f5a78c31f3f2ed76ec2d5e8b390fc4bdfd114bfb8e2593934",
+    "web/index.js": "sha256:25a078339c3ef12c5db561f2713256887eca2a64e8d566edbb91df077cac4ea4"
   },
-  "signature": "jItR39JzmloH+6Z3Qhj2bFSRw7AhYfxVtNc+JmgKCjvqivR6WIi6vlh1tv/0nF6IltrdUru2EUnt+ec8JEzUAg=="
+  "signature": "N5iqZMV1K6gP5n4cQ2TEJ9BqWABjCJbT4lhxkCKwTKWfFiC19lcQTfWyV3jjNRlL5l55d0OkAl+sFJRPrWkgDg=="
 }

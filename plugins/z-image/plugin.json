@@ -56,11 +56,53 @@
         "help": "Applied when the model doesn't override it. Z-Image needs little-to-none."
       },
       {
+        "key": "default_width",
+        "type": "number",
+        "label": "Image width (px)",
+        "default": 1024,
+        "help": "Output width in pixels. Z-Image Turbo is tuned for 1024."
+      },
+      {
+        "key": "default_height",
+        "type": "number",
+        "label": "Image height (px)",
+        "default": 1024,
+        "help": "Output height in pixels. Z-Image Turbo is tuned for 1024."
+      },
+      {
         "key": "static_keywords",
         "type": "string",
         "label": "Static keywords",
         "default": "",
         "help": "Always appended to the prompt (e.g. 'cinematic, wide shot')."
+      },
+      {
+        "key": "ai_name",
+        "type": "string",
+        "label": "AI name",
+        "default": "",
+        "help": "The name the AI writes to mean itself (e.g. 'Sapphire'). Case-insensitive. Wherever it appears in a prompt it's auto-replaced with the AI appearance below — so the AI just writes the name, never the description."
+      },
+      {
+        "key": "ai_description",
+        "type": "string",
+        "label": "AI appearance",
+        "default": "",
+        "help": "Physical description filled in wherever the AI name appears (e.g. 'a short American woman with brown hair')."
+      },
+      {
+        "key": "user_name",
+        "type": "string",
+        "label": "User name",
+        "default": "",
+        "help": "The name the AI writes to mean the user (e.g. 'Fishy'). Case-insensitive. Auto-replaced with the user appearance below."
+      },
+      {
+        "key": "user_description",
+        "type": "string",
+        "label": "User appearance",
+        "default": "",
+        "help": "Physical description filled in wherever the user name appears."
       },
       {
         "key": "timeout",

@@ -31,22 +31,34 @@ _DEFAULTS = {
     "default_steps": 8,
     "default_cfg": 1.0,
     "default_negative": "",
+    "default_width": 1024,
+    "default_height": 1024,
     "timeout": 180,
     "static_keywords": "",
-    "character_descriptions": {"me": "", "you": ""},
+    "ai_name": "",
+    "ai_description": "",
+    "user_name": "",
+    "user_description": "",
 }
 
 
+def _name_pairs(cfg):
+    """[(marker_name, replacement_description), ...] from settings, in order."""
+    return [
+        ((cfg.get("ai_name") or "").strip(), (cfg.get("ai_description") or "").strip()),
+        ((cfg.get("user_name") or "").strip(), (cfg.get("user_description") or "").strip()),
+    ]
+
+
 def _expand_prompt(prompt, cfg):
-    """SDXL-style convenience: replace whole-word 'me'/'you' (and any other
-    configured markers) with physical descriptions, then append static keywords.
-    The model writes 'me' for itself and 'you' for the human."""
+    """Replace the configured AI/user NAMES (whole-word, case-insensitive) with
+    their physical descriptions, then append static keywords. The model writes
+    just the name (e.g. 'Sapphire in the front yard'); the appearance is filled
+    in here, so the model never has to spell out a description."""
     out = prompt
-    chars = cfg.get("character_descriptions") or {}
-    if isinstance(chars, dict):
-        for marker, desc in chars.items():
-            if marker and desc:
-                out = re.sub(rf"\b{re.escape(marker)}\b", desc, out, count=1, flags=re.IGNORECASE)
+    for marker, desc in _name_pairs(cfg):
+        if marker and desc:
+            out = re.sub(rf"\b{re.escape(marker)}\b", desc, out, count=1, flags=re.IGNORECASE)
     kw = (cfg.get("static_keywords") or "").strip()
     if kw:
         out = f"{out.rstrip('. ')}. {kw}".strip()
@@ -67,37 +79,60 @@ def _settings(plugin_settings=None):
     return s
 
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "generate_image",
-            "description": (
-                "Generate an image via Z-Image Turbo and optionally view it yourself. "
-                "Describe it in ~20 words; write 'me' for yourself and 'you' for the human "
-                "(auto-filled). Add the count param when you need multiple images."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prompt": {"type": "string", "description": "The image description (~20 words)."},
-                    "view": {
-                        "type": "boolean",
-                        "description": "User always sees the images; you view them too if true."
+def _build_description(cfg):
+    """Tool description, built from settings. When AI/user names are configured,
+    it tells the model to write those names (the plugin fills in the appearance),
+    so the model never spells out a physical description itself."""
+    base = ("Generate an image via Z-Image Turbo and optionally view it yourself. "
+            "Describe the scene or action in ~20 words. Add the count param for multiple images.")
+    ai_name = (cfg.get("ai_name") or "").strip()
+    user_name = (cfg.get("user_name") or "").strip()
+    parts = []
+    if ai_name:
+        parts.append(f"'{ai_name}' for yourself")
+    if user_name:
+        parts.append(f"'{user_name}' for the user")
+    if parts:
+        base += (" Write " + " and ".join(parts) +
+                 " — just the name plus the scene or action, never a physical description; "
+                 "the appearance is filled in automatically.")
+    return base
+
+
+def _tool_schema(description):
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "generate_image",
+                "description": description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "prompt": {"type": "string", "description": "The scene or action to depict (~20 words), using the configured names."},
+                        "view": {
+                            "type": "boolean",
+                            "description": "Whether you also see the image (default true). The user always sees it regardless."
+                        },
+                        "count": {"type": "integer", "description": "How many images to make. Leave unset (default 1) in almost all cases — only raise it if the user explicitly asks for several."},
+                        "seed": {"type": "integer", "description": "Optional. Pass a seed from a prior result to reproduce that exact image; otherwise leave unset for a fresh one."}
                     },
-                    "count": {"type": "integer", "description": "How many at once (default 1)."},
-                    "seed": {"type": "integer", "description": "Reproduce an exact image — use a seed from a prior result."},
-                    "width": {"type": "integer", "description": "Pixels (default 1024)."},
-                    "height": {"type": "integer", "description": "Pixels (default 1024)."},
-                    "steps": {"type": "integer", "description": "(default 8)"},
-                    "cfg_scale": {"type": "number", "description": "(default 1)"},
-                    "negative_prompt": {"type": "string", "description": "What to avoid."}
-                },
-                "required": ["prompt"]
+                    "required": ["prompt"]
+                }
             }
         }
-    }
-]
+    ]
+
+
+def get_tools():
+    """Settings-aware schema builder. Core calls this at registration AND when
+    settings are saved (function_manager.refresh_plugin_tools), so the tool
+    description reflects the configured AI/user names live, with no reload."""
+    return _tool_schema(_build_description(_settings()))
+
+
+# Static fallback (core prefers get_tools() when present).
+TOOLS = _tool_schema(_build_description(_DEFAULTS))
 
 
 def execute(function_name, arguments, config=None, plugin_settings=None, credentials=None):
@@ -193,8 +228,8 @@ def _exec_generate(arguments, plugin_settings=None):
     except (TypeError, ValueError):
         count = 1
 
-    width = int(arguments.get("width") or 1024)
-    height = int(arguments.get("height") or 1024)
+    width = int(arguments.get("width") or cfg.get("default_width") or 1024)
+    height = int(arguments.get("height") or cfg.get("default_height") or 1024)
     steps = int(arguments.get("steps") or cfg.get("default_steps", 8))
     cfg_scale = float(arguments.get("cfg_scale") if arguments.get("cfg_scale") is not None else cfg.get("default_cfg", 1.0))
     negative = arguments.get("negative_prompt")
@@ -210,7 +245,7 @@ def _exec_generate(arguments, plugin_settings=None):
     else:
         seeds = [random.randint(1, 2**31 - 1) for _ in range(count)]
 
-    final_prompt = _expand_prompt(prompt, cfg)  # me/you swap + static keywords
+    final_prompt = _expand_prompt(prompt, cfg)  # name swap + static keywords
     logger.info(f"[ZIMAGE] generating {count} @ {width}x{height} steps={steps} cfg={cfg_scale} seeds={seeds}")
 
     raw_images = []
@@ -231,25 +266,36 @@ def _exec_generate(arguments, plugin_settings=None):
             logger.error(f"[ZIMAGE] generation failed (seed={seed}): {e}")
             if raw_images:
                 break  # keep what we have; report the partial set
-            return f"Image generation failed: {e}", False
+            # Connection/timeout errors are noisy — boil down to a short reason.
+            # HTTP errors from _call_sdserver already carry the status code.
+            ename = type(e).__name__
+            if "Connection" in ename or "Timeout" in ename:
+                reason = f"could not reach the image server at {api_url} (it may be down)"
+            else:
+                reason = str(e)
+            # Explicit no-retry instruction so the model doesn't loop on a dead server.
+            return (f"Image generation FAILED — {reason}. Do NOT call generate_image again "
+                    f"right now; retrying immediately won't help until the server is back. "
+                    f"Tell the user it failed (mention the error) and to check the sd-server.", False)
 
-    # ---- recipe text (travels WITH the images in the tool result) ----
-    lines = [
-        f"Generated {len(raw_images)} image(s) with Z-Image Turbo.",
-        "To recreate any EXACTLY, call generate_image with that image's seed + these params:",
-        f"  prompt: \"{prompt}\"",
-        f"  size={width}x{height}  steps={steps}  cfg_scale={cfg_scale}"
-        + (f"  negative=\"{negative}\"" if negative else ""),
-        "",
-    ]
-    for i, seed in enumerate(seeds[:len(raw_images)], start=1):
-        lines.append(f"  #{i}  seed={seed}")
-    recipe = "\n".join(lines)
+    # ---- result text (travels WITH the images in the tool result) ----
+    # Reference-only, NOT a call to action: phrased so the model treats the
+    # image as DONE (already shown to the user) and doesn't loop into more
+    # generate_image calls. Seeds are reference data, not an instruction.
+    n = len(raw_images)
+    if n == 1:
+        recipe = (f"Done — image generated and already shown to the user. "
+                  f"(Seed {seeds[0]}, reference only — reuse it only if the user asks to recreate this exact image.)")
+    else:
+        seed_list = ", ".join(f"#{i} seed={s}" for i, s in enumerate(seeds[:n], start=1))
+        recipe = (f"Done — {n} images generated and already shown to the user. "
+                  f"Seeds (reference only, reuse one only if asked to recreate that exact image): {seed_list}.")
 
     # ---- build images for the return ----
-    # The user ALWAYS sees the images. The model only sees them (vision tokens)
-    # when it sets view=true — default is hands-off / cheaper.
-    view = bool(arguments.get("view", False))
+    # The user ALWAYS sees the images. The model also sees them (vision tokens)
+    # by default (view defaults true, matching the tool description); pass
+    # view=false to skip the model's own look for a cheaper, hands-off call.
+    view = bool(arguments.get("view", True))
     def _enc(raw):
         return base64.b64encode(_resize_for_chat(raw)).decode()
 

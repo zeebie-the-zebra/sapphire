@@ -67,6 +67,7 @@ def execute(function_name, arguments, config, plugin_settings=None, credentials=
 | `AVAILABLE_FUNCTIONS` | list | Function names this file provides |
 | `TOOLS` | list | OpenAI-compatible function schemas |
 | `execute()` | function | Dispatcher — returns `(message, success)` |
+| `get_tools()` | function | *Optional.* Returns `TOOLS`-shaped schemas built from current settings — enables [dynamic descriptions](#dynamic-tool-descriptions) |
 
 ### Manifest Declaration
 
@@ -149,6 +150,50 @@ def _load_settings():
             pass
     return settings
 ```
+
+---
+
+## Dynamic Tool Descriptions
+
+A tool's `description` is what the AI reads to decide how to use it — so it's often
+useful to build it from the plugin's own settings (a user-configured name, mode, target,
+etc.). Define an optional **`get_tools()`** function that returns the same shape as
+`TOOLS`, built from current settings:
+
+```python
+def _build_description(cfg):
+    base = "Generate an image. Describe the scene or action in ~20 words."
+    name = (cfg.get("ai_name") or "").strip()
+    if name:
+        base += f" Write '{name}' for yourself — the appearance is filled in automatically."
+    return base
+
+def get_tools():
+    cfg = _load_settings()                      # your settings reader (see above)
+    return [{"type": "function", "function": {
+        "name": "generate_image",
+        "description": _build_description(cfg),
+        "parameters": { ... },
+    }}]
+
+# Static fallback — used if get_tools() is absent or raises.
+TOOLS = get_tools()
+```
+
+How it behaves:
+
+- **At load**, the function manager calls `get_tools()` (when present) instead of reading
+  the static `TOOLS` list, so the schema is correct from the first request.
+- **On a settings save**, the function manager re-runs `get_tools()` and copies the fresh
+  `description` / `parameters` onto the **live tool objects in place** — the AI sees the
+  new description on its next turn with **no plugin reload and no restart**. Nothing is
+  re-exec'd, so module-level state (DB handles, locks, ContextVars) is preserved.
+- Only `description` and `parameters` are refreshed; the tool **name never changes**
+  (toolset membership and dispatch are keyed on it). Adding or removing tools still
+  requires a full reload.
+
+Always keep a static `TOOLS` as the fallback. Plugins without `get_tools()` are
+unaffected — the settings-save refresh is a clean no-op for them.
 
 ---
 

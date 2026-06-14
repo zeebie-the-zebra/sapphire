@@ -358,7 +358,21 @@ class FunctionManager:
                         logger.info(f"Plugin tool '{module_name}' is disabled")
                         continue
 
-                    tools = namespace.get('TOOLS', [])
+                    # Settings-aware schema: if the module exposes get_tools(),
+                    # use it so the tool schema (e.g. a dynamic description built
+                    # from plugin settings) is correct from first load. The same
+                    # callable is stored below so refresh_plugin_tools() can rebuild
+                    # in place when settings change. Falls back to static TOOLS.
+                    get_tools_fn = namespace.get('get_tools')
+                    if callable(get_tools_fn):
+                        try:
+                            tools = get_tools_fn() or []
+                        except Exception as e:
+                            logger.warning(f"Plugin '{plugin_name}' get_tools() failed, using static TOOLS: {e}")
+                            tools = namespace.get('TOOLS', [])
+                    else:
+                        get_tools_fn = None
+                        tools = namespace.get('TOOLS', [])
                     executor = namespace.get('execute')
 
                     if not tools or not executor:
@@ -388,6 +402,7 @@ class FunctionManager:
                         'available_functions': available_functions or [t['function']['name'] for t in tools],
                         'emoji': emoji,
                         '_plugin': plugin_name,
+                        'get_tools': get_tools_fn,  # settings-aware rebuilder, or None
                     }
 
                     # Track per-tool flags (safe — conflict check passed)
@@ -500,6 +515,51 @@ class FunctionManager:
 
         if to_remove:
             logger.info(f"Plugin '{plugin_name}' tools unregistered: {to_remove}")
+
+    def refresh_plugin_tools(self, plugin_name: str) -> int:
+        """Rebuild a plugin's tool SCHEMAS from its current settings, in place.
+
+        For plugins whose tool module defines ``get_tools()`` (a settings-aware
+        schema builder), re-invoke it and copy the fresh description/parameters
+        onto the EXISTING tool dict objects. Because ``all_possible_tools`` and
+        ``_enabled_tools`` hold the same dict references the LLM reads each turn,
+        the update is seen on the next chat turn — no re-register, no module
+        re-exec (so module-level state is preserved), and no toolset/membership
+        change (tool NAMES are stable). Lets a plugin's tool description react to
+        a settings save without a reload.
+
+        No-op for plugins without ``get_tools()``. Only matching tool names are
+        updated; adding/removing tools still requires a full reload.
+        """
+        updated = 0
+        with self._tools_lock:
+            for module_name, info in self.function_modules.items():
+                if info.get('_plugin') != plugin_name:
+                    continue
+                get_tools_fn = info.get('get_tools')
+                if not callable(get_tools_fn):
+                    continue
+                try:
+                    fresh = get_tools_fn() or []
+                except Exception as e:
+                    logger.warning(f"refresh_plugin_tools: '{plugin_name}' get_tools() failed: {e}")
+                    continue
+                fresh_by_name = {t['function']['name']: t for t in fresh
+                                 if isinstance(t, dict) and isinstance(t.get('function'), dict)
+                                 and 'name' in t['function']}
+                for tool in info['tools']:
+                    new = fresh_by_name.get(tool['function']['name'])
+                    if not new:
+                        continue
+                    # Update schema fields in place; never touch 'name' (membership
+                    # and execution_map are keyed on it).
+                    for key in ('description', 'parameters'):
+                        if key in new['function']:
+                            tool['function'][key] = new['function'][key]
+                    updated += 1
+        if updated:
+            logger.info(f"Plugin '{plugin_name}' tool schemas refreshed ({updated} tool(s))")
+        return updated
 
     def register_dynamic_tools(self, module_name: str, tools: list, executor, plugin_name: str = '', emoji: str = ''):
         """Register tools from a dynamic source (MCP servers, runtime generators, etc.).

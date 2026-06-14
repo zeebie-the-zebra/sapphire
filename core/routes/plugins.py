@@ -1199,6 +1199,16 @@ async def update_plugin_settings(plugin_name: str, request: Request, _=Depends(r
                 try: tmp_path.unlink()
                 except Exception: pass
 
+    # Rebuild any settings-aware tool schemas (e.g. dynamic tool descriptions)
+    # so the plugin's tools reflect the just-saved settings immediately, without
+    # a reload. No-op for plugins whose tool modules don't define get_tools().
+    try:
+        system = get_system()
+        if system and getattr(system, 'llm_chat', None):
+            system.llm_chat.function_manager.refresh_plugin_tools(plugin_name)
+    except Exception as e:
+        logger.warning(f"Tool schema refresh failed for '{plugin_name}': {e}")
+
     return {"status": "success", "plugin": plugin_name, "settings": merged}
 
 

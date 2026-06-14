@@ -49,13 +49,13 @@ export async function render(container) {
       </style>
       <div class="zis-wrap">
         <h2>🖼️ Z-Image Studio</h2>
-        <p class="zis-sub">Generate one-offs to tune prompts, CFG, seed and steps. Type
-          <code>me</code> / <code>you</code> and tick Expand to preview the character swap.</p>
+        <p class="zis-sub">Generate one-offs to tune prompts, CFG, seed and steps. Type your
+          configured character names (set in Settings) and tick Expand to swap them for appearances.</p>
         <div class="zis-grid">
           <div class="zis-panel">
             <div class="zis-field grow">
               <label>Prompt</label>
-              <textarea id="zis-prompt" placeholder="me, sitting by a window, soft light"></textarea>
+              <textarea id="zis-prompt" placeholder="Sapphire, sitting by a window, soft light"></textarea>
             </div>
             <div class="zis-row">
               <div class="zis-field w90"><label>Count</label><input id="zis-count" type="number" min="1" value="1"></div>

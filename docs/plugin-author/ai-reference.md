@@ -9,6 +9,7 @@ When creating or modifying plugins:
 - Hooks = Python functions receiving mutable `HookEvent` object
 - Tools = `TOOLS` list + `execute(function_name, arguments, config)` returning `(str, bool)` (optional 4th arg `plugin_settings`, 5th `credentials` — inspected by arity)
 - Tool schema supports `is_local` (bool or `"endpoint"`) and `network: true` flags
+- Optional `get_tools()` (returns `TOOLS`-shaped list from current settings) = dynamic descriptions; rebuilt in place on settings-save, no reload (name stays fixed)
 - Voice commands = pre_chat hooks with trigger matching, `bypass_llm: true` for instant response
 - Routes = custom HTTP endpoints at `/api/plugin/{name}/{path}`; handler is called with keyword args (each path param + `body`, `settings`, `credentials`, `query`, `request`) — END the signature with `**_` or it raises TypeError. Auth+CSRF+rate-limit enforced by framework
 - Schedule = cron tasks calling `run(event)` handler, event has `system`, `config`, `task`, `plugin_state`

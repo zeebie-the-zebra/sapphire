@@ -6,9 +6,12 @@ const FALLBACK = {
   api_url: 'http://127.0.0.1:7861',
   default_negative: '',
   static_keywords: '',
-  character_descriptions: { me: '', you: '' },
+  ai_name: '', ai_description: '',
+  user_name: '', user_description: '',
   default_steps: 8,
   default_cfg: 1.0,
+  default_width: 1024,
+  default_height: 1024,
   max_count: 6,
   timeout: 180,
 };
@@ -80,17 +83,23 @@ async function testConnection(container) {
 function updatePreview(container) {
   const input = container.querySelector('#zi-preview-input');
   const output = container.querySelector('#zi-preview-output');
-  const meDesc = container.querySelector('#zi-char-me')?.value || '';
-  const youDesc = container.querySelector('#zi-char-you')?.value || '';
+  const pairs = [
+    [container.querySelector('#zi-ai-name')?.value || '', container.querySelector('#zi-ai-desc')?.value || ''],
+    [container.querySelector('#zi-user-name')?.value || '', container.querySelector('#zi-user-desc')?.value || ''],
+  ];
   let text = (input.value || '').replace(/</g, '&lt;');
-  if (meDesc) text = text.replace(/\bme\b/i, `<span class="replaced">${meDesc}</span>`);
-  if (youDesc) text = text.replace(/\byou\b/i, `<span class="replaced">${youDesc}</span>`);
+  for (const [name, desc] of pairs) {
+    if (name && desc) {
+      // whole-word, case-insensitive, first occurrence — mirrors the backend swap
+      const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+      text = text.replace(re, `<span class="replaced">${desc.replace(/</g, '&lt;')}</span>`);
+    }
+  }
   output.innerHTML = text || '<em>Type a sample prompt above...</em>';
 }
 
 function renderForm(container, settings) {
   const s = { ...FALLBACK, ...(settings || {}) };
-  s.character_descriptions = { ...FALLBACK.character_descriptions, ...(settings?.character_descriptions || {}) };
 
   container.innerHTML = `
     <div class="zi-form">
@@ -115,18 +124,27 @@ function renderForm(container, settings) {
       </div>
 
       <div class="zi-section">
-        <div class="zi-section-title">Character descriptions</div>
+        <div class="zi-section-title">Character names &amp; appearances</div>
         <div class="zi-hint" style="margin-top:-8px;margin-bottom:12px;">
-          The AI writes "me" for itself and "you" for the human; these get swapped for physical descriptions.
+          The AI writes a name (e.g. "Sapphire") in the prompt; it's swapped for the appearance.
+          Set any names you like — matching is whole-word and case-insensitive.
         </div>
-        <div class="zi-group"><label for="zi-char-me">"me" (the AI)</label>
-          <input type="text" id="zi-char-me" value="${s.character_descriptions.me}"></div>
-        <div class="zi-group" style="margin-top:8px;"><label for="zi-char-you">"you" (the human)</label>
-          <input type="text" id="zi-char-you" value="${s.character_descriptions.you}"></div>
+        <div class="zi-row" style="grid-template-columns:1fr 2fr;">
+          <div class="zi-group"><label for="zi-ai-name">AI name</label>
+            <input type="text" id="zi-ai-name" value="${s.ai_name}" placeholder="Sapphire"></div>
+          <div class="zi-group"><label for="zi-ai-desc">AI appearance</label>
+            <input type="text" id="zi-ai-desc" value="${s.ai_description}" placeholder="a short woman with brown hair"></div>
+        </div>
+        <div class="zi-row" style="grid-template-columns:1fr 2fr; margin-top:8px;">
+          <div class="zi-group"><label for="zi-user-name">User name</label>
+            <input type="text" id="zi-user-name" value="${s.user_name}" placeholder="Fishy"></div>
+          <div class="zi-group"><label for="zi-user-desc">User appearance</label>
+            <input type="text" id="zi-user-desc" value="${s.user_description}" placeholder="a man with a beard"></div>
+        </div>
         <div class="zi-preview">
           <div class="zi-preview-title">Preview replacement</div>
           <input type="text" class="zi-preview-input" id="zi-preview-input"
-                 value="me and you walking in the park">
+                 value="${(s.ai_name || 'Sapphire')} and ${(s.user_name || 'Fishy')} walking in the park">
           <div class="zi-preview-output" id="zi-preview-output"></div>
         </div>
       </div>
@@ -134,19 +152,26 @@ function renderForm(container, settings) {
       <div class="zi-section">
         <div class="zi-section-title">Generation defaults</div>
         <div class="zi-row">
+          <div class="zi-group"><label for="zi-width">Width (px)</label>
+            <input type="number" id="zi-width" value="${s.default_width}" min="256" max="2048" step="64"></div>
+          <div class="zi-group"><label for="zi-height">Height (px)</label>
+            <input type="number" id="zi-height" value="${s.default_height}" min="256" max="2048" step="64"></div>
           <div class="zi-group"><label for="zi-steps">Steps</label>
             <input type="number" id="zi-steps" value="${s.default_steps}" min="1" max="50"></div>
+        </div>
+        <div class="zi-row" style="margin-top:8px;">
           <div class="zi-group"><label for="zi-cfg">CFG scale</label>
             <input type="number" id="zi-cfg" value="${s.default_cfg}" min="1" max="20" step="0.5"></div>
           <div class="zi-group"><label for="zi-max">Max per call</label>
             <input type="number" id="zi-max" value="${s.max_count}" min="1" max="12"></div>
+          <div class="zi-group"></div>
         </div>
       </div>
     </div>
   `;
 
   container.querySelector('#zi-test-btn').addEventListener('click', () => testConnection(container));
-  ['#zi-preview-input', '#zi-char-me', '#zi-char-you'].forEach(sel =>
+  ['#zi-preview-input', '#zi-ai-name', '#zi-ai-desc', '#zi-user-name', '#zi-user-desc'].forEach(sel =>
     container.querySelector(sel).addEventListener('input', () => updatePreview(container)));
   updatePreview(container);
 }
@@ -156,12 +181,14 @@ function getFormSettings(container) {
     api_url: container.querySelector('#zi-api-url')?.value?.trim() || FALLBACK.api_url,
     default_negative: container.querySelector('#zi-negative')?.value || '',
     static_keywords: container.querySelector('#zi-keywords')?.value || '',
-    character_descriptions: {
-      me: container.querySelector('#zi-char-me')?.value || '',
-      you: container.querySelector('#zi-char-you')?.value || '',
-    },
+    ai_name: container.querySelector('#zi-ai-name')?.value || '',
+    ai_description: container.querySelector('#zi-ai-desc')?.value || '',
+    user_name: container.querySelector('#zi-user-name')?.value || '',
+    user_description: container.querySelector('#zi-user-desc')?.value || '',
     default_steps: parseInt(container.querySelector('#zi-steps')?.value) || FALLBACK.default_steps,
     default_cfg: parseFloat(container.querySelector('#zi-cfg')?.value) || FALLBACK.default_cfg,
+    default_width: parseInt(container.querySelector('#zi-width')?.value) || FALLBACK.default_width,
+    default_height: parseInt(container.querySelector('#zi-height')?.value) || FALLBACK.default_height,
     max_count: parseInt(container.querySelector('#zi-max')?.value) || FALLBACK.max_count,
   };
 }
@@ -174,7 +201,7 @@ export default {
       id: 'z-image',
       name: 'Z-Image',
       icon: '🖼️',
-      helpText: 'Z-Image Turbo via sd-server. The AI writes "me"/"you", swapped for physical descriptions.',
+      helpText: 'Z-Image Turbo via sd-server. The AI writes configured names, swapped for physical descriptions.',
       render: renderForm,
       load: async () => pluginsAPI.getSettings('z-image'),
       save: (settings) => pluginsAPI.saveSettings('z-image', settings),
