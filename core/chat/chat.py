@@ -55,6 +55,13 @@ def _inject_tool_images(messages, tool_images, provider=None):
     Images are added as content blocks so providers can convert them
     to their native format (Claude source blocks, OpenAI image_url, etc).
 
+    The message rides the `user` role because OpenAI-compatible APIs can't
+    carry images in a `tool` message. But it must NOT read as the user
+    talking - models (notably Qwen) otherwise treat it as a fresh request and
+    re-call the image tool. So the text self-labels as tool output and carries
+    a gentle brake. A tool can override the framing via an `inject_note` key on
+    its image dict; otherwise a super-explicit generic note is used. 2026-06-14.
+
     If the provider doesn't support vision, fall back to a text-only
     placeholder. Without this the next LLM call blows up with a 400
     "model does not support image inputs" the moment any image-returning
@@ -64,14 +71,25 @@ def _inject_tool_images(messages, tool_images, provider=None):
     if not supports:
         messages.append({
             "role": "user",
-            "content": f"[Tool returned {len(tool_images)} image(s) — saved to disk. "
-                       f"Current model does not support image inputs, so the image "
+            "content": f"[Tool returned {len(tool_images)} image(s), saved and shown to the user. "
+                       f"The current model does not support image inputs, so the image "
                        f"contents are not available for analysis this turn.]"
         })
-        logger.info(f"[TOOL] Skipped image injection ({len(tool_images)} image(s)) — provider does not support vision")
+        logger.info(f"[TOOL] Skipped image injection ({len(tool_images)} image(s)) - provider does not support vision")
         return
 
-    content = [{"type": "text", "text": "[Tool returned image(s) for analysis]"}]
+    # Self-labeling, non-imperative framing that carries the brake into the
+    # highest-authority/most-recent message (where the model actually listens),
+    # instead of leaving it stranded in the distrusted tool result.
+    generic_note = (
+        "[These image(s) are the result of the tool call you just made and have "
+        "already been shown to the user. This is NOT a message from the user. No "
+        "further action is needed; do not call the tool again unless the user asks "
+        "for a change. Continue your reply.]"
+    )
+    note = next((img.get("inject_note") for img in tool_images
+                 if isinstance(img, dict) and img.get("inject_note")), None) or generic_note
+    content = [{"type": "text", "text": note}]
     for img in tool_images:
         data = img.get("data", "")
         media_type = img.get("media_type") or _detect_image_media_type(data)

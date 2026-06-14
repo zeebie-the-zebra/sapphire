@@ -4,7 +4,7 @@ import re
 import time
 from typing import Generator, Union, Dict, Any
 import config
-from .chat_tool_calling import strip_ui_markers, wrap_tool_result, _extract_tool_images
+from .chat_tool_calling import strip_ui_markers, wrap_tool_result, _extract_tool_images, filter_to_thinking_only
 from .llm_providers import LLMResponse, get_generation_params
 from core.event_bus import publish, Events
 from core.hooks import hook_runner, HookEvent
@@ -433,7 +433,20 @@ class StreamingChat:
                     
                     # Combine prefill with current content for history
                     full_content = prefill + current_content if has_prefill else current_content
-                    
+
+                    # When the content carries inline <think> reasoning (Qwen/GLM-style),
+                    # keep only the thinking and drop the trailing decision-prose ("okay,
+                    # I'll generate the image"). Replaying that prose as committed history
+                    # nudges the model to repeat the action — the non-streaming path
+                    # already filters here; streaming didn't. Gated on inline think tags
+                    # so providers whose reasoning lives in thinking_raw (Claude) are
+                    # untouched and never get their prose wrapped. Only `content` changes;
+                    # thinking_raw/thinking are preserved. 2026-06-14.
+                    if "<think" in (full_content or "").lower():
+                        stored_content = filter_to_thinking_only(full_content)
+                    else:
+                        stored_content = full_content
+
                     # Store message with tool calls - include thinking_raw for Claude
                     # tool cycles, AND `thinking` for DeepSeek-reasoner's required
                     # reasoning_content round-trip on subsequent iterations. Without
@@ -443,15 +456,15 @@ class StreamingChat:
                     # tool execution hits 400 "Missing reasoning_content". 2026-05-14.
                     messages.append({
                         "role": "assistant",
-                        "content": full_content,
+                        "content": stored_content,
                         "tool_calls": tool_calls_to_execute,
                         "thinking_raw": thinking_raw,  # Has signatures for Claude API
                         "thinking": current_thinking if current_thinking else None,
                     })
-                    
+
                     # Save to history with new schema
                     self.main_chat.session_manager.add_assistant_with_tool_calls(
-                        content=full_content,
+                        content=stored_content,
                         tool_calls=tool_calls_to_execute,
                         thinking=current_thinking if current_thinking else None,
                         thinking_raw=thinking_raw,
