@@ -177,6 +177,7 @@ class FunctionManager:
         self._network_functions = set()  # Function names that require network access
         self._is_local_map = {}  # function_name -> is_local value (True, False, or "endpoint")
         self._function_module_map = {}  # function_name -> module_name (for endpoint lookups)
+        self._loop_warn_map = {}  # function_name -> (threshold:int, message:str) — loop guard
         # Track what was REQUESTED, not reverse-engineered
         self.current_toolset_name = "none"
         # Set when update_enabled_functions() is called with a dangling toolset
@@ -259,6 +260,9 @@ class FunctionManager:
                             self._network_functions.add(func_name)
                         if 'is_local' in tool:
                             self._is_local_map[func_name] = tool['is_local']
+                        lw = self._parse_loop_warn(tool)
+                        if lw:
+                            self._loop_warn_map[func_name] = lw
                         self._function_module_map[func_name] = module_name
                     
                     # Store mode filter if present
@@ -412,6 +416,9 @@ class FunctionManager:
                             self._network_functions.add(func_name)
                         if 'is_local' in tool:
                             self._is_local_map[func_name] = tool['is_local']
+                        lw = self._parse_loop_warn(tool)
+                        if lw:
+                            self._loop_warn_map[func_name] = lw
                         self._function_module_map[func_name] = module_name
 
                     if mode_filter:
@@ -494,6 +501,7 @@ class FunctionManager:
                     self.execution_map.pop(fname, None)
                     self._network_functions.discard(fname)
                     self._is_local_map.pop(fname, None)
+                    self._loop_warn_map.pop(fname, None)
                     self._function_module_map.pop(fname, None)
 
                 self.all_possible_tools = [t for t in self.all_possible_tools
@@ -530,6 +538,12 @@ class FunctionManager:
 
         No-op for plugins without ``get_tools()``. Only matching tool names are
         updated; adding/removing tools still requires a full reload.
+
+        NOTE: this only refreshes description/parameters. The registration-time
+        side-maps (``_loop_warn_map``, ``_network_functions``, ``_is_local_map``)
+        are NOT re-read here — so a flag like ``loop_warn_after`` must stay static
+        (not settings-derived) or it would go stale on a settings save until a full
+        reload. Today all such flags are static, so this is safe.
         """
         updated = 0
         with self._tools_lock:
@@ -560,6 +574,68 @@ class FunctionManager:
         if updated:
             logger.info(f"Plugin '{plugin_name}' tool schemas refreshed ({updated} tool(s))")
         return updated
+
+    # ── Loop guard (per-tool, per-turn) ──────────────────────────────────────
+    # A tool schema may declare a top-level `loop_warn_after: N` (+ optional
+    # `loop_warn_message`). When that tool is called >= N times in ONE user turn,
+    # the chat loop appends the message to the tool-result text the LLM reads, to
+    # discourage runaway repeat calls (e.g. image-gen spirals). The flag is read
+    # into `_loop_warn_map` at registration and stripped from the wire by the
+    # provider denylist (base.py), so it never reaches the LLM API.
+
+    DEFAULT_LOOP_WARN_MESSAGE = (
+        "You have now called this tool {count} times this turn, and each call has a "
+        "real cost. If the results are not matching your intent, stop and reconsider - "
+        "the request may be impossible to satisfy, or you may need to ask the user. "
+        "Do not keep retrying the same thing."
+    )
+
+    @staticmethod
+    def _parse_loop_warn(tool):
+        """Read (threshold:int, message:str) from a tool dict, or None. Never raises.
+        A malformed flag must NOT break registration (it would silently drop the
+        whole module's tools), so all parsing is defensive."""
+        try:
+            raw = tool.get('loop_warn_after')
+            if raw is None:
+                return None
+            threshold = int(raw)
+            if threshold < 1:
+                return None
+            msg = tool.get('loop_warn_message')
+            if not isinstance(msg, str) or not msg.strip():
+                msg = FunctionManager.DEFAULT_LOOP_WARN_MESSAGE
+            return (threshold, msg)
+        except Exception:
+            return None
+
+    def bump_loop_count(self, loop_counts, function_name):
+        """Increment the per-turn call count for function_name. Never raises.
+        `loop_counts` is a per-turn dict owned by the caller's turn frame (NEVER
+        stored on self — that would bleed across concurrent turns/chats)."""
+        try:
+            if loop_counts is not None:
+                loop_counts[function_name] = loop_counts.get(function_name, 0) + 1
+        except Exception:
+            pass
+
+    def loop_warn_suffix(self, function_name, loop_counts):
+        """Return '\\n\\n<message>' if function_name hit its loop-warn threshold this
+        turn, else ''. Never raises, never mutates. Uses str.replace (NOT .format) so
+        literal braces in a (settings-derived) message can't crash the turn."""
+        try:
+            if loop_counts is None:
+                return ""
+            entry = self._loop_warn_map.get(function_name)
+            if not entry:
+                return ""
+            threshold, message = entry
+            n = loop_counts.get(function_name, 0)
+            if n >= threshold:
+                return "\n\n" + message.replace("{count}", str(n))
+            return ""
+        except Exception:
+            return ""
 
     def register_dynamic_tools(self, module_name: str, tools: list, executor, plugin_name: str = '', emoji: str = ''):
         """Register tools from a dynamic source (MCP servers, runtime generators, etc.).
@@ -603,6 +679,9 @@ class FunctionManager:
                 fname = tool['function']['name']
                 self.execution_map[fname] = executor
                 self._function_module_map[fname] = module_name
+                lw = self._parse_loop_warn(tool)
+                if lw:
+                    self._loop_warn_map[fname] = lw
                 self.all_possible_tools.append(tool)
 
             # If "all" toolset is active, add to enabled too
@@ -645,6 +724,7 @@ class FunctionManager:
             for fname in func_names:
                 self.execution_map.pop(fname, None)
                 self._function_module_map.pop(fname, None)
+                self._loop_warn_map.pop(fname, None)
 
             self.all_possible_tools = [t for t in self.all_possible_tools
                                        if t['function']['name'] not in func_names]

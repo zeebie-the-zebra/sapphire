@@ -567,6 +567,7 @@ class LLMChat:
 
             tool_call_count = 0
             last_tool_name = None
+            loop_counts = {}  # per-turn per-tool call counts (loop guard); turn-local by design
             force_prefill = None
 
             # Inject thinking prefill if enabled
@@ -682,6 +683,7 @@ class LLMChat:
                         scopes=_scopes,
                         allowed_tools=_allowed_tool_names,
                         executor_snapshot=_executor_snapshot,
+                        loop_counts=loop_counts,
                     )
                     tool_call_count += tools_executed
 
@@ -727,6 +729,7 @@ class LLMChat:
                             scopes=_scopes,
                             allowed_tools=_allowed_tool_names,
                             executor_snapshot=_executor_snapshot,
+                            loop_counts=loop_counts,
                         )
 
                         if tool_images:
@@ -1139,6 +1142,7 @@ class LLMChat:
             final_content = None
             response_msg = None
             tool_call_count = 0
+            loop_counts = {}  # per-turn per-tool call counts (loop guard); turn-local by design
 
             for i in range(max_iterations):
                 # Context limit check — bail if messages are getting too large
@@ -1161,7 +1165,7 @@ class LLMChat:
                     })
                     tools_executed, tool_images = self.tool_engine.execute_tool_calls(
                         tool_calls, messages, None, provider, scopes=_scopes,
-                        allowed_tools=_allowed_tool_names
+                        allowed_tools=_allowed_tool_names, loop_counts=loop_counts
                     )
                     tool_call_count += tools_executed
                     if tool_images:
@@ -1174,7 +1178,7 @@ class LLMChat:
                     if fn_data:
                         filtered = filter_to_thinking_only(response_msg.content)
                         _, tool_images = self.tool_engine.execute_text_based_tool_call(
-                            fn_data, filtered, messages, None, provider, scopes=_scopes
+                            fn_data, filtered, messages, None, provider, scopes=_scopes, loop_counts=loop_counts
                         )
                         if tool_images:
                             _inject_tool_images(messages, tool_images)

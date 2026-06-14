@@ -228,6 +228,7 @@ class StreamingChat:
                 logger.info("[CONTINUE] Disabled thinking for continue (can't replay signatures)")
 
             tool_call_count = 0
+            loop_counts = {}  # per-turn per-tool call counts (loop guard); turn-local by design
             # Accumulate token usage across all iterations for final summary
             cumulative_tokens = {"prompt": 0, "completion": 0, "thinking": 0, "total": 0,
                                  "cache_read": 0, "cache_write": 0, "iterations": 0}
@@ -470,6 +471,8 @@ class StreamingChat:
                         tool_call_count += 1
                         function_name = tool_call["function"]["name"]
                         tool_call_id = tool_call["id"]
+                        # Loop guard: count every attempt this turn (success, throw, or bad JSON).
+                        self.main_chat.function_manager.bump_loop_count(loop_counts, function_name)
 
                         raw_args = tool_call.get("function", {}).get("arguments", "")
                         # Empty string is valid for no-arg tools — Claude/Anthropic
@@ -494,12 +497,14 @@ class StreamingChat:
                                     f"{function_name}: {raw_args!r}"
                                 )
                                 error_result = "Error: Invalid JSON arguments."
+                                # Loop-warn to the LLM only; history keeps raw error.
+                                llm_result = error_result + self.main_chat.function_manager.loop_warn_suffix(function_name, loop_counts)
                                 # CRITICAL: also append to messages — without this, the next
                                 # LLM call sees a tool_use with no matching tool_result and
                                 # Anthropic returns a 400 that kills the whole turn.
                                 # 2026-05-15.
                                 wrapped_err = provider.format_tool_result(
-                                    tool_call_id, function_name, error_result
+                                    tool_call_id, function_name, llm_result
                                 )
                                 messages.append(wrapped_err)
                                 self.main_chat.session_manager.add_tool_result(
@@ -532,6 +537,7 @@ class StreamingChat:
                                 iteration_tool_images.extend(tool_imgs)
                                 logger.info(f"[TOOL] {function_name} returned {len(tool_imgs)} image(s)")
                             clean_result = strip_ui_markers(result_str)
+                            clean_result += self.main_chat.function_manager.loop_warn_suffix(function_name, loop_counts)
 
                             publish(Events.TOOL_COMPLETE, {"name": function_name, "success": True})
 
@@ -562,6 +568,8 @@ class StreamingChat:
                         except Exception as tool_error:
                             logger.error(f"Tool execution error: {tool_error}", exc_info=True)
                             error_result = f"Error: {str(tool_error)}"
+                            # Loop-warn to the LLM only; history + SSE keep the raw error.
+                            llm_result = error_result + self.main_chat.function_manager.loop_warn_suffix(function_name, loop_counts)
 
                             publish(Events.TOOL_COMPLETE, {"name": function_name, "success": False})
 
@@ -576,7 +584,7 @@ class StreamingChat:
                             wrapped_msg = provider.format_tool_result(
                                 tool_call_id,
                                 function_name,
-                                error_result
+                                llm_result
                             )
                             messages.append(wrapped_msg)
 
@@ -633,7 +641,8 @@ class StreamingChat:
                             messages,
                             self.main_chat.session_manager,
                             provider,
-                            scopes=_scopes
+                            scopes=_scopes,
+                            loop_counts=loop_counts
                         )
 
                         # Inject tool-returned images for next LLM turn

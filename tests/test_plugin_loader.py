@@ -500,6 +500,7 @@ def _make_mock_fm():
     fm._enabled_tools = []
     fm._network_functions = set()
     fm._is_local_map = {}
+    fm._loop_warn_map = {}
     fm._function_module_map = {}
     fm._mode_filters = {}
     return fm
@@ -1082,6 +1083,7 @@ def execute(function_name, arguments, config):
             fm._mode_filters = {}
             fm._network_functions = set()
             fm._is_local_map = {}
+            fm._loop_warn_map = {}
             fm._function_module_map = {}
             fm.current_toolset_name = "none"
             fm.register_plugin_tools("idem_a", plugin_dir, ["tools/idem_a_tool.py"])
@@ -1122,6 +1124,7 @@ def execute(function_name, arguments, config):
                 fm._mode_filters = {}
                 fm._network_functions = set()
                 fm._is_local_map = {}
+                fm._loop_warn_map = {}
                 fm._function_module_map = {}
                 fm.current_toolset_name = "none"
                 fm.register_plugin_tools("idem_b", plugin_dir, ["tools/idem_b_tool.py"])
@@ -1154,6 +1157,7 @@ def execute(function_name, arguments, config):
             fm._mode_filters = {}
             fm._network_functions = set()
             fm._is_local_map = {}
+            fm._loop_warn_map = {}
             fm._function_module_map = {}
             fm.current_toolset_name = "none"
             fm.register_plugin_tools("idem_c", plugin_dir, ["tools/idem_c_tool.py"])

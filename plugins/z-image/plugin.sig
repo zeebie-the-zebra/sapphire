@@ -6,8 +6,8 @@
     "app/index.js": "sha256:1af786583fcf194552850247830e52173071b966033ca752a5072f01c57aac6e",
     "plugin.json": "sha256:6d302d159df8b1f3259e9b5a68f738a96fab5bc3e71921b8f984ef77defde793",
     "routes/api.py": "sha256:284803b1121514aefc8952b967ce507e7cc67a0f2ff4702043adadb36db2063f",
-    "tools/zimage_tools.py": "sha256:985fa9b69fa1334f5a78c31f3f2ed76ec2d5e8b390fc4bdfd114bfb8e2593934",
+    "tools/zimage_tools.py": "sha256:ad976a31e87c9d8861a2b4736fb1ab7db4014f56fffa21ddfee2fede3db3b53c",
     "web/index.js": "sha256:25a078339c3ef12c5db561f2713256887eca2a64e8d566edbb91df077cac4ea4"
   },
-  "signature": "N5iqZMV1K6gP5n4cQ2TEJ9BqWABjCJbT4lhxkCKwTKWfFiC19lcQTfWyV3jjNRlL5l55d0OkAl+sFJRPrWkgDg=="
+  "signature": "L7jDY0SfErkjsjbheSNxiOC1ugMnEk8BJbZdm4ZHLD8OBliQTLAysT63S3gatOAVXRNPTAgSvJ4Ibu0pfqNADQ=="
 }

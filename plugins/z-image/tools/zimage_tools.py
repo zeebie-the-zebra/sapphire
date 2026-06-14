@@ -94,7 +94,7 @@ def _build_description(cfg):
         parts.append(f"'{user_name}' for the user")
     if parts:
         base += (" Write " + " and ".join(parts) +
-                 " — just the name plus the scene or action, never a physical description; "
+                 " - just the name plus the scene or action, never a physical description; "
                  "the appearance is filled in automatically.")
     return base
 
@@ -103,6 +103,16 @@ def _tool_schema(description):
     return [
         {
             "type": "function",
+            # Loop guard (core feature): warn after 2 calls in one turn. Top-level
+            # flag, read into function_manager and stripped from the wire. ASCII only.
+            "loop_warn_after": 2,
+            "loop_warn_message": (
+                "You have now generated images {count} times this turn, and each "
+                "generation has a real cost. If the result is not what you wanted, the "
+                "prompt may be asking for something physically impossible (for example a "
+                "face and the back of a head at the same time) - regenerating will not "
+                "fix that. Stop and ask the user rather than trying again."
+            ),
             "function": {
                 "name": "generate_image",
                 "description": description,
@@ -114,7 +124,7 @@ def _tool_schema(description):
                             "type": "boolean",
                             "description": "Whether you also see the image (default true). The user always sees it regardless."
                         },
-                        "count": {"type": "integer", "description": "How many images to make. Leave unset (default 1) in almost all cases — only raise it if the user explicitly asks for several."},
+                        "count": {"type": "integer", "description": "How many images to make. Leave unset (default 1) in almost all cases - only raise it if the user explicitly asks for several."},
                         "seed": {"type": "integer", "description": "Optional. Pass a seed from a prior result to reproduce that exact image; otherwise leave unset for a fresh one."}
                     },
                     "required": ["prompt"]
@@ -274,8 +284,8 @@ def _exec_generate(arguments, plugin_settings=None):
             else:
                 reason = str(e)
             # Explicit no-retry instruction so the model doesn't loop on a dead server.
-            return (f"Image generation FAILED — {reason}. Do NOT call generate_image again "
-                    f"right now; retrying immediately won't help until the server is back. "
+            return (f"Image generation FAILED - {reason}. Do NOT call generate_image again "
+                    f"right now; retrying immediately will not help until the server is back. "
                     f"Tell the user it failed (mention the error) and to check the sd-server.", False)
 
     # ---- result text (travels WITH the images in the tool result) ----
@@ -284,12 +294,14 @@ def _exec_generate(arguments, plugin_settings=None):
     # generate_image calls. Seeds are reference data, not an instruction.
     n = len(raw_images)
     if n == 1:
-        recipe = (f"Done — image generated and already shown to the user. "
-                  f"(Seed {seeds[0]}, reference only — reuse it only if the user asks to recreate this exact image.)")
+        recipe = (f"Done - image generated and already shown to the user. You normally do not "
+                  f"need to generate again unless the user asks for a change. "
+                  f"(Seed {seeds[0]}, reference only - reuse it only to recreate this exact image.)")
     else:
         seed_list = ", ".join(f"#{i} seed={s}" for i, s in enumerate(seeds[:n], start=1))
-        recipe = (f"Done — {n} images generated and already shown to the user. "
-                  f"Seeds (reference only, reuse one only if asked to recreate that exact image): {seed_list}.")
+        recipe = (f"Done - {n} images generated and already shown to the user. You normally do not "
+                  f"need to generate more unless the user asks for a change. "
+                  f"Seeds (reference only, reuse one only to recreate that exact image): {seed_list}.")
 
     # ---- build images for the return ----
     # The user ALWAYS sees the images. The model also sees them (vision tokens)

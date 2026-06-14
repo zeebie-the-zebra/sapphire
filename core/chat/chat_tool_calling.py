@@ -374,7 +374,7 @@ class ToolCallingEngine:
             })
         return tool_calls_formatted
 
-    def execute_tool_calls(self, tool_calls, messages, history, provider: BaseProvider = None, scopes=None, allowed_tools=None, executor_snapshot=None):
+    def execute_tool_calls(self, tool_calls, messages, history, provider: BaseProvider = None, scopes=None, allowed_tools=None, executor_snapshot=None, loop_counts=None):
         """
         Execute tool calls and add results to messages array AND history.
 
@@ -395,17 +395,22 @@ class ToolCallingEngine:
 
         for tool_call in tool_calls:
             function_name = tool_call["function"]["name"]
+            # Loop guard: count every attempt this turn (success, throw, or bad JSON).
+            self.function_manager.bump_loop_count(loop_counts, function_name)
 
             try:
                 function_args = json.loads(tool_call["function"]["arguments"])
             except json.JSONDecodeError:
                 logger.error(f"Failed to parse tool arguments: {tool_call['function']['arguments']}")
                 error_result = "Error: Invalid JSON arguments."
+                # Loop-warn goes to the LLM message only — history keeps the raw error
+                # (else the warning persists and replays every future turn).
+                llm_result = error_result + self.function_manager.loop_warn_suffix(function_name, loop_counts)
 
                 if provider:
-                    wrapped_msg = provider.format_tool_result(tool_call["id"], function_name, error_result)
+                    wrapped_msg = provider.format_tool_result(tool_call["id"], function_name, llm_result)
                 else:
-                    wrapped_msg = wrap_tool_result(tool_call["id"], function_name, error_result)
+                    wrapped_msg = wrap_tool_result(tool_call["id"], function_name, llm_result)
                 messages.append(wrapped_msg)
 
                 if history:
@@ -425,6 +430,7 @@ class ToolCallingEngine:
                 logger.info(f"[TOOL] {function_name} returned {len(images)} image(s)")
 
             clean_result = strip_ui_markers(result_str)
+            clean_result += self.function_manager.loop_warn_suffix(function_name, loop_counts)
 
             if provider:
                 wrapped_msg = provider.format_tool_result(tool_call["id"], function_name, clean_result)
@@ -447,7 +453,7 @@ class ToolCallingEngine:
 
         return tools_executed, tool_images
 
-    def execute_text_based_tool_call(self, function_call_data, filtered_content, messages, history, provider: BaseProvider = None, scopes=None, allowed_tools=None, executor_snapshot=None):
+    def execute_text_based_tool_call(self, function_call_data, filtered_content, messages, history, provider: BaseProvider = None, scopes=None, allowed_tools=None, executor_snapshot=None, loop_counts=None):
         """
         Execute text-based function call (LM Studio compatibility).
         
@@ -463,6 +469,8 @@ class ToolCallingEngine:
         tool_call_id = f"call_{uuid.uuid4().hex[:8]}"
         function_name = function_call_data["function_call"]["name"]
         function_args = function_call_data["function_call"]["arguments"]
+        # Loop guard: count this attempt toward the per-turn total.
+        self.function_manager.bump_loop_count(loop_counts, function_name)
 
         # Some text-based-tool-call providers deliver `arguments` as an already-
         # JSON-encoded string; others as a dict. json.dumps on a string would
@@ -501,6 +509,7 @@ class ToolCallingEngine:
         if tool_images:
             logger.info(f"[TOOL] {function_name} returned {len(tool_images)} image(s) (text-based)")
         clean_result = strip_ui_markers(result_str)
+        clean_result += self.function_manager.loop_warn_suffix(function_name, loop_counts)
 
         if provider:
             wrapped_msg = provider.format_tool_result(tool_call_id, function_name, clean_result)

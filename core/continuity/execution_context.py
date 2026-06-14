@@ -391,6 +391,7 @@ class ExecutionContext:
         final_content = None
 
         overflow_reason = None
+        loop_counts = {}  # per-turn per-tool call counts (loop guard); turn-local by design
         for i in range(max_iterations):
             # Context limit check — auto-trim oldest messages rather than bail.
             # Previously this break fired before we ever called the LLM whenever
@@ -481,7 +482,7 @@ class ExecutionContext:
                     del self.tool_log[:-500]
                 tools_executed, tool_images = self.tool_engine.execute_tool_calls(
                     tool_calls, messages, None, self.provider, scopes=self.scopes,
-                    allowed_tools=self._allowed_tool_names
+                    allowed_tools=self._allowed_tool_names, loop_counts=loop_counts
                 )
                 if tool_images:
                     _inject_tool_images(messages, tool_images, self.provider)
@@ -510,7 +511,7 @@ class ExecutionContext:
                     filtered = filter_to_thinking_only(response_msg.content)
                     _, tool_images = self.tool_engine.execute_text_based_tool_call(
                         fn_data, filtered, messages, None, self.provider, scopes=self.scopes,
-                        allowed_tools=self._allowed_tool_names
+                        allowed_tools=self._allowed_tool_names, loop_counts=loop_counts
                     )
                     if tool_images:
                         _inject_tool_images(messages, tool_images, self.provider)
