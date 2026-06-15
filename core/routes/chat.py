@@ -243,15 +243,7 @@ async def get_unified_status(request: Request, _=Depends(require_login), system=
 
         chat_settings = system.llm_chat.session_manager.get_chat_settings()
 
-        # Backfill trim_color from persona if missing (pre-persona chats)
-        if not chat_settings.get('trim_color') and chat_settings.get('persona'):
-            try:
-                from core.personas import persona_manager
-                p = persona_manager.get(chat_settings['persona'])
-                if p:
-                    chat_settings['trim_color'] = p.get('settings', {}).get('trim_color', '')
-            except Exception:
-                pass
+        chat_settings = _backfill_persona_visuals(chat_settings)
 
         prompt_state = prompts.get_current_state()
         prompt_name = prompts.get_active_preset_name()
@@ -810,6 +802,31 @@ async def get_active_chat(request: Request, _=Depends(require_login), system=Dep
     return {"active_chat": system.llm_chat.get_active_chat()}
 
 
+def _backfill_persona_visuals(chat_settings):
+    """Resolve the per-chat visuals (trim_color, background) for the RESPONSE only:
+    chat override > persona default > none. Returns a COPY when it backfills so the
+    persona default never persists into the live/saved chat settings (which would
+    freeze the resolution). Cheap, defensive."""
+    if not isinstance(chat_settings, dict):
+        return chat_settings
+    if chat_settings.get('persona') and (
+            not chat_settings.get('trim_color') or not chat_settings.get('background')):
+        try:
+            from core.personas import persona_manager
+            p = persona_manager.get(chat_settings['persona'])
+            if p:
+                ps = p.get('settings', {})
+                out = dict(chat_settings)  # copy — don't mutate/persist the live settings
+                if not out.get('trim_color'):
+                    out['trim_color'] = ps.get('trim_color', '')
+                if not out.get('background'):
+                    out['background'] = ps.get('background', '')
+                return out
+        except Exception:
+            pass
+    return chat_settings
+
+
 @router.get("/api/chats/{chat_name}/settings")
 async def get_chat_settings(chat_name: str, request: Request, _=Depends(require_login), system=Depends(get_system)):
     """Get settings for a specific chat.
@@ -823,12 +840,12 @@ async def get_chat_settings(chat_name: str, request: Request, _=Depends(require_
     try:
         session_manager = system.llm_chat.session_manager
         if chat_name == session_manager.active_chat_name:
-            return {"settings": session_manager.get_chat_settings()}
+            return {"settings": _backfill_persona_visuals(session_manager.get_chat_settings())}
 
         settings = session_manager.read_chat_settings(chat_name)
         if settings is None:
             raise HTTPException(status_code=404, detail=f"Chat '{chat_name}' not found")
-        return {"settings": settings}
+        return {"settings": _backfill_persona_visuals(settings)}
     except HTTPException:
         raise
     except Exception as e:

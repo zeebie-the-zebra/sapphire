@@ -607,6 +607,13 @@ body {
     border: none;
     border-radius: 50%;
 }
+
+/* Scene background button — sits next to the accent circle in the sidebar header */
+.sb-scene-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; line-height: 1; color: var(--text);
+}
+.sb-scene-btn:hover { border-color: var(--trim, var(--accent-blue, #4a9eff)); }
 .sb-accent-circle::-moz-color-swatch {
     border: none;
     border-radius: 50%;
@@ -3913,6 +3920,17 @@ div.hb-response-summary {
     width: 100%;
     overflow-y: auto;
     overflow-x: hidden;
+}
+
+/* Scene backgrounds: image on #chatbg (set inline by applyBackground), and a
+   readability scrim that replaces the opaque overlay so the scene shows through. */
+#chatbg.has-bg {
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+}
+#chatbg.has-bg #chatbg-overlay {
+    background: var(--chat-area-scrim, rgba(0, 0, 0, 0.45));
 }
 
 #chatbg-overlay::-webkit-scrollbar { width: 8px; }

@@ -4,12 +4,14 @@ import * as ui from '../ui.js';
 import * as eventBus from '../core/event-bus.js';
 import { getElements, getIsProc } from '../core/state.js';
 import { updateScene, updateSendButtonLLM } from '../features/scene.js';
-import { applyTrimColor } from '../features/chat-settings.js';
+import { applyTrimColor, applyBackground } from '../features/chat-settings.js';
 import { handleNewChat, handleDeleteChat, handleChatChange } from '../features/chat-manager.js';
 import { getInitData, refreshInitData, getInitDataSync } from '../shared/init-data.js';
 import { switchView } from '../core/router.js';
 import { loadPersona, createFromChat, avatarImg, avatarFallback, avatarUrl } from '../shared/persona-api.js';
 import { initAgentStatus } from '../features/agent-status.js';
+import { mountScenePicker } from '../shared/scene-picker.js';
+import { setupModalClose } from '../shared/modal.js';
 import {
     renderScopeDropdowns,
     fetchScopeData,
@@ -285,6 +287,13 @@ export default {
                 applyTrimColor('');
                 debouncedSave(container);
             });
+        }
+
+        // Scene background: button opens the shared scene-picker in a modal.
+        const sceneBtn = container.querySelector('#sb-scene-btn') || document.getElementById('sb-scene-btn');
+        if (sceneBtn && !sceneBtn.dataset.bound) {
+            sceneBtn.dataset.bound = '1';
+            sceneBtn.addEventListener('click', openSceneModal);
         }
 
         // "Go to Mind" buttons are now wired by the shared/scope-dropdowns.js renderer
@@ -739,6 +748,9 @@ async function loadSidebar() {
             applyTrimColor(settings.trim_color || '');
         }
 
+        // Scene background (resolved server-side: chat override > persona default > none)
+        applyBackground(settings.background || '');
+
         // Update labels
         const pitchLabel = container.querySelector('#sb-pitch-val');
         if (pitchLabel) pitchLabel.textContent = settings.pitch || 0.98;
@@ -807,6 +819,34 @@ export async function flushPendingSave() {
         try { await saveSettings(container, chatName); }
         catch (e) { console.warn('Flush-pending save failed:', e); }
     }
+}
+
+function openSceneModal() {
+    const current = document.getElementById('chatbg')?.dataset.scene || '';
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+        <div class="modal-base">
+            <div class="modal-header"><h3>Chat Scene</h3><button class="close-btn modal-x" type="button">&times;</button></div>
+            <div class="modal-body"><div id="scene-picker-mount"></div></div>
+            <div class="modal-footer"><button class="btn btn-secondary modal-close" type="button">Done</button></div>
+        </div>`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('active'));  // .modal-overlay is display:none until .active
+    const close = () => { overlay.classList.remove('active'); setTimeout(() => overlay.remove(), 300); };
+    overlay.querySelector('.modal-x')?.addEventListener('click', close);
+    overlay.querySelector('.modal-close')?.addEventListener('click', close);
+    setupModalClose(overlay, close);
+
+    mountScenePicker(overlay.querySelector('#scene-picker-mount'), {
+        current,
+        onSelect: (name) => {
+            // Apply live (instant preview behind the modal) + persist as a per-chat override.
+            applyBackground(name);
+            const chatName = document.getElementById('chat-select')?.value;
+            if (chatName) api.updateChatSettings(chatName, { background: name }).catch(() => {});
+        }
+    });
 }
 
 async function saveSettings(container, chatNameOverride = null) {

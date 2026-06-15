@@ -31,3 +31,19 @@ export function applyTrimColor(color) {
 
     import('./volume.js').then(vol => vol.updateSliderFill()).catch(() => {});
 }
+
+// Scene background: set #chatbg's image from a scene name (or clear to default CSS).
+// `name` is a sanitized library stem; anything not matching is treated as "none".
+export function applyBackground(name) {
+    const bg = document.getElementById('chatbg');
+    if (!bg) return;
+    if (name && /^[a-z0-9_-]{1,50}$/.test(name)) {
+        bg.style.backgroundImage = `url('/api/backgrounds/${encodeURIComponent(name)}')`;
+        bg.classList.add('has-bg');
+        bg.dataset.scene = name;
+    } else {
+        bg.style.backgroundImage = '';
+        bg.classList.remove('has-bg');
+        bg.dataset.scene = '';
+    }
+}
