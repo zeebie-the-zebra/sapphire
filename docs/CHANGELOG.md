@@ -1,3 +1,10 @@
+# 2.7.6 - Background UI images per persona
+- Works like persona trim color, per chat override
+# 2.7.5 - Loop guards
+- Optional feature in plugins to notify the AI when it is looping on tools
+# 2.7.4 - Image pipeline for daemons
+- Plugins can send and receive images
+- Checkmark in Settings > LLM for vision models
 # 2.7.3 - Ghost messages in sidebar
 - Add or override ghost message in System Prompt in sidebar
 # 2.7.2 - Refactor UI

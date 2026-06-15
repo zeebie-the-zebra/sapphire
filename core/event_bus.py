@@ -211,6 +211,8 @@ class Events:
     COMPONENTS_CHANGED = "components_changed"
     TOOLSET_CHANGED = "toolset_changed"
     SPICE_CHANGED = "spice_changed"
+    BACKGROUND_CHANGED = "background_changed"            # active chat background changed (render)
+    BACKGROUNDS_LIBRARY_CHANGED = "backgrounds_library_changed"  # library upload/delete (tool refresh)
     SETTINGS_CHANGED = "settings_changed"
     CHAT_SETTINGS_CHANGED = "chat_settings_changed"
     # Scope CRUD — fired when memory/knowledge/goal/people scopes are created or

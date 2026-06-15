@@ -834,6 +834,7 @@ from core.routes.store import router as store_router
 from core.routes.dashboard import router as dashboard_router
 from core.routes.body import router as body_router
 from core.routes.videos import router as videos_router
+from core.routes.backgrounds import router as backgrounds_router
 
 app.include_router(chat_router)
 app.include_router(tts_router)
@@ -849,4 +850,5 @@ app.include_router(store_router)
 app.include_router(dashboard_router)
 app.include_router(body_router)
 app.include_router(videos_router)
+app.include_router(backgrounds_router)
 
