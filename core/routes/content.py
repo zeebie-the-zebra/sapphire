@@ -683,6 +683,9 @@ async def load_persona(name: str, request: Request, _=Depends(require_login), sy
 
     settings = persona.get("settings", {}).copy()
     settings["persona"] = name
+    # Always stamp the scene explicitly (the persona's, or '' to clear) so activating a
+    # persona fully sets the chat's background — no read-time inheritance. 2026-06-15.
+    settings.setdefault("background", "")
     # Reset scope keys to defaults if persona doesn't specify them,
     # otherwise old persona's scopes persist through dict merge
     from core.chat.function_manager import scope_setting_keys

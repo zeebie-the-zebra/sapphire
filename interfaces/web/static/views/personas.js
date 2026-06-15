@@ -4,6 +4,7 @@ import { listPersonas, getPersona, createPersona, updatePersona, deletePersona,
          importPersona, importPersonaCard,
          avatarUrl, avatarImg, avatarFallback } from '../shared/persona-api.js';
 import { PERSONA_TABS } from '../shared/persona-tabs.js';
+import { mountScenePicker } from '../shared/scene-picker.js';
 import { renderSectionTabs, bindSectionTabs } from '../shared/section-tabs.js';
 import { renderPanelList, bindPanelList } from '../shared/panel-list.js';
 import { helpPills } from '../features/video-link.js';
@@ -308,6 +309,16 @@ function renderDetail(p, isActive) {
                                  grid layout — the pa-field children injected by the shared
                                  renderer become direct children of pa-fence-body-grid. -->
                             <div id="pa-scope-dropdowns" style="display:contents"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pa-fence-group pa-fence-group-wide">
+                    <div class="pa-fence-heading"><span>Scene</span> <span class="pa-fence-heading-right" style="font-weight:400;color:var(--text-muted);font-size:11px;">default chat background for this persona</span></div>
+                    <div class="pa-fence">
+                        <div class="pa-fence-body">
+                            <input type="hidden" id="pa-s-background" data-key="background" value="${esc(s.background || '')}">
+                            <div id="pa-scene-mount"></div>
                         </div>
                     </div>
                 </div>
@@ -747,6 +758,20 @@ function bindEvents() {
     if (selectedData?.settings) {
         updateModelSelector(selectedData.settings.llm_primary || 'auto', selectedData.settings.llm_model || '');
     }
+
+    // Scene picker — the SAME shared component as the chat sidebar modal. Selecting a
+    // scene updates the hidden #pa-s-background (read by collectSettings) and saves.
+    const sceneMount = container.querySelector('#pa-scene-mount');
+    if (sceneMount) {
+        mountScenePicker(sceneMount, {
+            current: selectedData?.settings?.background || '',
+            onSelect: (name) => {
+                const hidden = container.querySelector('#pa-s-background');
+                if (hidden) hidden.value = name;
+                debouncedSave();
+            }
+        });
+    }
 }
 
 function collectSettings() {
@@ -773,6 +798,7 @@ function collectSettings() {
         llm_primary: get('llm_primary') || 'auto',
         llm_model: getSelectedModel(),
         trim_color: get('trim_color') || '#4a9eff',
+        background: get('background'),
         ...scopeFields,
     };
 }

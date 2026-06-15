@@ -101,6 +101,11 @@ export default {
         // Refresh spice dropdown when spice sets change
         eventBus.on(eventBus.Events.SPICE_CHANGED, () => loadSidebar());
 
+        // Sapphire's set_scene tool changes the chat background live (publishes {background}).
+        eventBus.on(eventBus.Events.CHAT_SETTINGS_CHANGED, (data) => {
+            if (data && typeof data.background === 'string') applyBackground(data.background);
+        });
+
         // Refresh sidebar scope dropdowns when scopes are created/deleted in
         // the Mind view. Without this, users see stale options until a full
         // page refresh — or worse, select a scope in the sidebar that the

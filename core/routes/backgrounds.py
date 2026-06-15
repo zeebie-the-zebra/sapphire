@@ -86,15 +86,15 @@ def _reencode(raw: bytes, max_px: int) -> bytes:
 
 
 def _publish_library_changed():
-    """Notify listeners the library changed (the scene tool's description refresh wires
-    to this in step 3). No-op until something subscribes."""
+    """Refresh the scene tool's live-menu description after an upload/delete so
+    Sapphire always sees the current scenes. Defensive — never breaks the request."""
     try:
-        from core.event_bus import publish, Events
-        evt = getattr(Events, "BACKGROUNDS_LIBRARY_CHANGED", None)
-        if evt:
-            publish(evt, {})
-    except Exception:
-        pass
+        from core.api_fastapi import get_system
+        system = get_system()
+        if system and getattr(system, 'llm_chat', None):
+            system.llm_chat.function_manager.refresh_core_tool_descriptions()
+    except Exception as e:
+        logger.warning(f"[BG] scene-tool refresh failed: {e}")
 
 
 @router.get("/api/backgrounds")

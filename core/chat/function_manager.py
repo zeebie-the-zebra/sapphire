@@ -226,7 +226,19 @@ class FunctionManager:
                         continue
                     
                     available_functions = getattr(module, 'AVAILABLE_FUNCTIONS', None)
-                    tools = getattr(module, 'TOOLS', [])
+                    # Door-B: settings/library-aware schema. If the module exposes
+                    # get_tools(), use it (dynamic description, e.g. the scene tool's
+                    # live menu) and stash the callable so refresh can rebuild it.
+                    get_tools_fn = getattr(module, 'get_tools', None)
+                    if callable(get_tools_fn):
+                        try:
+                            tools = get_tools_fn() or []
+                        except Exception as e:
+                            logger.warning(f"Module '{module_name}' get_tools() failed, using TOOLS: {e}")
+                            tools = getattr(module, 'TOOLS', [])
+                    else:
+                        get_tools_fn = None
+                        tools = getattr(module, 'TOOLS', [])
                     executor = getattr(module, 'execute', None)
                     mode_filter = getattr(module, 'MODE_FILTER', None)
                     emoji = getattr(module, 'EMOJI', '')
@@ -243,7 +255,8 @@ class FunctionManager:
                         'tools': tools,
                         'executor': executor,
                         'available_functions': available_functions if available_functions else [t['function']['name'] for t in tools],
-                        'emoji': emoji
+                        'emoji': emoji,
+                        'get_tools': get_tools_fn,  # settings/library-aware rebuilder, or None
                     }
 
                     # Register tool-declared settings
@@ -637,6 +650,40 @@ class FunctionManager:
             return ""
         except Exception:
             return ""
+
+    def refresh_core_tool_descriptions(self) -> int:
+        """Re-run get_tools() for every loaded tool module that defines one (the
+        scene tool's live menu, etc.) and copy the fresh description/parameters onto
+        the EXISTING tool dicts in place — so a core tool's description can react to
+        external state (a scene upload/delete) without a restart. Never raises."""
+        updated = 0
+        try:
+            with self._tools_lock:
+                for module_name, info in self.function_modules.items():
+                    get_tools_fn = info.get('get_tools')
+                    if not callable(get_tools_fn):
+                        continue
+                    try:
+                        fresh = get_tools_fn() or []
+                    except Exception as e:
+                        logger.warning(f"refresh_core_tool_descriptions: '{module_name}' get_tools() failed: {e}")
+                        continue
+                    fresh_by_name = {t['function']['name']: t for t in fresh
+                                     if isinstance(t, dict) and isinstance(t.get('function'), dict)
+                                     and 'name' in t['function']}
+                    for tool in info.get('tools', []):
+                        new = fresh_by_name.get(tool['function']['name'])
+                        if not new:
+                            continue
+                        for key in ('description', 'parameters'):
+                            if key in new['function']:
+                                tool['function'][key] = new['function'][key]
+                        updated += 1
+        except Exception as e:
+            logger.warning(f"refresh_core_tool_descriptions failed: {e}")
+        if updated:
+            logger.info(f"Tool descriptions refreshed ({updated} tool(s))")
+        return updated
 
     def register_dynamic_tools(self, module_name: str, tools: list, executor, plugin_name: str = '', emoji: str = ''):
         """Register tools from a dynamic source (MCP servers, runtime generators, etc.).

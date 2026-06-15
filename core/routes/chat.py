@@ -803,24 +803,24 @@ async def get_active_chat(request: Request, _=Depends(require_login), system=Dep
 
 
 def _backfill_persona_visuals(chat_settings):
-    """Resolve the per-chat visuals (trim_color, background) for the RESPONSE only:
-    chat override > persona default > none. Returns a COPY when it backfills so the
-    persona default never persists into the live/saved chat settings (which would
-    freeze the resolution). Cheap, defensive."""
+    """Backfill trim_color from the persona for pre-persona chats (migration crutch).
+
+    Background is intentionally NOT backfilled. chat.background is the SINGLE source of
+    truth: a scene name, or empty = no scene. Persona default scenes reach a chat by
+    STAMPING at activation (load_persona), never by read-time inheritance — so an
+    untouched chat shows no scene (privacy: no retroactive leak of a persona's scene)
+    and an explicit 'None' sticks (empty isn't reinterpreted as 'inherit'). 2026-06-15.
+
+    Returns a COPY when it changes anything (never mutates the live settings)."""
     if not isinstance(chat_settings, dict):
         return chat_settings
-    if chat_settings.get('persona') and (
-            not chat_settings.get('trim_color') or not chat_settings.get('background')):
+    if chat_settings.get('persona') and not chat_settings.get('trim_color'):
         try:
             from core.personas import persona_manager
             p = persona_manager.get(chat_settings['persona'])
             if p:
-                ps = p.get('settings', {})
-                out = dict(chat_settings)  # copy — don't mutate/persist the live settings
-                if not out.get('trim_color'):
-                    out['trim_color'] = ps.get('trim_color', '')
-                if not out.get('background'):
-                    out['background'] = ps.get('background', '')
+                out = dict(chat_settings)
+                out['trim_color'] = p.get('settings', {}).get('trim_color', '')
                 return out
         except Exception:
             pass
