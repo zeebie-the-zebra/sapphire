@@ -632,6 +632,7 @@ class FunctionManager:
             threshold, message = entry
             n = loop_counts.get(function_name, 0)
             if n >= threshold:
+                logger.info(f"[LOOP-WARN] '{function_name}' hit {n}/{threshold} call(s) this turn - warning appended to tool result")
                 return "\n\n" + message.replace("{count}", str(n))
             return ""
         except Exception:

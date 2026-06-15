@@ -122,7 +122,7 @@ def _tool_schema(description):
                         "prompt": {"type": "string", "description": "The scene or action to depict (~20 words), using the configured names."},
                         "view": {
                             "type": "boolean",
-                            "description": "Whether you also see the image (default true). The user always sees it regardless."
+                            "description": "Whether you see the image yourself (default true). true: you see the full image - richer, but on some models it can pull you into regenerating it repeatedly. false: you get a short text description of it instead - no regeneration loop, and cheaper. The user always sees the full image either way."
                         },
                         "count": {"type": "integer", "description": "How many images to make. Leave unset (default 1) in almost all cases - only raise it if the user explicitly asks for several."},
                         "seed": {"type": "integer", "description": "Optional. Pass a seed from a prior result to reproduce that exact image; otherwise leave unset for a fresh one."}
@@ -311,14 +311,18 @@ def _exec_generate(arguments, plugin_settings=None):
     def _enc(raw):
         return base64.b64encode(_resize_for_chat(raw)).decode()
 
+    # vibe_when_hidden: when she chose view=false the user still sees the full image,
+    # but instead of the model getting nothing it gets a short CLIP description (text,
+    # so no phantom-user-image message and no re-generation loop).
     if len(raw_images) == 1:
         out_images = [{"data": _enc(raw_images[0]), "media_type": "image/jpeg",
-                       "display_only": (not view)}]
+                       "display_only": (not view), "vibe_when_hidden": True}]
     else:
         # count>1: ONE clean image — the labeled grid (contact sheet). Individuals
         # aren't rendered to avoid the grid+duplicates clutter; the recipe above
         # gives each image's seed, so any single is a recreate-by-seed away.
         out_images = [{"data": base64.b64encode(_make_grid(raw_images)).decode(),
-                       "media_type": "image/jpeg", "display_only": (not view)}]
+                       "media_type": "image/jpeg", "display_only": (not view),
+                       "vibe_when_hidden": True}]
 
     return {"text": recipe, "images": out_images}, True

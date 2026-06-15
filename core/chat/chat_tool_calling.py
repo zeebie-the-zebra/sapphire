@@ -208,18 +208,25 @@ def _extract_tool_images(result, history=None, provider=None):
         # Save images to DB and embed markers in text
         # Images with display_only=True are saved for user gallery but not sent to LLM
         llm_images = []
+        hidden_to_vibe = []  # hidden from the LLM, but described via CLIP so it still gets the gist
         for img in images:
             img_id = _save_tool_image(img, history)
             if img_id:
                 text = f"<<IMG::tool:{img_id}>>\n{text}"
             if not img.get("display_only") and supports_vision:
                 llm_images.append(img)
-        if images and not supports_vision:
-            # Non-vision model: image goes to disk + UI history, but the LLM
-            # can't see it. Generate a CLIP-based atmospheric description so
-            # the model still gets the "vibe" of what was captured.
+            elif (not supports_vision) or img.get("vibe_when_hidden"):
+                # No vision support at all, OR the tool opted in to a text
+                # description when it deliberately hides the full image from the
+                # model (e.g. z-image view=false: the user sees the image, the
+                # model gets the gist WITHOUT the full image — which avoids the
+                # phantom-user-message re-generation loop). 2026-06-14.
+                hidden_to_vibe.append(img)
+        if hidden_to_vibe:
+            # Generate a CLIP-based atmospheric description so the model still
+            # gets the "vibe" of what was captured/produced.
             vibe_parts = []
-            for img in images:
+            for img in hidden_to_vibe:
                 try:
                     import base64 as _b64
                     from core import vibes as _vibes
@@ -229,8 +236,8 @@ def _extract_tool_images(result, history=None, provider=None):
                     logger.warning(f"[VIBES] failed to describe image: {e}")
             if vibe_parts:
                 text = (text + "\n\n" + "\n\n".join(vibe_parts)).strip()
-            else:
-                text = (text + "\n\n[Note: current model does not support image inputs — "
+            elif not supports_vision:
+                text = (text + "\n\n[Note: current model does not support image inputs - "
                         f"image(s) were captured and saved but cannot be analyzed this turn.]").strip()
         return text, llm_images
     return str(result), []
