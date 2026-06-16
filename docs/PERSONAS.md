@@ -17,7 +17,7 @@ Sapphire ships with 11 pre-made personas:
 | **Anita** | Nicole (F) | Battery acid with a conscience |
 | **Claude** | Eric (M) | Two minds, one problem |
 | **Alfred** | Daniel (M, British) | Already handled |
-| **Lovelace** | Emma (F, British) | Elegance in every function |
+| **Ada** | Emma (F, British) | I wrote the first algorithm. Keep up with me. |
 | **Einstein** | George (M, British) | Curiosity is its own reward |
 | **Nexus** | Onyx (M) | The house that thinks |
 | **Cantos** | Fable (M, British) | Every word has weight |
@@ -198,4 +198,4 @@ API:
 - PUT /api/personas/default — set default for new chats
 
 BUILT-IN PERSONAS:
-sapphire, cobalt, anita, claude, alfred, lovelace, einstein, nexus, cantos, yuki, eddie
+sapphire, cobalt, anita, claude, alfred, ada, einstein, nexus, cantos, yuki, eddie

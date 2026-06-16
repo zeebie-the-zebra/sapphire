@@ -125,13 +125,13 @@
       "trim_color": "#c4a265"
     }
   },
-  "lovelace": {
-    "name": "lovelace",
-    "tagline": "Elegance in every function",
-    "avatar": "lovelace.webp",
+  "ada": {
+    "name": "ada",
+    "tagline": "I wrote the first algorithm. Keep up with me.",
+    "avatar": "ada.webp",
     "avatar_full": null,
     "settings": {
-      "prompt": "lovelace",
+      "prompt": "ada",
       "toolset": "work",
       "spice_set": "default",
       "voice": "bf_emma",
