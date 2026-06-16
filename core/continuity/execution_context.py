@@ -23,6 +23,37 @@ logger = logging.getLogger(__name__)
 # from the spawning agent, NOT from the user's foreground chat. Scout #7.
 current_task_persona: ContextVar[Optional[str]] = ContextVar('current_task_persona', default=None)
 
+# Warn once per process about a loop-guard version skew (see helper below).
+_loop_guard_skew_warned = False
+
+
+def _exec_with_loop_counts(fn, *args, loop_counts=None, **kwargs):
+    """Call fn(*args, loop_counts=..., **kwargs), degrading gracefully if the tool
+    engine predates the loop guard.
+
+    The loop guard is a cosmetic warning feature. On a partial update where
+    core/chat/chat_tool_calling.py is older than this file, fn won't accept the
+    loop_counts kwarg and Python raises TypeError AT BIND TIME - before any tool
+    runs - so it is safe to retry without it (no double execution). We drop the
+    loop guard for this call and keep the trigger running. Warn once per process so
+    the skew shows up in logs without spamming every trigger. A TypeError that is
+    NOT about loop_counts is a real error, re-raised untouched."""
+    global _loop_guard_skew_warned
+    try:
+        return fn(*args, loop_counts=loop_counts, **kwargs)
+    except TypeError as e:
+        if "loop_counts" not in str(e):
+            raise
+        if not _loop_guard_skew_warned:
+            _loop_guard_skew_warned = True
+            logger.warning(
+                "[CONTINUITY] tool engine does not accept 'loop_counts' - core/chat/"
+                "chat_tool_calling.py is older than execution_context.py (partial update). "
+                "Loop guard disabled for triggers; continuing DEGRADED. Re-run the update so "
+                "that file matches, then restart to re-enable."
+            )
+        return fn(*args, **kwargs)
+
 
 def _scrub_inline_images(msg: Dict[str, Any]) -> Dict[str, Any]:
     """Strip inline base64 image blocks from a user message before persistence.
@@ -480,7 +511,8 @@ class ExecutionContext:
                 # is the actual bound. Keep the last 500. Scout longevity #3.
                 if len(self.tool_log) > 500:
                     del self.tool_log[:-500]
-                tools_executed, tool_images = self.tool_engine.execute_tool_calls(
+                tools_executed, tool_images = _exec_with_loop_counts(
+                    self.tool_engine.execute_tool_calls,
                     tool_calls, messages, None, self.provider, scopes=self.scopes,
                     allowed_tools=self._allowed_tool_names, loop_counts=loop_counts
                 )
@@ -509,7 +541,8 @@ class ExecutionContext:
                     if len(self.tool_log) > 500:
                         del self.tool_log[:-500]
                     filtered = filter_to_thinking_only(response_msg.content)
-                    _, tool_images = self.tool_engine.execute_text_based_tool_call(
+                    _, tool_images = _exec_with_loop_counts(
+                        self.tool_engine.execute_text_based_tool_call,
                         fn_data, filtered, messages, None, self.provider, scopes=self.scopes,
                         allowed_tools=self._allowed_tool_names, loop_counts=loop_counts
                     )

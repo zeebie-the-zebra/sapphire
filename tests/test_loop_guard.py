@@ -191,3 +191,37 @@ def test_error_path_warn_reaches_llm_but_not_history():
     assert "WARN 1" in messages[-1]["content"]          # LLM sees the warn
     raw = history.add_tool_result.call_args[0][2]        # history gets raw error only
     assert "WARN" not in raw and "Invalid JSON" in raw
+
+
+# ── 6. Trigger version-skew: degrade instead of crash ─────────────────────────
+
+def test_exec_with_loop_counts_passes_through_when_engine_accepts_it():
+    from core.continuity.execution_context import _exec_with_loop_counts
+    def good(a, b, loop_counts=None, scopes=None):
+        return ("ran", loop_counts, scopes)
+    assert _exec_with_loop_counts(good, 1, 2, loop_counts={"gen": 1}, scopes="s") == \
+        ("ran", {"gen": 1}, "s")
+
+
+def test_exec_with_loop_counts_degrades_on_old_engine_no_double_exec():
+    """Version skew: an engine too old to accept loop_counts raises TypeError at
+    BIND time (before the body), so we retry without it — once, no double-exec."""
+    import core.continuity.execution_context as ec
+    ec._loop_guard_skew_warned = False
+    runs = []
+    def old(a, b, scopes=None):          # no loop_counts, no **kwargs -> real bind-time TypeError
+        runs.append((a, b, scopes))
+        return ("ran", None)
+    out = ec._exec_with_loop_counts(old, 1, 2, loop_counts={}, scopes="s")
+    assert out == ("ran", None)
+    assert runs == [(1, 2, "s")], "tool body runs exactly once (the retry), loop_counts dropped"
+    assert ec._loop_guard_skew_warned is True   # the degradation was logged
+
+
+def test_exec_with_loop_counts_reraises_unrelated_typeerror():
+    """A TypeError that ISN'T about loop_counts is a real bug — never masked."""
+    from core.continuity.execution_context import _exec_with_loop_counts
+    def buggy(a, loop_counts=None):
+        raise TypeError("something else entirely")
+    with pytest.raises(TypeError, match="something else"):
+        _exec_with_loop_counts(buggy, 1, loop_counts={})
