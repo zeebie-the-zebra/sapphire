@@ -1209,6 +1209,39 @@ async def update_plugin_settings(plugin_name: str, request: Request, _=Depends(r
     except Exception as e:
         logger.warning(f"Tool schema refresh failed for '{plugin_name}': {e}")
 
+    # Settings-saved hook: notify the active provider(s) so a plugin can react to
+    # its own settings change (e.g. pre-download a newly selected model off the
+    # request path). Opt-in + generic — only providers that define
+    # on_settings_saved(plugin_name, settings) react; all others are a no-op.
+    # Runs AFTER the atomic save above and is fully isolated, so a provider bug
+    # can never lose the just-persisted settings. (Added 2026-06-16.)
+    try:
+        system = get_system()
+        # The three swappable providers are NOT addressed the same way:
+        #   tts: a client that wraps .provider
+        #   stt: whisper_client IS the provider (no .provider)
+        #   embedder: a module singleton — read it WITHOUT creating one (get_embedder
+        #             is lazy-create; calling it here would force-load a model per save)
+        targets = []
+        _tts = getattr(system, "tts", None)
+        if _tts is not None:
+            targets.append(getattr(_tts, "provider", None))
+        targets.append(getattr(system, "whisper_client", None))
+        try:
+            import core.embeddings as _emb_mod
+            targets.append(getattr(_emb_mod, "_embedder", None))  # active singleton or None
+        except Exception:
+            pass
+        for prov in targets:
+            if prov is not None and hasattr(prov, "on_settings_saved"):
+                try:
+                    # dict(merged) — a provider can't mutate the response/persisted dict.
+                    prov.on_settings_saved(plugin_name, dict(merged))
+                except Exception as e:
+                    logger.warning(f"[{plugin_name}] provider on_settings_saved failed: {e}")
+    except Exception as e:
+        logger.debug(f"settings-saved provider notify skipped: {e}")
+
     return {"status": "success", "plugin": plugin_name, "settings": merged}
 
 

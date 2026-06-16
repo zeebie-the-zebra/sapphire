@@ -289,6 +289,55 @@ def _get_api_key(self):
     return ''
 ```
 
+## Reacting to Settings Changes (`on_settings_saved`)
+
+A provider may define an **optional** `on_settings_saved` method to react when its own
+plugin's settings are saved - e.g. pre-download a newly selected model so the first use
+isn't stalled. Wired for the active **TTS / STT / embedder** providers.
+
+```python
+def on_settings_saved(self, plugin_name: str, settings: dict):
+    """Called by core AFTER a plugin's settings are persisted."""
+    if plugin_name != "my-tts":          # you're notified for EVERY plugin save - filter
+        return
+    name = (settings or {}).get("model")
+    if name and not self._model_path(name).exists():
+        import threading
+        threading.Thread(target=self._warm_download, args=(name,), daemon=True).start()
+```
+
+**Contract:**
+- **Opt-in** - only providers that define the method are called; everyone else is a no-op.
+- **Filter by `plugin_name`** - you're notified for *any* plugin's settings save, not just yours.
+- **Return immediately.** It runs on the settings-save request path. Do heavy work (downloads,
+  model loads) in a background `threading.Thread(..., daemon=True)`, never inline, or you stall
+  the save response.
+- **Runs after the atomic save, fully isolated** - an exception you raise is caught + logged and
+  can never lose the just-saved settings.
+- `settings` is a **copy** - mutating it has no effect on the persisted file or the response.
+
+## Progress Toasts (`PLUGIN_NOTICE`)
+
+Any plugin or provider can surface a transient UI toast by publishing `PLUGIN_NOTICE`:
+
+```python
+from core.event_bus import publish, Events
+
+publish(Events.PLUGIN_NOTICE, {
+    "plugin": "my-tts",
+    "message": "Downloading model...",
+    "severity": "info",          # info | success | warning | error
+})
+```
+
+- The frontend renders it as a toast; the message is HTML-escaped, so keep it plain text.
+- **Ephemeral** - it is NOT replayed to tabs opened *after* it fired, so a freshly-opened tab
+  won't surface a stale "done" toast.
+
+Piper combines both: `on_settings_saved` kicks off a background voice download that publishes
+`PLUGIN_NOTICE` ("Downloading... / Voice ready / failed") as it progresses. See
+`plugins/piper/provider.py` for the reference implementation.
+
 ## Lifecycle
 
 1. **Plugin loads** — `plugin_loader.scan()` reads `capabilities.providers` from manifest

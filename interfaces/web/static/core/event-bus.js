@@ -242,6 +242,7 @@ export const Events = {
     // Plugin events
     PLUGIN_RELOADED: 'plugin_reloaded',
     PLUGIN_LOAD_ERROR: 'plugin_load_error',
+    PLUGIN_NOTICE: 'plugin_notice',   // generic plugin->UI toast: {plugin, message, severity}
 
     // Mind data changed — tool or UI wrote to memory/goal/knowledge/people.
     // Payload: {domain, scope, action}. Mind view uses it to live-refresh.

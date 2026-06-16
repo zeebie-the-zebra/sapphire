@@ -683,7 +683,12 @@ export const showToast = (msg, type = 'error', duration = 4000) => {
 
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
-    toast.innerHTML = `<span class="toast-text">${msg.replace(/</g, '&lt;')}</span><button class="toast-close">\u00d7</button>`;
+    // Full HTML-escape (& first) + length clamp + String() coercion \u2014 toasts are
+    // plain text, and PLUGIN_NOTICE lets any plugin supply the message.
+    const safe = String(msg).slice(0, 500)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    toast.innerHTML = `<span class="toast-text">${safe}</span><button class="toast-close">\u00d7</button>`;
     toast.querySelector('.toast-close').addEventListener('click', () => toast.remove());
     container.appendChild(toast);
 

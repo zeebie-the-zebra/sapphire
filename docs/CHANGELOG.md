@@ -1,3 +1,7 @@
+# 2.7.7 - Piper TTS + Wordpress
+- New plugin-save hook
+- Piper TTS added for CPU TTS fast (streaming supported)
+- Wordpress tools (blogs, pages, settings, plugins, users)
 # 2.7.6 - Background UI images per persona
 - Works like persona trim color, per chat override
 # 2.7.5 - Loop guards

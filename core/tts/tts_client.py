@@ -159,6 +159,15 @@ class TTSClient:
             return True  # Keep current voice (default af_heart)
         self.voice_name = voice_name
         logger.info(f"Voice set to: {self.voice_name}")
+        # Notify the provider so it can react to a voice change — e.g. pre-fetch a
+        # model for a newly-selected voice off the hot path (Piper). Opt-in +
+        # isolated: only providers that define on_voice_selected react. 2026-06-16.
+        prov = self._provider
+        if prov is not None and hasattr(prov, "on_voice_selected"):
+            try:
+                prov.on_voice_selected(voice_name)
+            except Exception as e:
+                logger.warning(f"provider on_voice_selected failed: {e}")
         return True
     
     def set_speed(self, speed):

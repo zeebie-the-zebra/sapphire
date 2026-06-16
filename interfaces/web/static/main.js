@@ -451,6 +451,13 @@ function initEventBus() {
         }, 50);
     });
 
+    // Generic plugin toasts — any plugin can publish PLUGIN_NOTICE to surface one
+    eventBus.on(eventBus.Events.PLUGIN_NOTICE, (data) => {
+        if (!data?.message) return;
+        const sev = ['info', 'success', 'warning', 'error'].includes(data.severity) ? data.severity : 'info';
+        ui.showToast(data.message, sev);
+    });
+
     // Message events
     eventBus.on(eventBus.Events.MESSAGE_ADDED, () => debouncedRefresh());
     eventBus.on(eventBus.Events.MESSAGE_REMOVED, () => debouncedRefresh());

@@ -30,7 +30,10 @@ class EventBus:
         }
 
         with self._lock:
-            self._replay_buffer.append(event)
+            # Ephemeral events (transient UI toasts) aren't replayed to late
+            # subscribers - a freshly-opened tab shouldn't surface a stale "done" toast.
+            if event_type not in ("plugin_notice",):
+                self._replay_buffer.append(event)
             dead_subscribers = []
 
             # Sync subscribers
@@ -243,6 +246,10 @@ class Events:
     # Plugin events
     PLUGIN_RELOADED = "plugin_reloaded"
     PLUGIN_LOAD_ERROR = "plugin_load_error"
+    # Generic plugin -> UI toast. Any plugin may publish this to surface a toast.
+    # Payload: {plugin, message, severity} where severity in
+    # {info, success, warning, error}. (Added 2026-06-16.)
+    PLUGIN_NOTICE = "plugin_notice"
 
     # Daemon/webhook events
     DAEMON_EVENT = "daemon_event"
