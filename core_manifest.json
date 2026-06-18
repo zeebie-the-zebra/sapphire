@@ -97,7 +97,7 @@
     "core/sapphire_logging.py": "988d9d449fd17d6b1722a3d5cc44a743c679ae786a8f9ca6e13415566bd7418c",
     "core/settings_defaults.json": "4adae4994e7d34f08f197e2e65fd9d1333cf4309384304487552064a8ba0847d",
     "core/settings_help.json": "a56345bfc7a6a9af58abb2df5b17e05106359ee1aeaa266bca5bb3b9bb52c71c",
-    "core/settings_manager.py": "45330a22d819772f3664e1deadcef17a7c5a99a52dadb2a1312c67952b53a27e",
+    "core/settings_manager.py": "40d629964085e49057a4f49f3f694fdfc29046ec8669925970c7bc7f149752bc",
     "core/setup.py": "a58bb0c83993b7a632746526885b40e79ff24f99f3ab16085080e2f8392e25f8",
     "core/socks_proxy.py": "b790441d5c62ff42f80304f84c4e7c545f37cec09f7a88358b24bc092e735480",
     "core/spice_sets/__init__.py": "703441a2a79181597f8447faf491365122526730b3f54c0e4d8575f6b07b74ab",

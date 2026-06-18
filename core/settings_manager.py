@@ -508,15 +508,11 @@ class SettingsManager:
                 if category not in nested:
                     nested[category] = {}
                 
-                # Special handling for nested config objects
-                if isinstance(value, dict) and self._is_config_object(key):
-                    # Deep merge: preserve existing nested values
-                    if key in nested[category]:
-                        nested[category][key] = {**nested[category][key], **value}
-                    else:
-                        nested[category][key] = value
-                else:
-                    nested[category][key] = value
+                # Replace, never merge. Config-objects are stored + set WHOLE (every writer is
+                # read-modify-write the full dict), so the in-memory value IS the full intended
+                # state. Merging re-added deleted sub-keys from the stale disk dict - the
+                # "delete a provider, it resurrects on reload" bug. (Fixed 2026-06-18.)
+                nested[category][key] = value
             else:
                 # Fallback: put at root level if category unknown
                 nested[key] = value
