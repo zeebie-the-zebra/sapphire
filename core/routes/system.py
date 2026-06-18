@@ -894,3 +894,17 @@ async def revoke_api_token(token_id: str, _=Depends(require_login)):
     if api_tokens.revoke(token_id):
         return {"status": "revoked"}
     raise HTTPException(status_code=404, detail="Token not found")
+
+
+@router.get("/api/system/integrity")
+async def system_integrity(_=Depends(require_login)):
+    """Verify the core install against the shipped manifest (SHA256). No git needed."""
+    from core.integrity import verify
+    return verify()
+
+
+@router.post("/api/system/integrity/repair")
+async def system_integrity_repair(_=Depends(require_login)):
+    """Restore files that don't match the manifest (git installs), with per-file status."""
+    from core.integrity import repair
+    return repair()

@@ -87,6 +87,19 @@ export default {
                 <p class="text-muted" style="font-size:var(--font-xs);margin:4px 0 0">Configure LLM, audio, voice, and identity settings step by step.</p>
             </div>
 
+            <div class="integrity-check" style="margin:20px 0;padding:16px;border:1px solid var(--border);border-radius:var(--radius)">
+                <h4 style="margin:0 0 8px;font-size:var(--font-sm)">Install Integrity</h4>
+                <p class="text-muted" style="font-size:var(--font-xs);margin:0 0 12px">
+                    Checks every core file against the shipped manifest (SHA256). Catches partial updates, half-applied pulls, and corruption.
+                </p>
+                <div id="integrity-status" style="font-size:var(--font-sm);margin-bottom:10px">Checking…</div>
+                <div style="display:flex;gap:8px">
+                    <button class="btn-primary" id="integrity-verify">Verify</button>
+                    <button class="btn-sm danger" id="integrity-repair" style="display:none">Repair</button>
+                </div>
+                <div id="integrity-output" style="margin-top:10px;font-size:var(--font-xs)"></div>
+            </div>
+
             <div class="api-tokens" style="margin:20px 0;padding:16px;border:1px solid var(--border);border-radius:var(--radius)">
                 <h4 style="margin:0 0 8px;font-size:var(--font-sm)">API Keys</h4>
                 <p class="text-muted" style="font-size:var(--font-xs);margin:0 0 12px">
@@ -145,6 +158,72 @@ export default {
             } else {
                 ui.showToast('Setup wizard plugin not loaded', 'error');
             }
+        });
+
+        // ─── Install Integrity ──────────────────────────────────────────
+        const integStatus = el.querySelector('#integrity-status');
+        const integVerify = el.querySelector('#integrity-verify');
+        const integRepair = el.querySelector('#integrity-repair');
+        const integOutput = el.querySelector('#integrity-output');
+
+        const _badList = (items) =>
+            `<div style="max-height:160px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius);padding:8px;font-family:var(--mono,monospace)">${items.map(x => _escapeHtml(x)).join('<br>')}</div>`;
+
+        async function renderIntegrity(report) {
+            if (!report) {
+                try {
+                    const res = await fetch('/api/system/integrity', { credentials: 'same-origin' });
+                    report = await res.json();
+                } catch (e) {
+                    integStatus.innerHTML = `<span style="color:var(--error,#dc3545)">Check failed: ${_escapeHtml(e.message)}</span>`;
+                    return;
+                }
+            }
+            if (!report.available) {
+                integStatus.innerHTML = `<span class="text-muted">No manifest in this build — integrity check unavailable.</span>`;
+                integRepair.style.display = 'none';
+                return;
+            }
+            if (report.ok) {
+                integStatus.innerHTML = `<span style="color:var(--success,#28a745)">✓ OK — ${report.matched}/${report.total} files match v${_escapeHtml(report.version)}</span>`;
+                integRepair.style.display = 'none';
+                integOutput.innerHTML = '';
+            } else {
+                integStatus.innerHTML = `<span style="color:var(--error,#dc3545)">⚠ ${report.mismatched.length} modified, ${report.missing.length} missing — does not match v${_escapeHtml(report.version)} (partial update?)</span>`;
+                const bad = [...report.mismatched.map(f => f + '  (modified)'), ...report.missing.map(f => f + '  (missing)')];
+                integOutput.innerHTML = _badList(bad);
+                integRepair.style.display = '';
+            }
+        }
+
+        if (integStatus) renderIntegrity();
+
+        integVerify?.addEventListener('click', async () => {
+            integStatus.textContent = 'Verifying…';
+            await renderIntegrity();
+        });
+
+        integRepair?.addEventListener('click', async () => {
+            integRepair.disabled = true;
+            integRepair.textContent = 'Repairing…';
+            try {
+                const res = await fetch('/api/system/integrity/repair', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const result = await res.json();
+                const lines = [
+                    ...result.repaired.map(r => `✓ ${r.file} — ${r.detail}`),
+                    ...result.failed.map(r => `✗ ${r.file} — ${r.detail}`),
+                ];
+                integOutput.innerHTML = _badList(lines) + `<div style="margin-top:6px">${_escapeHtml(result.message)}</div>`;
+                await renderIntegrity(result.reverify);
+                ui.showToast(result.message, result.reverify.ok ? 'success' : 'warning');
+            } catch (e) {
+                ui.showToast(`Repair failed: ${e.message}`, 'error');
+            }
+            integRepair.disabled = false;
+            integRepair.textContent = 'Repair';
         });
 
         // ─── API Keys section ───────────────────────────────────────────

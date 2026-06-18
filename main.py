@@ -92,6 +92,15 @@ def run_sapphire():
     except Exception as e:
         log(f"Pending-update apply raised: {e}", RED)
 
+    # Core integrity check (~22ms) — runs after any pending update applies, so it
+    # catches a partial/half-applied update at boot instead of at crash-time. Logs via
+    # the logging module (visible in journalctl) rather than the buffered launcher print.
+    try:
+        from core.integrity import log_boot_status
+        log_boot_status()
+    except Exception as e:
+        log(f"Integrity boot check raised: {e}", YELLOW)
+
     try:
         _child_process = subprocess.Popen(
             [sys.executable, str(script_path)],
