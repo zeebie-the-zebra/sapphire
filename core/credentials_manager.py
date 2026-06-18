@@ -598,8 +598,22 @@ class CredentialsManager:
                 return False
     
     def clear_llm_api_key(self, provider: str) -> bool:
-        """Clear API key for an LLM provider."""
-        return self.set_llm_api_key(provider, '')
+        """Remove the stored credential entry for an LLM provider (not just blank it),
+        so a deleted provider leaves no dangling entry behind."""
+        with self._lock:
+            try:
+                llm = self._credentials.get('llm', {})
+                if provider not in llm:
+                    return True  # nothing stored — already clear
+                del llm[provider]
+                if not self._save():
+                    logger.error(f"Failed to persist credential removal for '{provider}'")
+                    return False
+                logger.info(f"Removed stored credential for provider '{provider}'")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to clear API key for '{provider}': {e}")
+                return False
     
     def has_llm_api_key(self, provider: str) -> bool:
         """Check if provider has an API key (from either stored or env)."""

@@ -167,6 +167,9 @@ class ProviderRegistry(_BaseRegistry):
             return None
 
         config = providers_config[provider_key]
+        if not isinstance(config, dict):
+            logger.error(f"Provider '{provider_key}' config is not a dict ({type(config).__name__}); skipping")
+            return None
 
         if not config.get('enabled', False):
             logger.debug(f"Provider '{provider_key}' is disabled")
@@ -312,6 +315,9 @@ class ProviderRegistry(_BaseRegistry):
                 continue
 
             config = providers_config[provider_key]
+            if not isinstance(config, dict):
+                logger.warning(f"Provider '{provider_key}' config is not a dict; skipping in fallback")
+                continue
 
             if not config.get('enabled', False):
                 continue

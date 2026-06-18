@@ -898,10 +898,15 @@ async def add_custom_provider(request: Request, _=Depends(require_login)):
 
     # Build config
     template = data.get('template', 'openai')
+    if template not in provider_registry._classes:
+        raise HTTPException(status_code=400, detail=f"Unknown provider template '{template}'")
+    base_url = (data.get('base_url') or '').strip()
+    if not base_url:
+        raise HTTPException(status_code=400, detail="A base URL is required for a custom provider")
     provider_config = {
         'template': template,
         'display_name': data.get('display_name', name),
-        'base_url': data.get('base_url', ''),
+        'base_url': base_url,
         'model': data.get('model', ''),
         'enabled': data.get('enabled', True),
         'use_as_fallback': data.get('use_as_fallback', True),
@@ -955,8 +960,8 @@ async def delete_custom_provider(provider_key: str, request: Request, _=Depends(
     try:
         from core.credentials_manager import credentials
         credentials.clear_llm_api_key(provider_key)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to clear credentials for deleted provider '{provider_key}': {e}")
 
     publish(Events.SETTINGS_CHANGED, {"key": "LLM_CUSTOM_PROVIDERS", "value": provider_key})
     return {"status": "success", "name": provider_key}

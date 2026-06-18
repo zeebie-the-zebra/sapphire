@@ -171,26 +171,34 @@ export default {
 
         // Model select
         el.querySelectorAll('.model-select').forEach(select => {
-            select.addEventListener('change', e => {
+            select.addEventListener('change', async e => {
                 const key = e.target.dataset.provider;
                 const card = e.target.closest('.provider-card');
                 const model = handleModelSelectChange(card, e.target.value);
                 if (model) {
-                    updateProvider(key, { model });
-                    loadModelGenParamsIntoCard(card, model, generationProfiles);
+                    try {
+                        await updateProvider(key, { model });
+                        loadModelGenParamsIntoCard(card, model, generationProfiles);
+                    } catch (err) {
+                        showToast(`Failed to save model: ${err.message || err}`, 'error');
+                    }
                 }
             });
         });
 
         // Custom model
         el.querySelectorAll('.model-custom').forEach(input => {
-            input.addEventListener('change', e => {
+            input.addEventListener('change', async e => {
                 const key = e.target.dataset.provider;
                 const card = e.target.closest('.provider-card');
                 const model = e.target.value.trim();
                 if (model) {
-                    updateProvider(key, { model });
-                    loadModelGenParamsIntoCard(card, model, generationProfiles);
+                    try {
+                        await updateProvider(key, { model });
+                        loadModelGenParamsIntoCard(card, model, generationProfiles);
+                    } catch (err) {
+                        showToast(`Failed to save model: ${err.message || err}`, 'error');
+                    }
                 }
             });
         });
@@ -249,11 +257,15 @@ export default {
                 const key = btn.dataset.provider;
                 if (!confirm(`Remove provider "${key}"?`)) return;
                 try {
-                    await fetch(`/api/llm/custom-providers/${key}`, { method: 'DELETE' });
+                    const res = await fetch(`/api/llm/custom-providers/${key}`, { method: 'DELETE' });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.detail || `HTTP ${res.status}`);
+                    }
                     showToast(`Removed: ${key}`, 'success');
                     ctx.refreshTab();
                 } catch (e) {
-                    showToast('Failed to remove', 'error');
+                    showToast(`Failed to remove: ${e.message}`, 'error');
                 }
             });
         });
