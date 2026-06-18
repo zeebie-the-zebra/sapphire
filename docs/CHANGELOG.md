@@ -1,3 +1,5 @@
+# 2.7.8 - Stability
+- Added Settings > System > integrity check (verify/repair)
 # 2.7.7 - Piper TTS + Wordpress
 - New plugin-save hook
 - Piper TTS added for CPU TTS fast (streaming supported)
