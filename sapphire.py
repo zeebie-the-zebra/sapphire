@@ -83,6 +83,7 @@ class VoiceChatSystem:
         # NOT persisted — resets on restart. See enter/exit_conversation_mode.
         self.conversation_mode_enabled = False
         self.conversation_session = None
+        self._conversation_manager = None  # lazy ConversationManager (true speech mode)
 
         self.history = ConversationHistory(max_history=config.LLM_MAX_HISTORY)
 
@@ -472,6 +473,14 @@ class VoiceChatSystem:
                 self.toggle_wakeword(True)
             except Exception as e2:
                 logger.error(f"[CONV] hard reset ALSO failed: {e2}")
+
+    def get_conversation_manager(self):
+        """Lazy-create the true-speech-mode (conversation mode) manager. Lazy so
+        nothing (silero, the engine, the driver) loads until it's first used."""
+        if getattr(self, "_conversation_manager", None) is None:
+            from core.conversation import ConversationManager
+            self._conversation_manager = ConversationManager(self)
+        return self._conversation_manager
 
     def reload_wakeword_model(self, model_name=None):
         """Hot-swap the wake word model on a live detector.

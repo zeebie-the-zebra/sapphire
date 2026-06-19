@@ -908,3 +908,25 @@ async def system_integrity_repair(_=Depends(require_login)):
     """Restore files that don't match the manifest (git installs), with per-file status."""
     from core.integrity import repair
     return repair()
+
+
+@router.put("/api/runtime/true-speech")
+async def toggle_true_speech(request: Request, _=Depends(require_login), system=Depends(get_system)):
+    """Enter/exit true speech mode (conversation mode — continuous listen, no wakeword).
+
+    System-level + ephemeral. Local mic, headphone tier (open-speaker AEC = later).
+    FAIL-SAFE: if the mic can't be acquired, wakeword is left intact and we report
+    failure — true speech mode simply doesn't engage.
+    """
+    data = await request.json()
+    enabled = bool(data.get("enabled", False))
+    mgr = system.get_conversation_manager()
+    if enabled:
+        ok = mgr.start_local()
+        return {
+            "status": "ok" if ok else "failed",
+            "active": mgr.active,
+            "note": "" if ok else "could not acquire mic — wakeword intact",
+        }
+    mgr.stop()
+    return {"status": "ok", "active": mgr.active}

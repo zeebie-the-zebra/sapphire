@@ -68,11 +68,11 @@ class ConversationDriver:
             if text and text.strip():
                 logger.info("[CONV] turn: transcribed user utterance")
                 self.system.process_llm_query(text)
-                # Stay in RESPONDING (and thus barge-in-able) until playback ends.
-                try:
-                    self.system.tts.wait(timeout=120)
-                except Exception:
-                    pass
+                # process_llm_query returns once the LLM is done and tts.speak() is
+                # kicked off (speak is non-blocking). Wait for playback to actually
+                # START, then FINISH — so we stay in RESPONDING (barge-in-able) for the
+                # whole spoken reply rather than racing to IDLE before she's done.
+                self._wait_for_playback()
             else:
                 logger.info("[CONV] turn: no usable speech, skipping LLM")
         except Exception as e:
@@ -80,6 +80,21 @@ class ConversationDriver:
         finally:
             # No-op if a barge-in already moved us out of RESPONDING.
             self.engine.turn_finished()
+
+    def _wait_for_playback(self, start_timeout=2.0, max_play=180):
+        """Hold the turn in RESPONDING for the spoken reply: wait for tts playback
+        to START (it's kicked off non-blocking), then for it to FINISH."""
+        import time
+        tts = getattr(self.system, "tts", None)
+        if tts is None:
+            return
+        deadline = time.monotonic() + start_timeout
+        while not getattr(tts, "_is_playing", False) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        try:
+            tts.wait(timeout=max_play)
+        except Exception:
+            pass
 
     # ── helpers ─────────────────────────────────────────────────────────────
     def _spawn(self, target, *args):
