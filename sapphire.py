@@ -79,6 +79,10 @@ class VoiceChatSystem:
         self.current_session = None
         self._processing_lock = threading.Lock()
         self._web_active_count = 0  # Ref-counted wakeword suppression during web UI activity
+        # Conversation mode (v3): ephemeral per-session flag + audio-session handle.
+        # NOT persisted — resets on restart. See enter/exit_conversation_mode.
+        self.conversation_mode_enabled = False
+        self.conversation_session = None
 
         self.history = ConversationHistory(max_history=config.LLM_MAX_HISTORY)
 
@@ -379,6 +383,95 @@ class VoiceChatSystem:
                 self.wake_word_recorder.stop_recording()
                 logger.info("Wakeword stopped")
             return True
+
+    def enter_conversation_mode(self, acquire_audio):
+        """Fail-safe handoff INTO conversation mode (v3 Rollout 1 — SAFETY CRITICAL).
+
+        Acquire + verify conversation audio BEFORE committing; on ANY failure the
+        wakeword pipeline is restored so Sapphire is NEVER left deaf. This is the
+        Rollout-1 acceptance criterion: a conversation-mode failure (incl.
+        Windows/WASAPI) must degrade to "feature unavailable," never a broken
+        wakeword. The guarantee is pure control flow, so it holds on every OS.
+
+        `acquire_audio` is a zero-arg callable that opens the conversation audio
+        session (mic + AEC — filled in by Rollout 2 / the browser intake) and
+        returns a session object (optional `.close()`); it may raise. Returns
+        True if conversation mode is now active, else False.
+        """
+        from core.wakeword.wakeword_null import NullWakeWordDetector
+        from core.event_bus import publish, Events
+
+        if isinstance(self.wake_detector, NullWakeWordDetector):
+            logger.warning("[CONV] wakeword not active — cannot enter conversation mode")
+            return False
+        if self.conversation_mode_enabled:
+            return True
+
+        # Phase 1: release the mic. Two INPUT streams on one device corrupt
+        # (wake_detector.py:254), so the wakeword mic must be CLOSED before
+        # conversation audio opens its own. Reversible via _restore_wakeword.
+        try:
+            self.wake_detector.stop_listening()
+            self.wake_word_recorder.stop_recording()
+        except Exception as e:
+            logger.error(f"[CONV] could not release wakeword mic ({e}); restoring, aborting")
+            self._restore_wakeword()
+            return False
+        time.sleep(0.2)  # device settle (PipeWire/WASAPI)
+
+        # Phase 2: acquire + verify conversation audio. ANY failure -> restore.
+        try:
+            session = acquire_audio()
+            if session is None:
+                raise RuntimeError("acquire_audio returned None")
+        except Exception as e:
+            logger.error(f"[CONV] audio acquisition failed ({e}); restoring wakeword")
+            self._restore_wakeword()
+            return False
+
+        # Phase 3: commit — only now is the wakeword fully yielded.
+        self.conversation_session = session
+        self.conversation_mode_enabled = True
+        publish(Events.CONVERSATION_MODE_CHANGED, {"enabled": True})
+        logger.info("[CONV] conversation mode ON — wakeword suppressed")
+        return True
+
+    def exit_conversation_mode(self):
+        """Tear down conversation audio and restore the wakeword pipeline.
+        Idempotent and fail-safe — always tries to leave wakeword listening."""
+        from core.event_bus import publish, Events
+        if not self.conversation_mode_enabled:
+            return
+        session = self.conversation_session
+        self.conversation_session = None
+        self.conversation_mode_enabled = False
+        if session is not None:
+            try:
+                close = getattr(session, "close", None)
+                if callable(close):
+                    close()
+            except Exception as e:
+                logger.warning(f"[CONV] conversation session close error: {e}")
+        self._restore_wakeword()
+        publish(Events.CONVERSATION_MODE_CHANGED, {"enabled": False})
+        logger.info("[CONV] conversation mode OFF — wakeword restored")
+
+    def _restore_wakeword(self):
+        """Bring the wakeword pipeline back up after conversation mode or a failed
+        handoff: reopen the mic and restart detection; hard-reset if that throws.
+        Never raises — restoring Sapphire's ears is the one thing that must not fail."""
+        from core.wakeword.wakeword_null import NullWakeWordDetector
+        if isinstance(self.wake_detector, NullWakeWordDetector):
+            return
+        try:
+            self.wake_word_recorder.start_recording()
+            self.wake_detector.start_listening()
+        except Exception as e:
+            logger.error(f"[CONV] wakeword restore failed ({e}); hard reset via toggle_wakeword")
+            try:
+                self.toggle_wakeword(True)
+            except Exception as e2:
+                logger.error(f"[CONV] hard reset ALSO failed: {e2}")
 
     def reload_wakeword_model(self, model_name=None):
         """Hot-swap the wake word model on a live detector.

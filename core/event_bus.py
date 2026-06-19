@@ -203,6 +203,10 @@ class Events:
     
     # Wakeword events
     WAKEWORD_DETECTED = "wakeword_detected"
+
+    # Conversation mode (v3) — fired on enter/exit so the UI reflects state.
+    # Payload: {enabled: bool}.
+    CONVERSATION_MODE_CHANGED = "conversation_mode_changed"
     
     # Tool events
     TOOL_EXECUTING = "tool_executing"
