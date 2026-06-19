@@ -729,8 +729,22 @@ class StreamingChat:
 
                     return
             
-            # If cancelled, don't make another API call — fall through to finally block
+            # If cancelled, KEEP whatever she generated before the interrupt (was:
+            # discard the whole turn — barge-in left a hole in the history). Save the
+            # partial prose as a TEXT assistant message — never a tool_use, so the
+            # tool_use->tool_result contract is untouched. Then fall through. 2026-06-19.
             if self.cancel_flag:
+                partial = (current_content or "").strip()
+                if partial:
+                    save_content = prefill + current_content if has_prefill else current_content
+                    try:
+                        self.main_chat.session_manager.add_assistant_final(
+                            content=save_content,
+                            thinking=current_thinking if current_thinking else None,
+                            metadata=metadata,
+                        )
+                    except Exception as e:
+                        logger.warning(f"[STREAMING] partial save on cancel failed: {e}")
                 return
 
             # Loop exhausted - force final response

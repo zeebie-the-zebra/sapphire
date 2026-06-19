@@ -207,6 +207,11 @@ class Events:
     # Conversation mode (v3) — fired on enter/exit so the UI reflects state.
     # Payload: {enabled: bool}.
     CONVERSATION_MODE_CHANGED = "conversation_mode_changed"
+    # Streaming voice turn → web UI (so a local-mic reply streams in instead of
+    # blobbing). START: {message_id}. CHUNK: {message_id, text}. END: {message_id}.
+    VOICE_TURN_START = "voice_turn_start"
+    VOICE_TURN_CHUNK = "voice_turn_chunk"
+    VOICE_TURN_END = "voice_turn_end"
     
     # Tool events
     TOOL_EXECUTING = "tool_executing"
