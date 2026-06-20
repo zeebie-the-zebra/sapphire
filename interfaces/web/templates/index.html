@@ -288,10 +288,15 @@
                             </div>
                         </div>
 
-                        <!-- Quick toggles -->
+                        <!-- Quick toggles (per-chat) -->
                         <div class="sb-toggles">
                             <button type="button" class="sb-toggle active" id="sb-spice-toggle" data-active="true">Spice &middot; 3</button>
                             <button type="button" class="sb-toggle" id="sb-datetime-toggle" data-active="false">Date/Time</button>
+                        </div>
+                        <!-- System toggles (NOT per-chat): true speech mode + global thinking -->
+                        <div class="sb-toggles">
+                            <button type="button" class="sb-toggle" id="sb-conversation-toggle" data-system data-active="false">Conversation</button>
+                            <button type="button" class="sb-toggle" id="sb-think-toggle" data-system data-active="false">Think</button>
                         </div>
 
                         <!-- Mind Scopes Accordion — populated by shared/scope-dropdowns.js

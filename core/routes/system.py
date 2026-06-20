@@ -930,3 +930,9 @@ async def toggle_true_speech(request: Request, _=Depends(require_login), system=
         }
     mgr.stop()
     return {"status": "ok", "active": mgr.active}
+
+
+@router.get("/api/runtime/true-speech")
+async def get_true_speech(_=Depends(require_login), system=Depends(get_system)):
+    """Current true speech mode state (system-level, ephemeral) — for UI load-state."""
+    return {"enabled": bool(getattr(system, "conversation_mode_enabled", False))}

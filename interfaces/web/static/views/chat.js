@@ -229,8 +229,9 @@ export default {
             }
         };
 
-        // Toggle buttons (Spice, Date/Time)
-        container.querySelectorAll('.sb-toggle').forEach(btn => {
+        // Toggle buttons (Spice, Date/Time) — PER-CHAT (saved via debouncedSave).
+        // [data-system] toggles (Conversation, Think) are excluded here and wired below.
+        container.querySelectorAll('.sb-toggle:not([data-system])').forEach(btn => {
             btn.addEventListener('click', () => {
                 const active = btn.dataset.active !== 'true';
                 btn.dataset.active = active;
@@ -238,6 +239,71 @@ export default {
                 debouncedSave(container);
             });
         });
+
+        // System-level toggles (NOT per-chat). Conversation = true speech mode (runtime
+        // API); Think = global CLAUDE_THINKING_ENABLED (settings batch). Each calls its own
+        // API + reflects state; never touches per-chat settings.
+        const _csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
+        const convBtn = container.querySelector('#sb-conversation-toggle');
+        if (convBtn) {
+            convBtn.addEventListener('click', async () => {
+                const want = convBtn.dataset.active !== 'true';
+                convBtn.dataset.active = want; convBtn.classList.toggle('active', want);
+                try {
+                    const res = await fetch('/api/runtime/true-speech', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': _csrf() },
+                        body: JSON.stringify({ enabled: want }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    const on = data.active === true;
+                    convBtn.dataset.active = String(on); convBtn.classList.toggle('active', on);
+                    if (!res.ok || on !== want) ui.showToast?.(data.note || 'Could not toggle Conversation mode', 'error');
+                } catch (e) {
+                    convBtn.dataset.active = String(!want); convBtn.classList.toggle('active', !want);
+                    ui.showToast?.('Network error toggling Conversation mode', 'error');
+                }
+            });
+        }
+        const thinkBtn = container.querySelector('#sb-think-toggle');
+        if (thinkBtn) {
+            thinkBtn.addEventListener('click', async () => {
+                const want = thinkBtn.dataset.active !== 'true';
+                thinkBtn.dataset.active = want; thinkBtn.classList.toggle('active', want);
+                try {
+                    const res = await fetch('/api/settings/batch', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': _csrf() },
+                        body: JSON.stringify({ settings: { CLAUDE_THINKING_ENABLED: want }, persist: true }),
+                    });
+                    if (!res.ok) {
+                        thinkBtn.dataset.active = String(!want); thinkBtn.classList.toggle('active', !want);
+                        ui.showToast?.('Could not toggle Think', 'error');
+                    }
+                } catch (e) {
+                    thinkBtn.dataset.active = String(!want); thinkBtn.classList.toggle('active', !want);
+                    ui.showToast?.('Network error toggling Think', 'error');
+                }
+            });
+        }
+        // Reflect Conversation state when the backend announces a change (tool / other tab).
+        eventBus.on('conversation_mode_changed', (data) => {
+            const b = container.querySelector('#sb-conversation-toggle');
+            if (!b) return;
+            const on = data?.enabled === true;
+            b.dataset.active = String(on); b.classList.toggle('active', on);
+        });
+        // Initial state for the system toggles (not in per-chat settings).
+        (async () => {
+            try {
+                const r = await fetch('/api/runtime/true-speech');
+                if (r.ok) { const d = await r.json(); setToggle(container, '#sb-conversation-toggle', d.enabled === true, null); }
+            } catch (e) { /* ignore */ }
+            try {
+                const r = await fetch('/api/settings');
+                if (r.ok) { const s = await r.json(); const on = (s.CLAUDE_THINKING_ENABLED ?? s?.settings?.CLAUDE_THINKING_ENABLED) === true; setToggle(container, '#sb-think-toggle', on, null); }
+            } catch (e) { /* ignore */ }
+        })();
 
         // Auto-save on any sidebar input change.
         // EVENT DELEGATION: bind ONCE to the chat-sidebar parent so dynamically-added

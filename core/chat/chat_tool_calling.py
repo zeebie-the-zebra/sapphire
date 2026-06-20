@@ -365,6 +365,28 @@ class ToolCallingEngine:
             except json.JSONDecodeError as e:
                 logger.debug(f"JSON parse failed for raw format: {e}")
 
+        # Format 5: nested-XML pseudo tool call (Llama / llama.cpp / functionary
+        # style) — NO JSON payload; args are <parameter> tags:
+        #   <tool_call><function=NAME><parameter=KEY>VALUE</parameter>...</function></tool_call>
+        # The <tool_call> wrapper is optional (some models emit a bare
+        # <function=...>). Require the </function> close so we never fire on a
+        # partial stream. Lowest precedence — only reached when formats 1-4 miss,
+        # so it can't override a working parse. Added 2026-06-20 after a Discord
+        # user's local model leaked this dialect as raw text (web_search).
+        fn_match = re.search(
+            r'<function\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*>(.*?)</function\s*>',
+            text, re.IGNORECASE | re.DOTALL,
+        )
+        if fn_match:
+            args = {}
+            for pname, pval in re.findall(
+                r'<parameter\s*=\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*>(.*?)</parameter\s*>',
+                fn_match.group(2), re.IGNORECASE | re.DOTALL,
+            ):
+                args[pname] = pval.strip()
+            logger.info(f"[TOOL] Parsed nested-XML tool call: {fn_match.group(1)}")
+            return {"function_call": {"name": fn_match.group(1), "arguments": args}}
+
         return None
 
     def format_tool_calls_for_conversation(self, tool_calls):
