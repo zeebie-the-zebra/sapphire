@@ -230,15 +230,34 @@ async def tts_preview(request: Request, _=Depends(require_login), system=Depends
 
 @router.get("/api/tts/status")
 async def tts_status(request: Request, _=Depends(require_login), system=Depends(get_system)):
-    """Get TTS playback status."""
+    """Get TTS playback status (tts_client OR the conversation-mode sink)."""
     playing = getattr(system.tts, '_is_playing', False)
-    return {"playing": playing}
+    if not playing and getattr(system, "conversation_mode_enabled", False):
+        mgr = getattr(system, "_conversation_manager", None)
+        sink = getattr(getattr(mgr, "driver", None), "_active_sink", None)
+        if sink is not None and getattr(sink, "_is_playing", False):
+            playing = True
+    return {"playing": playing, "tts_playing": playing}
 
 
 @router.post("/api/tts/stop")
 async def tts_stop(request: Request, _=Depends(require_login), system=Depends(get_system)):
-    """Stop TTS playback."""
+    """Stop TTS playback (tts_client + the conversation-mode sink)."""
     system.tts.stop()
+    # Conversation mode plays through PumpkinChunker (a separate sink) and the LLM may
+    # still be streaming — stop both so the UI stop button actually silences her.
+    if getattr(system, "conversation_mode_enabled", False):
+        try:
+            system.cancel_generation()
+        except Exception:
+            pass
+        mgr = getattr(system, "_conversation_manager", None)
+        sink = getattr(getattr(mgr, "driver", None), "_active_sink", None)
+        if sink is not None:
+            try:
+                sink.stop()
+            except Exception:
+                pass
     return {"status": "success"}
 
 

@@ -79,7 +79,7 @@ class ConversationDriver:
             sink = self._ensure_sink()
             sink.start()
             self._active_sink = sink
-            publish(Events.VOICE_TURN_START, {"message_id": message_id})
+            publish(Events.VOICE_TURN_START, {"message_id": message_id, "user_text": text})
 
             stream, sid, chat = self.system.llm_chat.begin_stream()
             try:

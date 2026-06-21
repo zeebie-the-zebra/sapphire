@@ -458,8 +458,30 @@ function initEventBus() {
         ui.showToast(data.message, sev);
     });
 
+    // Voice-turn live streaming: render the local-mic reply into the chat AS it streams,
+    // instead of letting the saved message blob in at the end. While a voice turn is live we
+    // SUPPRESS the MESSAGE_ADDED refresh (it would wipe the live bubble mid-stream);
+    // finishStreaming reconciles with the saved message on END — same as the web-typed path.
+    let _voiceTurnActive = false;
+    eventBus.on('voice_turn_start', (data) => {
+        try {
+            if (data?.user_text) ui.addUserMessage(data.user_text);
+            ui.startStreaming();
+            _voiceTurnActive = true;
+        } catch (e) { console.warn('[VOICE_TURN] start failed', e); }
+    });
+    eventBus.on('voice_turn_chunk', (data) => {
+        if (!_voiceTurnActive) return;
+        try { ui.appendStream(data?.text || ''); } catch (e) { /* ignore */ }
+    });
+    eventBus.on('voice_turn_end', async () => {
+        if (!_voiceTurnActive) return;
+        _voiceTurnActive = false;
+        try { await ui.finishStreaming(); } catch (e) { console.warn('[VOICE_TURN] end failed', e); }
+    });
+
     // Message events
-    eventBus.on(eventBus.Events.MESSAGE_ADDED, () => debouncedRefresh());
+    eventBus.on(eventBus.Events.MESSAGE_ADDED, () => { if (_voiceTurnActive) return; debouncedRefresh(); });
     eventBus.on(eventBus.Events.MESSAGE_REMOVED, () => debouncedRefresh());
     eventBus.on(eventBus.Events.CHAT_CLEARED, () => debouncedRefresh());
 
