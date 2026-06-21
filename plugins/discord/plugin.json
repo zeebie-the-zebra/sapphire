@@ -1,5 +1,6 @@
 {
   "name": "discord",
+  "short_display_name": "Discord",
   "version": "1.0.0",
   "description": "Discord — bot accounts, messaging, daemon listener",
   "author": "sapphire",

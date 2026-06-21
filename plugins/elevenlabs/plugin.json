@@ -1,5 +1,6 @@
 {
   "name": "elevenlabs",
+  "short_display_name": "ElevenLabs",
   "version": "1.0.0",
   "description": "ElevenLabs \u2014 cloud text-to-speech with premium voices",
   "author": "sapphire",

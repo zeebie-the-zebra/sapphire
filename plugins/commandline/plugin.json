@@ -1,5 +1,6 @@
 {
   "name": "commandline",
+  "short_display_name": "Command Line",
   "version": "1.0.0",
   "description": "Command Line — run shell commands on the local machine",
   "author": "sapphire",

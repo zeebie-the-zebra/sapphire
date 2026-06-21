@@ -1,5 +1,6 @@
 {
   "name": "memory",
+  "short_display_name": "Memory",
   "short_name": "Memory System",
   "version": "1.0.0",
   "description": "Long-term memory, knowledge base, goals, and people — Sapphire's Mind",

@@ -7,20 +7,28 @@ Every plugin needs a `plugin.json` in its root folder.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | string | Yes | — | Unique identifier (overrides the folder name if set; folder name is the fallback) |
+| `short_display_name` | string | No | — | **The plugin's display title** in lists & Settings. Keep it **2–4 words** (≤40 chars; clipped past that). This is the ONE field for the name — detail goes in `description`, NOT here. |
 | `version` | string | No | — | Semver (`1.0.0`) |
-| `description` | string | No | — | One-line summary |
+| `description` | string | No | — | One-line summary shown UNDER the title — free prose. **Never used as the title** (that's `short_display_name`). |
 | `author` | string | No | — | Author name |
 | `url` | string | No | — | Project URL (shown in Settings) |
 | `icon` | string | No | — | Emoji icon shown in Settings UI and plugin lists |
 | `emoji` | string | No | — | Alias for `icon` (legacy — prefer `icon`) |
-| `display_name` | string | No | — | Human-friendly name (used as label fallback in apps) |
-| `short_name` | string | No | — | Short title for Settings UI (falls back to `description`) |
+| `display_name` | string | No | — | Legacy fallback for `short_display_name` (also an app label). Prefer `short_display_name`. |
+| `short_name` | string | No | — | Legacy fallback for `short_display_name`. Prefer `short_display_name`. |
 | `priority` | int | No | 50 | Execution order within band (lower = first) |
 | `default_enabled` | bool | No | false | Auto-enable on fresh install |
 | `managed_hide` | bool | No | false | Hide plugin entirely in managed/resale mode |
 | `settingsUI` | string\|null | No | `"auto"` | Controls settings panel: `"auto"` (from manifest schema), `"plugin"` (custom JS), `"core"` (hardcoded), or `null` (none) |
 | `pip_dependencies` | string[] | No | `[]` | Python packages required (pip specifiers, e.g. `["telethon>=1.34", "requests"]`). Checked before loading; missing deps shown in UI with install option |
 | `capabilities` | object | No | — | What the plugin provides (see below) |
+
+### Plugin display title — set `short_display_name`, don't dump prose
+
+The title shown in plugin lists & Settings resolves in this order:
+`short_display_name` → `display_name` → `short_name` → (first clause of `description`, **truncated to 40 chars**) → `name`.
+
+**Set `short_display_name`** (2–4 words, e.g. `"Weather"`, `"Home Assistant"`). The `description` fallback is deliberately truncated — it exists only so legacy plugins don't render a paragraph, NOT as a place to name your plugin. If you set just a long `description`, your title becomes a clipped sentence indistinguishable from the next plugin's; set `short_display_name` and it's a clean, short name.
 
 ## Capabilities
 

@@ -1,5 +1,6 @@
 {
   "name": "piper",
+  "short_display_name": "Piper",
   "version": "1.0.0",
   "description": "Piper — fast local neural TTS for CPU / weak hardware",
   "author": "sapphire",

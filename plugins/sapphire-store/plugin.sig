@@ -2,8 +2,8 @@
   "plugin": "sapphire-store",
   "version": "1.0.0",
   "files": {
-    "plugin.json": "sha256:c63b9f870403be95b8b08cc8f73c015d7a7a4f70afe92fc77e11a5e9932a203b",
+    "plugin.json": "sha256:1580c89d9e206fb0855daca3a4ad3fb270ab42e1f41da638b3bc952abf8316ad",
     "tools/store_tools.py": "sha256:217b5e01bd20d7b7cb1e82af4a37cbc629dc913fccd289cc2678d9a942c8e393"
   },
-  "signature": "8S2irUYWRcIRPBdgixVw+fazgjVq4zku3bZejD32/SjoOcfRLMOtWwaVvtQa3Yhw70dedpQfOXtOEv0OIAG1Cw=="
+  "signature": "YSkM/w2hi2LkAZAbg/eedhFbPC7G5LiIkSZi2CDD0Pi2iN9S51pGMrCd4JVz5mqLWJPrnFaH1Cl2s/J2COB6CQ=="
 }

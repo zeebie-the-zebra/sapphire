@@ -180,22 +180,24 @@ def _settings_to_schema(settings_dict, help_dict=None):
 
 def _generate_manifest(name, module, code):
     """Generate plugin.json manifest from validated module."""
-    # Title from plugin name: weather_lookup → Weather Lookup
-    title = name.replace('_', ' ').title()
+    # short_display_name = the SHORT label shown in plugin lists (weather_lookup
+    # → Weather Lookup). This is the one field that drives the display title; the
+    # old "Title — description" smushing is dead (it produced giant names when
+    # authors wrote prose). 2026-06-21.
+    short_display_name = name.replace('_', ' ').title()[:40]
 
-    # Description from first tool's description (first sentence, capped)
+    # description = the full sentence, shown UNDER the title — free prose, never
+    # the title itself. From the first tool's description (first sentence, capped).
     tool_desc = ''
     if module.TOOLS:
         func = module.TOOLS[0].get('function', {})
-        tool_desc = func.get('description', '').split('.')[0].strip()[:80]
-
-    # Convention: "Title — short description" (API splits on — for display title)
-    description = f"{title} — {tool_desc}" if tool_desc else title
+        tool_desc = func.get('description', '').split('.')[0].strip()[:120]
 
     manifest = {
         "name": name,
         "version": "1.0.0",
-        "description": description,
+        "short_display_name": short_display_name,
+        "description": tool_desc or short_display_name,
         "author": "ai-toolmaker",
         "default_enabled": True,
         "capabilities": {

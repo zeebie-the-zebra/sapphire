@@ -1,5 +1,6 @@
 {
   "name": "image-gen",
+  "short_display_name": "Image Gen",
   "version": "1.0.0",
   "description": "Image Generation — SDXL scene rendering with character descriptions",
   "author": "sapphire",

@@ -1,5 +1,6 @@
 {
   "name": "wordpress",
+  "short_display_name": "WordPress",
   "version": "1.0.0",
   "description": "WordPress - manage posts, pages, users, plugins and settings of a WordPress site via its REST API",
   "author": "sapphire",

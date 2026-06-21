@@ -1,5 +1,6 @@
 {
   "name": "gallery",
+  "short_display_name": "Gallery",
   "version": "1.0.0",
   "description": "Photo Gallery — browse and view the user's image collection",
   "author": "sapphire",

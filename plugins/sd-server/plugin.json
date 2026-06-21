@@ -1,5 +1,6 @@
 {
   "name": "sd-server",
+  "short_display_name": "SD Server",
   "version": "1.1.0",
   "description": "Local image generation via stable-diffusion.cpp (sd-server). Generic — runs Z-Image Turbo by default, swap models per the README. Generate, grid, recreate-by-seed, and a wildcard slideshow.",
   "author": "sapphire",

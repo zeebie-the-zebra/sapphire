@@ -1,5 +1,6 @@
 {
   "name": "telegram",
+  "short_display_name": "Telegram",
   "version": "1.0.0",
   "description": "Telegram — bot and client accounts via Telethon",
   "author": "sapphire",

@@ -1,5 +1,6 @@
 {
   "name": "email",
+  "short_display_name": "Email",
   "version": "1.1.0",
   "description": "Email — read inbox, send to whitelisted contacts via IMAP/SMTP",
   "author": "sapphire",

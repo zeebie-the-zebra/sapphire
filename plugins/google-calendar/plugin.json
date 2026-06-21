@@ -1,5 +1,6 @@
 {
   "name": "google-calendar",
+  "short_display_name": "Google Calendar",
   "version": "1.0.0",
   "description": "Google Calendar — view schedule, add and remove events",
   "author": "sapphire",

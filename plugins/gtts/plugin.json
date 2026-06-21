@@ -1,5 +1,6 @@
 {
   "name": "gtts",
+  "short_display_name": "Google TTS",
   "version": "1.0.0",
   "description": "Google Translate TTS \u2014 free, zero-config text-to-speech",
   "author": "sapphire",

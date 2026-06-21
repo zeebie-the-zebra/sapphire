@@ -183,6 +183,29 @@ def _get_merged_plugins():
     return _enforce_locked(merged)
 
 
+def _cap_title(s: str, n: int = 40) -> str:
+    s = (s or "").strip()
+    return (s[:n].rstrip() + "…") if len(s) > n else s
+
+
+def _plugin_display_title(fields: dict, name: str) -> str:
+    """Resolve a plugin's SHORT display title — never a paragraph.
+
+    Precedence: short_display_name → display_name → short_name → title →
+    (description's first clause, TRUNCATED) → name. The truncation is the safety
+    net: a legacy/third-party plugin that only set a long `description` gets a
+    clipped, readable title instead of a screen-eating run-on. New authors set
+    `short_display_name` — the single documented field. 2026-06-21."""
+    for key in ("short_display_name", "display_name", "short_name", "title"):
+        v = (fields.get(key) or "").strip()
+        if v:
+            return _cap_title(v)
+    desc = (fields.get("description") or "").strip()
+    if desc:
+        return _cap_title(desc.split("—")[0])
+    return name
+
+
 @router.get("/api/webui/plugins")
 async def list_plugins(request: Request, _=Depends(require_login)):
     """List all plugins (core-ui + backend plugins)."""
@@ -196,7 +219,7 @@ async def list_plugins(request: Request, _=Depends(require_login)):
             "name": name,
             "enabled": name in enabled_set,
             "locked": name in LOCKED_PLUGINS,
-            "title": meta.get("title", name),
+            "title": _plugin_display_title(meta, name),
             "showInSidebar": meta.get("showInSidebar", True),
             "collapsible": meta.get("collapsible", True),
             "settingsUI": "core"
@@ -229,11 +252,7 @@ async def list_plugins(request: Request, _=Depends(require_login)):
                     "name": info["name"],
                     "enabled": info.get("enabled", info["name"] in enabled_set),
                     "locked": False,
-                    "title": (
-                        manifest.get("display_name")
-                        or manifest.get("short_name")
-                        or manifest.get("description", info["name"]).split("—")[0].strip()
-                    ),
+                    "title": _plugin_display_title(manifest, info["name"]),
                     "showInSidebar": False,
                     "collapsible": True,
                     "settingsUI": settings_ui,
