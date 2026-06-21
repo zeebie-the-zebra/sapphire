@@ -486,7 +486,7 @@ class PluginLoader:
                         settings_schema=w.get("settings_schema", []) or [],
                         api_version=w.get("api_version", 1),
                     ))
-                logger.info(f"[PLUGINS] Registered {len(widgets)} widget(s) for {name}")
+                logger.debug(f"[PLUGINS] Registered {len(widgets)} widget(s) for {name}")
             except Exception as e:
                 logger.warning(f"[PLUGINS] Widget registration failed for {name}: {e}")
 
@@ -531,7 +531,7 @@ class PluginLoader:
                     logger.error(f"[PLUGINS] Failed to load provider {class_name} for {name}: {e}", exc_info=True)
             if registered:
                 info["registered_providers"] = registered
-                logger.info(f"[PLUGINS] {name}: registered {len(registered)} provider(s)")
+                logger.debug(f"[PLUGINS] {name}: registered {len(registered)} provider(s)")
 
         # Register scheduled tasks with continuity scheduler
         schedules = capabilities.get("schedule", [])
@@ -550,7 +550,7 @@ class PluginLoader:
                         "plugin_dir": str(plugin_dir),
                     })
                     task_ids.append(task["id"])
-                    logger.info(f"[PLUGINS] Registered schedule task '{sched.get('name')}' for {name}")
+                    logger.debug(f"[PLUGINS] Registered schedule task '{sched.get('name')}' for {name}")
                 except Exception as e:
                     logger.error(f"[PLUGINS] Failed to register schedule for {name}: {e}")
             info["schedule_task_ids"] = task_ids
@@ -569,7 +569,7 @@ class PluginLoader:
                         "task_fields": src.get("task_fields", []),
                         "description": src.get("description", ""),
                     } for src in event_sources]
-                logger.info(f"[PLUGINS] Registered {len(event_sources)} event source(s) for {name}")
+                logger.debug(f"[PLUGINS] Registered {len(event_sources)} event source(s) for {name}")
 
             # Load daemon module (start is deferred until scheduler is ready)
             daemon_entry = daemon_config.get("entry")
@@ -1319,7 +1319,7 @@ class PluginLoader:
             compiled = re.compile(f'^{regex_pattern}$')
 
             registered.append((method, compiled, param_names, handler_func))
-            logger.info(f"[PLUGINS] Registered route: {method} /api/plugin/{name}/{path}")
+            logger.debug(f"[PLUGINS] Registered route: {method} /api/plugin/{name}/{path}")
 
         if registered:
             with self._lock:
@@ -1330,7 +1330,7 @@ class PluginLoader:
         with self._lock:
             if name in self._routes:
                 del self._routes[name]
-                logger.info(f"[PLUGINS] Unregistered routes for: {name}")
+                logger.debug(f"[PLUGINS] Unregistered routes for: {name}")
 
     def get_route_handler(self, plugin_name: str, method: str, path: str) -> Optional[Tuple[Callable, dict]]:
         """Find a matching route handler. Returns (handler_func, path_params) or None."""
@@ -1366,7 +1366,7 @@ class PluginLoader:
         """
         with self._lock:
             self._reply_handlers[plugin_name] = handler
-        logger.info(f"[PLUGINS] Registered reply handler for {plugin_name}")
+        logger.debug(f"[PLUGINS] Registered reply handler for {plugin_name}")
 
     def _get_reply_handler(self, source_name: str) -> Optional[Callable]:
         """Find the reply handler for an event source by looking up its plugin."""

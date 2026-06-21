@@ -365,10 +365,7 @@ def get_shutdown_callback():
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """Log incoming requests."""
-    if request.url.path.startswith('/static/'):
-        logger.debug(f"REQ: {request.method} {request.url.path}")
-    else:
-        logger.info(f"REQ: {request.method} {request.url.path}")
+    logger.debug(f"REQ: {request.method} {request.url.path}")
     response = await call_next(request)
     if response.status_code >= 400 and not request.url.path.startswith('/static/'):
         logger.warning(f"RSP: {response.status_code} {request.method} {request.url.path}")

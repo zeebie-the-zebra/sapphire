@@ -125,7 +125,7 @@ class HookRunner:
                 self._hooks[hook_name] = []
             self._hooks[hook_name].append((priority, handler, plugin_name, voice_match))
             self._sorted[hook_name] = False
-        logger.info(f"[HOOKS] Registered {plugin_name}:{handler.__name__} on '{hook_name}' (priority {priority})")
+        logger.debug(f"[HOOKS] Registered {plugin_name}:{handler.__name__} on '{hook_name}' (priority {priority})")
 
     def unregister(self, hook_name: str, plugin_name: str):
         """Remove all handlers for a plugin from a specific hook."""

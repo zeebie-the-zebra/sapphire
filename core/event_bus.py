@@ -83,7 +83,7 @@ class EventBus:
                     except queue.Full:
                         break
         
-        logger.info(f"New subscriber: {sub_id} (replay={replay}) — total subscribers: {len(self._subscribers)}")
+        logger.debug(f"New subscriber: {sub_id} (replay={replay}) — total subscribers: {len(self._subscribers)}")
 
         # Immediate connection event - wakes up client instantly
         # Include boot_version so frontend can detect server restarts
@@ -107,12 +107,12 @@ class EventBus:
                     logger.debug(f"Keepalive #{keepalive_count} for {sub_id}")
                     yield {"type": "keepalive", "timestamp": time.time()}
         except GeneratorExit:
-            logger.info(f"Subscriber {sub_id} generator closed by client")
+            logger.debug(f"Subscriber {sub_id} generator closed by client")
         finally:
             with self._lock:
                 if sub_id in self._subscribers:
                     del self._subscribers[sub_id]
-            logger.info(f"Subscriber disconnected: {sub_id}")
+            logger.debug(f"Subscriber disconnected: {sub_id}")
     
     async def async_subscribe(self, replay: bool = True) -> AsyncGenerator[Dict[str, Any], None]:
         """Async subscribe to events. No threadpool thread consumed."""
@@ -132,7 +132,7 @@ class EventBus:
                     except asyncio.QueueFull:
                         break
 
-        logger.info(f"New async subscriber: {sub_id} (replay={replay}) — total: {len(self._subscribers) + len(self._async_subscribers)}")
+        logger.debug(f"New async subscriber: {sub_id} (replay={replay}) — total: {len(self._subscribers) + len(self._async_subscribers)}")
 
         boot_version = None
         try:
@@ -153,11 +153,11 @@ class EventBus:
                     logger.debug(f"Keepalive #{keepalive_count} for {sub_id}")
                     yield {"type": "keepalive", "timestamp": time.time()}
         except GeneratorExit:
-            logger.info(f"Async subscriber {sub_id} generator closed by client")
+            logger.debug(f"Async subscriber {sub_id} generator closed by client")
         finally:
             with self._lock:
                 self._async_subscribers.pop(sub_id, None)
-            logger.info(f"Async subscriber disconnected: {sub_id}")
+            logger.debug(f"Async subscriber disconnected: {sub_id}")
 
     def subscriber_count(self) -> int:
         """Return current number of subscribers."""

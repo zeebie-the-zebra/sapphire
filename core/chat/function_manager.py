@@ -878,14 +878,14 @@ class FunctionManager:
             if len(enabled_names) == 1 and enabled_names[0] == "all":
                 self.current_toolset_name = "all"
                 self._enabled_tools = self.all_possible_tools.copy()
-                logger.info(f"Ability 'all' - LOADED ALL {len(self._enabled_tools)} FUNCTIONS")
+                logger.debug(f"Ability 'all' - LOADED ALL {len(self._enabled_tools)} FUNCTIONS")
                 return
 
             # Special case: "none" disables all functions
             if len(enabled_names) == 1 and enabled_names[0] == "none":
                 self.current_toolset_name = "none"
                 self._enabled_tools = []
-                logger.info(f"Ability 'none' - all functions disabled")
+                logger.debug(f"Ability 'none' - all functions disabled")
                 return
 
             # Check if this is a module ability name
@@ -894,14 +894,14 @@ class FunctionManager:
                 self.current_toolset_name = ability_name
                 module_info = self.function_modules[ability_name]
                 enabled_names = module_info['available_functions']
-                logger.info(f"Ability '{ability_name}' (module) requesting {len(enabled_names)} functions")
+                logger.debug(f"Ability '{ability_name}' (module) requesting {len(enabled_names)} functions")
 
             # Check if this is a toolset name
             elif len(enabled_names) == 1 and toolset_manager.toolset_exists(enabled_names[0]):
                 toolset_name = enabled_names[0]
                 self.current_toolset_name = toolset_name
                 enabled_names = toolset_manager.get_toolset_functions(toolset_name)
-                logger.info(f"Ability '{toolset_name}' (toolset) requesting {len(enabled_names)} functions")
+                logger.debug(f"Ability '{toolset_name}' (toolset) requesting {len(enabled_names)} functions")
 
             # Single-name input that's NOT a known toolset / module → it's a
             # dangling reference (deleted toolset, plugin removed, stale chat
@@ -950,7 +950,7 @@ class FunctionManager:
                     f"removed/disabled plugin tool): {missing}"
                 )
 
-            logger.info(f"Toolset '{self.current_toolset_name}': {len(self._enabled_tools)}/{expected_count} functions loaded")
+            logger.debug(f"Toolset '{self.current_toolset_name}': {len(self._enabled_tools)}/{expected_count} functions loaded")
             logger.debug(f"Enabled: {actual_names}")
 
     def is_valid_toolset(self, ability_name: str) -> bool:

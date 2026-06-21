@@ -135,24 +135,36 @@ for handler in root_logger.handlers[:]:
 root_logger.addHandler(file_handler)
 root_logger.addHandler(console_handler)
 
-# Quiet down noisy loggers
-logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
+# Quiet down noisy third-party loggers. These flood with wire-level chatter —
+# httpx/httpcore request bytes, telethon MTProto keepalive PINGs (~every 20-30s),
+# discord gateway heartbeats — that drowns Sapphire's own diagnostics and, at
+# volume on slow disks, turns logging into a syscall storm (every record is
+# flushed to disk + stdout). WARNING still surfaces real errors (disconnects,
+# auth failures). Pinned independently of the root level so they stay quiet even
+# when the user flips LOG_LEVEL=DEBUG to debug Sapphire itself.
+_NOISY_LOGGERS = ('uvicorn.access', 'telethon', 'httpx', 'httpcore', 'discord')
+
+def _quiet_noisy_loggers():
+    for _name in _NOISY_LOGGERS:
+        logging.getLogger(_name).setLevel(logging.WARNING)
+
+_quiet_noisy_loggers()
 
 
 def set_log_level(level_name):
     """Hot-apply root logger level. Called on boot with config.LOG_LEVEL and
     via settings reload callback when the user changes the setting.
 
-    uvicorn.access stays pinned at WARNING regardless — HTTP access log noise
-    bleeding back at DEBUG would drown the actual diagnostic content the user
-    flipped to DEBUG to see."""
+    The noisy third-party loggers (_NOISY_LOGGERS) stay pinned at WARNING
+    regardless — their wire-level chatter bleeding back at DEBUG would drown the
+    diagnostic content the user flipped to DEBUG to see."""
     name = (level_name or "INFO").upper()
     level = getattr(logging, name, None)
     if not isinstance(level, int):
         root_logger.warning(f"Unknown log level {level_name!r}; keeping current")
         return
     root_logger.setLevel(level)
-    logging.getLogger('uvicorn.access').setLevel(logging.WARNING)
+    _quiet_noisy_loggers()
     root_logger.info(f"Log level set to {name}")
 
 # Windows: asyncio ProactorEventLoop logs harmless ConnectionResetError on socket cleanup
