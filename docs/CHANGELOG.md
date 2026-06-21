@@ -1,4 +1,8 @@
-# 2.7.8 - Stability
+# 2.7.9 - sd-server plugin
+- Slideshow support in Apps and Sidebar in chat
+- auto gen images with random prompt pieces
+# 2.7.8 - Stability + Pipework
+- Laid piping for conversation mode
 - Added Settings > System > integrity check (verify/repair)
 # 2.7.7 - Piper TTS + Wordpress
 - New plugin-save hook
