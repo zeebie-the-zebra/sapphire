@@ -19,7 +19,7 @@ from typing import Dict, Any, List, Optional, Generator
 
 from openai import OpenAI
 
-from .base import BaseProvider, LLMResponse, ToolCall, retry_on_rate_limit
+from .base import BaseProvider, LLMResponse, ToolCall, retry_on_rate_limit, server_answered
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +81,16 @@ class OpenAIResponsesProvider(BaseProvider):
         return True
     
     def health_check(self) -> bool:
-        """Check endpoint health via models.list()."""
+        """Reachability probe via models.list(). ANY HTTP status response (4xx/5xx)
+        counts as reachable — a broken /models doesn't mean completions are down.
+        Only a genuine connection/DNS/timeout error marks it unhealthy."""
         try:
             self._client.models.list(timeout=self.health_check_timeout)
             return True
         except Exception as e:
+            if server_answered(e):
+                logger.debug(f"Health check: {self.base_url} /models errored ({e}) but server is reachable")
+                return True
             logger.debug(f"Health check failed for {self.base_url}: {e}")
             return False
     

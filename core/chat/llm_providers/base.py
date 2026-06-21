@@ -24,6 +24,20 @@ RETRY_STATUS_CODES = {429, 529}  # Rate limit codes (429 standard, 529 Anthropic
 T = TypeVar('T')
 
 
+def server_answered(exc: Exception) -> bool:
+    """True if an API-client exception means the HOST RESPONDED with an HTTP status
+    (4xx/5xx) — i.e. the server is REACHABLE even if the probed endpoint (e.g.
+    /models) is broken. False for connection/DNS/timeout errors (genuinely
+    unreachable). Health checks use this so a flaky side-endpoint (e.g. Fireworks'
+    /models returning 500) doesn't falsely mark a working provider dead — the
+    actual completion is the real source of truth. 2026-06-21."""
+    try:
+        import openai
+        return isinstance(exc, openai.APIStatusError)
+    except Exception:
+        return False
+
+
 def retry_on_rate_limit(func: Callable[..., T], *args, **kwargs) -> T:
     """
     Execute a function with exponential backoff retry on rate limit errors.
@@ -165,7 +179,7 @@ class BaseProvider(ABC):
         self.base_url = llm_config.get('base_url', '')
         self.api_key = llm_config.get('api_key', '')
         self.model = llm_config.get('model', '')
-        self.health_check_timeout = llm_config.get('timeout', 0.5)
+        self.health_check_timeout = llm_config.get('timeout', 3.0)
         self.request_timeout = request_timeout
         self._client = None
     

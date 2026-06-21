@@ -19,7 +19,7 @@ from typing import Dict, Any, List, Optional, Generator
 
 from openai import OpenAI
 
-from .base import BaseProvider, LLMResponse, ToolCall, retry_on_rate_limit
+from .base import BaseProvider, LLMResponse, ToolCall, retry_on_rate_limit, server_answered
 
 logger = logging.getLogger(__name__)
 
@@ -158,21 +158,25 @@ class OpenAICompatProvider(BaseProvider):
         return self._client
     
     def health_check(self) -> bool:
-        """Check endpoint health via models.list(), with HTTP fallback."""
+        """Reachability probe via models.list(). ANY HTTP status response (4xx/5xx)
+        counts as reachable — a broken /models (e.g. Fireworks 500 'Error listing
+        deployed models', or xAI/Grok not exposing /models) does NOT mean completions
+        are down, and the older code wrongly hard-failed chat on it. Only a genuine
+        connection/DNS/timeout error marks the provider unhealthy."""
         try:
             self._client.models.list(timeout=self.health_check_timeout)
             return True
         except Exception as e:
-            # Some APIs (xAI/Grok) don't support /models but are otherwise fine.
-            # If we got an HTTP error (not a connection error), the server is alive.
-            err_str = str(e).lower()
-            if '400' in err_str or '403' in err_str or '404' in err_str or '405' in err_str:
-                logger.debug(f"Health check: {self.base_url} doesn't support /models but server is reachable")
+            # Host answered with an HTTP status (incl. 500/401/429) → it's reachable.
+            # Let the actual completion be the judge of whether it truly works.
+            if server_answered(e):
+                logger.debug(f"Health check: {self.base_url} /models errored ({e}) but server is reachable")
                 return True
 
             logger.debug(f"Health check failed for {self.base_url}: {e}")
 
-            # Auto-correct missing /v1 suffix (common with llama.cpp, Ollama, etc.)
+            # Genuinely unreachable (connection/timeout) — auto-correct a missing
+            # /v1 suffix (common with llama.cpp, Ollama, etc.) and retry once.
             base = self.base_url.rstrip('/')
             if not base.endswith('/v1'):
                 corrected = base + '/v1'
