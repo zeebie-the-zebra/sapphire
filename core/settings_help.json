@@ -101,6 +101,22 @@
     "short": "Detection confidence threshold (0.0-1.0)",
     "long": "Minimum confidence score required to trigger wake word detection. Lower values (0.3-0.4) are more sensitive but may cause false positives. Higher values (0.6-0.8) require clearer pronunciation but reduce false triggers. Default 0.5 is a good balance for most environments."
   },
+  "CONVERSATION_VAD_THRESHOLD": {
+    "short": "Speech confidence to count as you talking (0.0-1.0)",
+    "long": "How confidently silero must classify audio as speech before conversation mode treats it as you talking. Raise it (0.6-0.7) to reject keyboard noise, background TV, and quiet sounds; lower it if it misses your soft speech. Default 0.5."
+  },
+  "CONVERSATION_BARGE_HOLD_MS": {
+    "short": "Sustained speech (ms) before you interrupt her",
+    "long": "How long continuous speech must last during her reply before it counts as a barge-in and cuts her off. Raise it (150-250) so keyboard bursts or coughs don't interrupt her; lower it for snappier interrupts. Default 90ms."
+  },
+  "CONVERSATION_MIN_SPEECH_MS": {
+    "short": "Shortest utterance (ms) that starts a turn",
+    "long": "Speech shorter than this is discarded as a blip, not sent to the LLM. Raise it (250-400) to reject clicks/taps; lower it to catch very short replies like 'yes'. Default 200ms."
+  },
+  "CONVERSATION_ENDPOINT_SILENCE_MS": {
+    "short": "Pause (ms) before she decides you're done",
+    "long": "How long you must be silent after speaking before conversation mode sends your utterance to the LLM. Raise it (900-1200) if it cuts you off mid-thought; lower it for faster responses. Default 700ms."
+  },
   "WAKEWORD_FRAMEWORK": {
     "short": "Inference framework (onnx or tflite)",
     "long": "The inference backend for wake word detection. 'onnx' works on all platforms including Windows. 'tflite' is Linux-only but may be slightly faster on some ARM devices. Use 'onnx' unless you have a specific reason to use tflite."

@@ -695,6 +695,9 @@ class SettingsManager:
             'BACKUPS_KEEP_MONTHLY', 'BACKUPS_KEEP_MANUAL',
             # Setup wizard progress
             'SETUP_WIZARD_STEP',
+            # Conversation (true speech) mode tunables — read fresh on each activation
+            'CONVERSATION_VAD_THRESHOLD', 'CONVERSATION_BARGE_HOLD_MS',
+            'CONVERSATION_MIN_SPEECH_MS', 'CONVERSATION_ENDPOINT_SILENCE_MS',
         }
         
         # Everything else requires restart (TTS, STT, modules, etc. are initialized at startup)

@@ -4,8 +4,10 @@ Ties the driver + VAD gate + front-door to the fail-safe handoff. `start_local`
 enters true speech mode using the local mic (headphone tier); `stop` exits and
 restores wakeword. One manager per system; lives on the VoiceChatSystem.
 
-The gate (silero) and source_factory are injectable so this is unit-testable
-without loading the VAD model or opening a real mic.
+The engine/gate tunables (VAD threshold, barge-hold, min-speech, endpoint-silence)
+are read FRESH from settings on each `start_local`, so changing them in
+Settings > Conversation takes effect on the next activation — no restart. The gate
+and source_factory are injectable so this is unit-testable without silero or a mic.
 """
 import logging
 
@@ -17,21 +19,22 @@ logger = logging.getLogger(__name__)
 class ConversationManager:
     def __init__(self, system, gate=None, source_factory=None):
         self.system = system
-        self.driver = ConversationDriver(system)
-        self._gate = gate                       # None -> lazy-load silero on first use
+        self._injected_gate = gate                 # tests inject; prod builds fresh per start
+        self.driver = None                         # built fresh per start_local with tunables
         self._source_factory = source_factory or self._default_local_source
-
-    def _ensure_gate(self):
-        if self._gate is None:
-            from core.conversation.vad import SpeechGate
-            self._gate = SpeechGate()
-        return self._gate
 
     def _default_local_source(self, driver, gate):
         from core.conversation.local_source import LocalMicSource
         src = LocalMicSource(driver, gate)
-        src.start()                              # raises on failure -> handoff restores wakeword
+        src.start()                                # raises on failure -> handoff restores wakeword
         return src
+
+    def _build_gate(self):
+        if self._injected_gate is not None:
+            return self._injected_gate
+        import config
+        from core.conversation.vad import SpeechGate
+        return SpeechGate(threshold=float(getattr(config, "CONVERSATION_VAD_THRESHOLD", 0.5)))
 
     @property
     def active(self):
@@ -41,7 +44,15 @@ class ConversationManager:
         """Enter true speech mode on the local mic. Returns True if active."""
         if self.active:
             return True
-        gate = self._ensure_gate()
+        import config
+        # Rebuild driver + gate from current settings so tuning applies without restart.
+        self.driver = ConversationDriver(
+            self.system,
+            endpoint_silence_ms=int(getattr(config, "CONVERSATION_ENDPOINT_SILENCE_MS", 700)),
+            min_speech_ms=int(getattr(config, "CONVERSATION_MIN_SPEECH_MS", 200)),
+            barge_hold_ms=int(getattr(config, "CONVERSATION_BARGE_HOLD_MS", 90)),
+        )
+        gate = self._build_gate()
 
         def acquire():
             return self._source_factory(self.driver, gate)
@@ -53,4 +64,5 @@ class ConversationManager:
     def stop(self):
         """Exit true speech mode and restore wakeword (idempotent)."""
         self.system.exit_conversation_mode()
-        self.driver.reset()
+        if self.driver is not None:
+            self.driver.reset()
