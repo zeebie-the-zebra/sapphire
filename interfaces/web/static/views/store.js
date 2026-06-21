@@ -638,7 +638,7 @@ function bindEvents() {
         if (e.target.classList.contains('store-search')) {
             clearTimeout(searchTimeout);
             const q = e.target.value;
-            searchTimeout = setTimeout(() => setSearch(q), 500);
+            searchTimeout = setTimeout(() => setSearch(q), 800);
         }
     });
 
