@@ -65,6 +65,36 @@ def _expand_prompt(prompt, cfg):
     return out
 
 
+_ASPECT_DIMS = {
+    "square": (1024, 1024),
+    "portrait": (832, 1216),
+    "landscape": (1216, 832),
+}
+
+
+def pick_aspect_dims(aspects):
+    """Pick a random aspect from the allowed list -> (name, (w, h)). Empty -> square."""
+    choices = [a for a in (aspects or []) if a in _ASPECT_DIMS] or ["square"]
+    name = random.choice(choices)
+    return name, _ASPECT_DIMS[name]
+
+
+def assemble_slideshow_prompt(slots, cfg, expand=True):
+    """Wildcards assembly: slots = [{"name":.., "options":[str]}, ...]. Pick one
+    random non-empty line per slot, join with commas, then run the name-swap +
+    static-keyword expansion (unless expand=False). Returns the prompt string."""
+    parts = []
+    for slot in (slots or []):
+        opts = [o.strip() for o in (slot.get("options") or [])
+                if isinstance(o, str) and o.strip()]
+        if opts:
+            parts.append(random.choice(opts))
+    raw = ", ".join(parts)
+    if not raw:
+        return ""
+    return _expand_prompt(raw, cfg) if expand else raw
+
+
 def _settings(plugin_settings=None):
     s = dict(_DEFAULTS)
     if plugin_settings:
@@ -72,7 +102,7 @@ def _settings(plugin_settings=None):
     else:
         try:
             from core.plugin_loader import plugin_loader
-            stored = plugin_loader.get_plugin_settings("z-image") or {}
+            stored = plugin_loader.get_plugin_settings("sd-server") or {}
             s.update({k: v for k, v in stored.items() if v is not None})
         except Exception:
             pass

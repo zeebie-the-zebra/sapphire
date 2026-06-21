@@ -131,3 +131,46 @@ def generate(**kwargs):
         "params": {"width": width, "height": height, "steps": steps,
                    "cfg_scale": cfg_scale, "negative": negative, "expanded": expand},
     }
+
+
+# POST /api/plugin/sd-server/slideshow/preview   body: {slots, expand}
+def slideshow_preview(**kwargs):
+    """Assemble a random prompt from the slots and return it as TEXT — no GPU.
+    Powers the Studio 'Go/Preview' button so users can test slot combos cheaply."""
+    body = kwargs.get("body") or {}
+    zt = _tools()
+    cfg = zt._settings(kwargs.get("settings"))
+    prompt = zt.assemble_slideshow_prompt(body.get("slots"), cfg, expand=bool(body.get("expand", True)))
+    if not prompt:
+        return {"success": False, "error": "No slot options to assemble a prompt"}
+    return {"success": True, "prompt": prompt}
+
+
+# POST /api/plugin/sd-server/slideshow/next   body: {slots, aspects, expand}
+def slideshow_next(**kwargs):
+    """Assemble a random prompt, pick a random allowed aspect, generate ONE image.
+    The slideshow loop (Studio or the sidebar Reel) calls this on its cooldown timer."""
+    body = kwargs.get("body") or {}
+    zt = _tools()
+    cfg = zt._settings(kwargs.get("settings"))
+    prompt = zt.assemble_slideshow_prompt(body.get("slots"), cfg, expand=bool(body.get("expand", True)))
+    if not prompt:
+        return {"success": False, "error": "No slot options to assemble a prompt"}
+    aspect, (w, h) = zt.pick_aspect_dims(body.get("aspects"))
+    steps = int(cfg.get("default_steps", 8))
+    cfg_scale = float(cfg.get("default_cfg", 1.0))
+    negative = cfg.get("default_negative", "")
+    seed = random.randint(1, 2**31 - 1)
+    api_url = cfg.get("api_url", "http://127.0.0.1:7861")
+    timeout = int(cfg.get("timeout", 180))
+    payload = {"prompt": prompt, "negative_prompt": negative, "steps": steps,
+               "cfg_scale": cfg_scale, "width": w, "height": h, "seed": seed, "batch_size": 1}
+    t0 = time.time()
+    try:
+        raw = zt._call_sdserver(api_url, payload, timeout)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    return {"success": True,
+            "image": "data:image/png;base64," + base64.b64encode(raw).decode(),
+            "prompt": prompt, "seed": seed, "aspect": aspect,
+            "width": w, "height": h, "elapsed": round(time.time() - t0, 1)}

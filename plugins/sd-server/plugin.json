@@ -1,7 +1,7 @@
 {
-  "name": "z-image",
-  "version": "1.0.0",
-  "description": "Z-Image Turbo — fast local image generation via sd-server (stable-diffusion.cpp). Generate several at once, see them in a labeled grid, and recreate any exactly by seed.",
+  "name": "sd-server",
+  "version": "1.1.0",
+  "description": "Local image generation via stable-diffusion.cpp (sd-server). Generic — runs Z-Image Turbo by default, swap models per the README. Generate, grid, recreate-by-seed, and a wildcard slideshow.",
   "author": "sapphire",
   "icon": "🖼️",
   "priority": 50,
@@ -9,15 +9,23 @@
   "settingsUI": "plugin",
   "capabilities": {
     "app": {
-      "label": "Z-Image Studio",
+      "label": "Image Studio",
       "icon": "🖼️",
-      "description": "Generate images directly — tune prompts, CFG, seed and steps in real time",
+      "description": "Generate images directly — tune prompts, CFG, seed and steps in real time; run a wildcard slideshow",
       "nav": false
+    },
+    "sidebar_accordion": {
+      "title": "Reel",
+      "icon": "🎞️",
+      "content": "sidebar.html",
+      "script": "sidebar.js"
     },
     "tools": ["tools/zimage_tools.py"],
     "routes": [
       {"method": "POST", "path": "test", "handler": "routes/api.py:test_connection"},
-      {"method": "POST", "path": "generate", "handler": "routes/api.py:generate"}
+      {"method": "POST", "path": "generate", "handler": "routes/api.py:generate"},
+      {"method": "POST", "path": "slideshow/preview", "handler": "routes/api.py:slideshow_preview"},
+      {"method": "POST", "path": "slideshow/next", "handler": "routes/api.py:slideshow_next"}
     ],
     "settings": [
       {

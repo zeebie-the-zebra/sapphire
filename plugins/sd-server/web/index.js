@@ -61,7 +61,7 @@ async function testConnection(container) {
 
   btn.disabled = true; btn.textContent = 'Testing...'; btn.className = 'zi-test-btn';
   try {
-    const res = await fetch('/api/plugin/z-image/test', {
+    const res = await fetch('/api/plugin/sd-server/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
@@ -194,17 +194,17 @@ function getFormSettings(container) {
 }
 
 export default {
-  name: 'z-image',
+  name: 'sd-server',
   init(container) {
     injectStyles();
     registerPluginSettings({
-      id: 'z-image',
-      name: 'Z-Image',
+      id: 'sd-server',
+      name: 'Image (sd-server)',
       icon: '🖼️',
-      helpText: 'Z-Image Turbo via sd-server. The AI writes configured names, swapped for physical descriptions.',
+      helpText: 'stable-diffusion.cpp (sd-server) — runs Z-Image Turbo by default. The AI writes configured names, swapped for physical descriptions.',
       render: renderForm,
-      load: async () => pluginsAPI.getSettings('z-image'),
-      save: (settings) => pluginsAPI.saveSettings('z-image', settings),
+      load: async () => pluginsAPI.getSettings('sd-server'),
+      save: (settings) => pluginsAPI.saveSettings('sd-server', settings),
       getSettings: getFormSettings,
     });
   },
