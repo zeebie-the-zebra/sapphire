@@ -10,6 +10,7 @@ let _busy = false;
 // slideshow state
 let _profiles = [];
 let _active = 0;
+let _genDefaults = {};   // plugin-settings gen defaults, for placeholders + inherit
 let _running = false;
 let _timer = null;
 let _inflight = false;
@@ -22,6 +23,14 @@ const CSRF = () => document.querySelector('meta[name="csrf-token"]')?.content ||
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Sampler/scheduler dropdowns for real-time tuning. Blank "(default)" = fall back
+// to the saved plugin setting (backend: body.sampler_name || settings.default_sampler).
+const SAMPLERS = ['', 'euler a', 'euler', 'heun', 'dpm2', 'dpm++ 2m', 'lcm', 'ddim',
+                  'res multistep', 'res 2s', 'euler_cfg_pp', 'euler_a_cfg_pp'];
+const SCHEDULERS = ['', 'karras', 'exponential', 'discrete', 'sgm_uniform', 'ays', 'gits'];
+const OPTS = (vals, sel) => vals.map(v =>
+    `<option value="${esc(v)}"${v === (sel || '') ? ' selected' : ''}>${v || '(default)'}</option>`).join('');
+
 const DEFAULT_PROFILE = () => ({
     name: 'Default',
     slots: [
@@ -33,6 +42,8 @@ const DEFAULT_PROFILE = () => ({
     interval_sec: 20,
     aspects: ['square'],
     expand: true,
+    // Gen overrides — blank = inherit the plugin Settings defaults.
+    steps: '', cfg_scale: '', negative_prompt: '', sampler_name: '', scheduler: '',
 });
 
 export async function render(container) {
@@ -54,9 +65,10 @@ export async function render(container) {
         .zis-field { display: flex; flex-direction: column; gap: 4px; }
         .zis-field.grow { flex: 1 1 100%; }
         .zis-field label { font-size: 12px; color: var(--text-dim, #9aa); }
-        .zis-field input, .zis-field textarea {
+        .zis-field input, .zis-field textarea, .zis-field select {
             background: var(--bg, #111); color: var(--text, #eee);
             border: 1px solid var(--border, #333); border-radius: 6px; padding: 7px 9px; font: inherit; }
+        .zis-field select option { background: var(--bg, #111); color: var(--text, #eee); }
         .zis-field textarea { min-height: 96px; resize: vertical; }
         .zis-field.w90 input { width: 84px; }
         .zis-check { display: flex; align-items: center; gap: 7px; font-size: 13px; margin-top: 12px; }
@@ -128,6 +140,10 @@ export async function render(container) {
                 <div class="zis-field w90"><label>Height</label><input id="zis-h" type="number" step="64" placeholder="1024"></div>
                 <div class="zis-field grow"><label>Seed (blank = random)</label><input id="zis-seed" type="text" placeholder="random"></div>
               </div>
+              <div class="zis-row">
+                <div class="zis-field grow"><label>Sampler</label><select id="zis-sampler">${OPTS(SAMPLERS, '')}</select></div>
+                <div class="zis-field grow"><label>Scheduler</label><select id="zis-scheduler">${OPTS(SCHEDULERS, '')}</select></div>
+              </div>
               <div class="zis-field grow" style="margin-top:10px;">
                 <label>Negative prompt</label>
                 <input id="zis-neg" type="text" placeholder="(inert at CFG 1.0)">
@@ -168,6 +184,16 @@ export async function render(container) {
                 </div>
               </div>
               <label class="zis-check"><input id="sl-expand" type="checkbox" checked> Expand names + keywords</label>
+              <div class="zis-row" style="margin-top:10px;">
+                <div class="zis-field w90"><label>Steps</label><input id="sl-steps" type="number" min="1"></div>
+                <div class="zis-field w90"><label>CFG</label><input id="sl-cfg" type="number" step="0.1"></div>
+                <div class="zis-field grow"><label>Negative prompt</label><input id="sl-neg" type="text"></div>
+              </div>
+              <div class="zis-row">
+                <div class="zis-field grow"><label>Sampler</label><select id="sl-sampler">${OPTS(SAMPLERS, '')}</select></div>
+                <div class="zis-field grow"><label>Scheduler</label><select id="sl-scheduler">${OPTS(SCHEDULERS, '')}</select></div>
+              </div>
+              <div class="zis-hint" style="margin-top:6px;">Blank = use Settings defaults (shown as placeholders). Negative prompts only bite at CFG &gt; 1 — raise CFG for SDXL/Pony.</div>
               <button class="zis-btn sec" id="sl-preview">Preview prompt</button>
               <button id="sl-go" class="zis-btn">▶ Start slideshow</button>
             </div>
@@ -231,6 +257,7 @@ async function generate() {
         steps: $('#zis-steps').value, cfg_scale: $('#zis-cfg').value,
         width: $('#zis-w').value, height: $('#zis-h').value,
         seed: $('#zis-seed').value.trim(), negative_prompt: $('#zis-neg').value,
+        sampler_name: $('#zis-sampler').value, scheduler: $('#zis-scheduler').value,
         expand: $('#zis-expand').checked,
     };
     _busy = true;
@@ -286,6 +313,10 @@ async function loadProfiles() {
         const r = await fetch(SET_URL);
         const d = await r.json();
         const s = d.settings || d || {};
+        _genDefaults = {
+            steps: s.default_steps, cfg: s.default_cfg, negative: s.default_negative,
+            sampler: s.default_sampler, scheduler: s.default_scheduler,
+        };
         _profiles = Array.isArray(s.slideshow_profiles) && s.slideshow_profiles.length
             ? s.slideshow_profiles : [DEFAULT_PROFILE()];
         _active = Math.max(0, Math.min(parseInt(s.slideshow_active) || 0, _profiles.length - 1));
@@ -333,6 +364,17 @@ function applyProfileToUI(p) {
     _container.querySelector('#sl-expand').checked = p.expand !== false;
     const asp = new Set(p.aspects && p.aspects.length ? p.aspects : ['square']);
     _container.querySelectorAll('.sl-asp-cb').forEach(cb => { cb.checked = asp.has(cb.value); });
+    // Gen overrides: value from profile (blank = inherit), placeholder = settings default.
+    const g = _genDefaults || {};
+    const ph = (sel, v) => { const el = _container.querySelector(sel); if (el && v != null && v !== '') el.placeholder = String(v); };
+    _container.querySelector('#sl-steps').value = p.steps ?? '';
+    _container.querySelector('#sl-cfg').value = p.cfg_scale ?? '';
+    _container.querySelector('#sl-neg').value = p.negative_prompt ?? '';
+    _container.querySelector('#sl-sampler').value = p.sampler_name || '';
+    _container.querySelector('#sl-scheduler').value = p.scheduler || '';
+    ph('#sl-steps', g.steps ?? 8);
+    ph('#sl-cfg', g.cfg ?? 1.0);
+    ph('#sl-neg', g.negative || '(settings default)');
 }
 
 function readUIProfile() {
@@ -349,6 +391,11 @@ function readUIProfile() {
         interval_sec: Math.max(2, parseInt(_container.querySelector('#sl-interval').value) || 20),
         aspects: aspects.length ? aspects : ['square'],
         expand: _container.querySelector('#sl-expand').checked,
+        steps: _container.querySelector('#sl-steps').value.trim(),
+        cfg_scale: _container.querySelector('#sl-cfg').value.trim(),
+        negative_prompt: _container.querySelector('#sl-neg').value,
+        sampler_name: _container.querySelector('#sl-sampler').value,
+        scheduler: _container.querySelector('#sl-scheduler').value,
     };
 }
 
@@ -428,7 +475,9 @@ async function slideNext() {
     try {
         const r = await fetch('/api/plugin/sd-server/slideshow/next', {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
-            body: JSON.stringify({ slots: p.slots, aspects: p.aspects, expand: p.expand }),
+            body: JSON.stringify({ slots: p.slots, aspects: p.aspects, expand: p.expand,
+                steps: p.steps, cfg_scale: p.cfg_scale, negative_prompt: p.negative_prompt,
+                sampler_name: p.sampler_name, scheduler: p.scheduler }),
         });
         const d = await r.json();
         if (d.success) { showNow(d); pushRing(d); setStatus(`${d.aspect} · ${d.elapsed}s · seed ${d.seed}`); }

@@ -30,6 +30,8 @@ _DEFAULTS = {
     "max_count": 6,
     "default_steps": 8,
     "default_cfg": 1.0,
+    "default_sampler": "",
+    "default_scheduler": "",
     "default_negative": "",
     "default_width": 1024,
     "default_height": 1024,
@@ -107,6 +109,20 @@ def _settings(plugin_settings=None):
         except Exception:
             pass
     return s
+
+
+def _apply_sampler(payload, sampler, scheduler):
+    """Inject sampler_name/scheduler into a txt2img payload — but only when set.
+    Blank = omit the key so sd-server uses its own default. This is what makes
+    the plugin model-agnostic: Z-Image Turbo runs fine with both blank; for
+    SDXL/Pony the user sets e.g. sampler='dpm++ 2m', scheduler='karras'."""
+    sampler = (sampler or "").strip()
+    scheduler = (scheduler or "").strip()
+    if sampler:
+        payload["sampler_name"] = sampler
+    if scheduler:
+        payload["scheduler"] = scheduler
+    return payload
 
 
 def _build_description(cfg):
@@ -268,13 +284,15 @@ def _exec_generate(arguments, plugin_settings=None):
     except (TypeError, ValueError):
         count = 1
 
-    width = int(arguments.get("width") or cfg.get("default_width") or 1024)
-    height = int(arguments.get("height") or cfg.get("default_height") or 1024)
-    steps = int(arguments.get("steps") or cfg.get("default_steps", 8))
-    cfg_scale = float(arguments.get("cfg_scale") if arguments.get("cfg_scale") is not None else cfg.get("default_cfg", 1.0))
-    negative = arguments.get("negative_prompt")
-    if negative is None:
-        negative = cfg.get("default_negative", "")
+    # Gen params come from SETTINGS only. The AI tool deliberately can't set
+    # steps/cfg/size/sampler — they're not in the schema, and sourcing them here
+    # (not from arguments) also ignores any a model hallucinates. The AI controls
+    # prompt / count / seed / view; everything else is the user's UI settings.
+    width = int(cfg.get("default_width") or 1024)
+    height = int(cfg.get("default_height") or 1024)
+    steps = int(cfg.get("default_steps", 8))
+    cfg_scale = float(cfg.get("default_cfg", 1.0))
+    negative = cfg.get("default_negative", "")
     api_url = cfg.get("api_url", _DEFAULTS["api_url"])
     timeout = int(cfg.get("timeout", 180))
 
@@ -300,6 +318,7 @@ def _exec_generate(arguments, plugin_settings=None):
             "seed": seed,
             "batch_size": 1,
         }
+        _apply_sampler(payload, cfg.get("default_sampler"), cfg.get("default_scheduler"))
         try:
             raw_images.append(_call_sdserver(api_url, payload, timeout))
         except Exception as e:

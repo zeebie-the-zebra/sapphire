@@ -48,14 +48,28 @@
         "type": "number",
         "label": "Default steps",
         "default": 8,
-        "help": "Z-Image Turbo is tuned for 8 steps."
+        "help": "Sampling steps. Match your model: Z-Image Turbo ~8, SDXL/Pony ~25-30."
       },
       {
         "key": "default_cfg",
         "type": "number",
         "label": "Default CFG scale",
         "default": 1.0,
-        "help": "Z-Image Turbo wants cfg ~1.0."
+        "help": "Match your model: Z-Image Turbo ~1.0, SDXL/Pony ~5-7."
+      },
+      {
+        "key": "default_sampler",
+        "type": "string",
+        "label": "Sampler",
+        "default": "",
+        "help": "Sampler name. Blank = let sd-server pick (fine for Z-Image Turbo). SDXL/Pony: 'dpm++ 2m'. Others: 'euler a', 'euler', 'heun', 'dpm2', 'lcm', 'ddim'. Live list at /sdapi/v1/samplers."
+      },
+      {
+        "key": "default_scheduler",
+        "type": "string",
+        "label": "Scheduler",
+        "default": "",
+        "help": "Noise schedule. Blank = server default. SDXL/Pony: 'karras'. Live list at /sdapi/v1/schedulers."
       },
       {
         "key": "default_negative",

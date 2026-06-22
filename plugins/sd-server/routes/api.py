@@ -117,6 +117,10 @@ def generate(**kwargs):
                 "steps": steps, "cfg_scale": cfg_scale,
                 "width": width, "height": height, "seed": seed, "batch_size": 1,
             }
+            # Studio form may override sampler/scheduler in real time; else settings.
+            zt._apply_sampler(payload,
+                              body.get("sampler_name") or cfg.get("default_sampler"),
+                              body.get("scheduler") or cfg.get("default_scheduler"))
             raw = zt._call_sdserver(api_url, payload, timeout)
             images.append("data:image/png;base64," + base64.b64encode(raw).decode())
     except Exception as e:
@@ -157,14 +161,27 @@ def slideshow_next(**kwargs):
     if not prompt:
         return {"success": False, "error": "No slot options to assemble a prompt"}
     aspect, (w, h) = zt.pick_aspect_dims(body.get("aspects"))
-    steps = int(cfg.get("default_steps", 8))
-    cfg_scale = float(cfg.get("default_cfg", 1.0))
-    negative = cfg.get("default_negative", "")
+
+    # Per-slideshow gen overrides; blank/missing inherits the plugin settings.
+    def _bnum(key, default, cast):
+        v = body.get(key)
+        if v in (None, ""):
+            return default
+        try:
+            return cast(v)
+        except (TypeError, ValueError):
+            return default
+    steps = _bnum("steps", int(cfg.get("default_steps", 8)), int)
+    cfg_scale = _bnum("cfg_scale", float(cfg.get("default_cfg", 1.0)), float)
+    negative = body.get("negative_prompt") or cfg.get("default_negative", "")
     seed = random.randint(1, 2**31 - 1)
     api_url = cfg.get("api_url", "http://127.0.0.1:7861")
     timeout = int(cfg.get("timeout", 180))
     payload = {"prompt": prompt, "negative_prompt": negative, "steps": steps,
                "cfg_scale": cfg_scale, "width": w, "height": h, "seed": seed, "batch_size": 1}
+    zt._apply_sampler(payload,
+                      body.get("sampler_name") or cfg.get("default_sampler"),
+                      body.get("scheduler") or cfg.get("default_scheduler"))
     t0 = time.time()
     try:
         raw = zt._call_sdserver(api_url, payload, timeout)

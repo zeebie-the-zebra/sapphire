@@ -51,7 +51,9 @@ async function tick() {
         status('Generating…');
         const r = await fetch('/api/plugin/sd-server/slideshow/next', {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
-            body: JSON.stringify({ slots: p.slots, aspects: p.aspects || ['square'], expand: p.expand !== false }),
+            body: JSON.stringify({ slots: p.slots, aspects: p.aspects || ['square'], expand: p.expand !== false,
+                steps: p.steps, cfg_scale: p.cfg_scale, negative_prompt: p.negative_prompt,
+                sampler_name: p.sampler_name, scheduler: p.scheduler }),
         });
         const d = await r.json();
         if (d.success) {

@@ -10,11 +10,28 @@ const FALLBACK = {
   user_name: '', user_description: '',
   default_steps: 8,
   default_cfg: 1.0,
+  default_sampler: '',
+  default_scheduler: '',
   default_width: 1024,
   default_height: 1024,
   max_count: 6,
   timeout: 180,
 };
+
+// Sampler/scheduler names accepted by sd-server (stable-diffusion.cpp). Blank =
+// omit the field so the server uses its own default — keeps Z-Image Turbo working
+// untouched; SDXL/Pony users pick e.g. 'dpm++ 2m' + 'karras'. The live, build-exact
+// lists are at GET /sdapi/v1/samplers and /sdapi/v1/schedulers.
+const SAMPLERS = ['', 'euler a', 'euler', 'heun', 'dpm2', 'dpm++ 2m', 'lcm', 'ddim',
+                  'res multistep', 'res 2s', 'euler_cfg_pp', 'euler_a_cfg_pp'];
+const SCHEDULERS = ['', 'karras', 'exponential', 'discrete', 'sgm_uniform', 'ays', 'gits'];
+
+function opts(values, selected) {
+  const sel = selected || '';
+  return values.map(v =>
+    `<option value="${v}"${v === sel ? ' selected' : ''}>${v || '(server default)'}</option>`
+  ).join('');
+}
 
 function injectStyles() {
   if (document.getElementById('zi-styles')) return;
@@ -24,10 +41,14 @@ function injectStyles() {
     .zi-form { display:flex; flex-direction:column; gap:16px; }
     .zi-group { display:flex; flex-direction:column; gap:6px; }
     .zi-group label { font-size:13px; font-weight:500; color:var(--text); }
-    .zi-group input, .zi-group textarea {
+    .zi-group input, .zi-group textarea, .zi-group select {
       padding:8px 12px; border:1px solid var(--border); border-radius:6px;
       background:var(--bg-primary); color:var(--text); font-size:13px; }
-    .zi-group input:focus, .zi-group textarea:focus { outline:none; border-color:var(--accent-blue); }
+    .zi-group input:focus, .zi-group textarea:focus, .zi-group select:focus { outline:none; border-color:var(--accent-blue); }
+    /* --bg-primary is undefined in the theme — selects fall back to UA white, so set
+       a real dark bg from a defined var; also style the option popup explicitly. */
+    .zi-group select { background:var(--input-bg,#1a1a1a); }
+    .zi-group select option { background:var(--input-bg,#1a1a1a); color:var(--text,#f5f5f5); }
     .zi-group input.error { border-color:var(--error,#e74c3c); }
     .zi-group textarea { resize:vertical; min-height:54px; }
     .zi-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
@@ -166,6 +187,14 @@ function renderForm(container, settings) {
             <input type="number" id="zi-max" value="${s.max_count}" min="1" max="12"></div>
           <div class="zi-group"></div>
         </div>
+        <div class="zi-row" style="margin-top:8px;">
+          <div class="zi-group"><label for="zi-sampler">Sampler</label>
+            <select id="zi-sampler">${opts(SAMPLERS, s.default_sampler)}</select></div>
+          <div class="zi-group"><label for="zi-scheduler">Scheduler</label>
+            <select id="zi-scheduler">${opts(SCHEDULERS, s.default_scheduler)}</select></div>
+          <div class="zi-group"></div>
+        </div>
+        <div class="zi-hint">Blank = let sd-server pick (fine for Z-Image Turbo). SDXL/Pony: sampler <code>dpm++ 2m</code>, scheduler <code>karras</code>.</div>
       </div>
     </div>
   `;
@@ -187,6 +216,8 @@ function getFormSettings(container) {
     user_description: container.querySelector('#zi-user-desc')?.value || '',
     default_steps: parseInt(container.querySelector('#zi-steps')?.value) || FALLBACK.default_steps,
     default_cfg: parseFloat(container.querySelector('#zi-cfg')?.value) || FALLBACK.default_cfg,
+    default_sampler: container.querySelector('#zi-sampler')?.value || '',
+    default_scheduler: container.querySelector('#zi-scheduler')?.value || '',
     default_width: parseInt(container.querySelector('#zi-width')?.value) || FALLBACK.default_width,
     default_height: parseInt(container.querySelector('#zi-height')?.value) || FALLBACK.default_height,
     max_count: parseInt(container.querySelector('#zi-max')?.value) || FALLBACK.max_count,
