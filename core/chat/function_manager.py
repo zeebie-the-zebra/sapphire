@@ -159,6 +159,75 @@ def scope_defaults_dict() -> dict:
     return result
 
 
+def _coerce_num(val, target):
+    """Coerce a string to int/number. Returns (value, ok). Non-strings pass
+    through untouched (already numeric / not our problem). Never raises."""
+    if not isinstance(val, str):
+        return val, True
+    try:
+        f = float(val.strip())
+    except (ValueError, TypeError):
+        return val, False
+    if target == "integer":
+        return (int(f), True) if f.is_integer() else (val, False)
+    return f, True
+
+
+def _coerce_args(arguments, parameters):
+    """Best-effort coerce LLM-supplied string args to their schema-declared
+    types. Returns (arguments, error). `error` is an LLM-actionable message when
+    a declared-typed arg is present but can't be coerced (e.g. "abc" for an
+    integer), else None. Never raises.
+
+    Only coerces TOWARD a declared non-string type — string params (zip codes,
+    ids) are left untouched. Models, especially local ones (Qwen/GLM), routinely
+    stringify numbers ("2", "1,2,3"); without this they reach the tool as str and
+    crash on numeric comparisons."""
+    props = (parameters or {}).get("properties", {})
+    bad = []
+    for key, val in list(arguments.items()):
+        spec = props.get(key)
+        if not isinstance(spec, dict):
+            continue
+        t = spec.get("type")
+        if t in ("integer", "number"):
+            new, ok = _coerce_num(val, t)
+            if ok:
+                arguments[key] = new
+            elif isinstance(val, str):
+                bad.append((key, t, val))
+        elif t == "boolean" and isinstance(val, str):
+            low = val.strip().lower()
+            if low in ("true", "1", "yes"):
+                arguments[key] = True
+            elif low in ("false", "0", "no"):
+                arguments[key] = False
+        elif t == "array":
+            item_t = (spec.get("items") or {}).get("type")
+            # A string for a numeric array is a comma-list ("1,2,3"); splitting is
+            # safe only because numeric elements never contain commas.
+            seq = [s.strip() for s in val.split(",")] if isinstance(val, str) else val
+            if isinstance(seq, list) and item_t in ("integer", "number"):
+                coerced, failed = [], False
+                for x in seq:
+                    new, ok = _coerce_num(x, item_t)
+                    if not ok:
+                        failed = True
+                        break
+                    coerced.append(new)
+                if failed:
+                    bad.append((key, f"array of {item_t}", val))
+                else:
+                    arguments[key] = coerced
+    if bad:
+        parts = "; ".join(f"'{k}' expects {ty}, got {v!r}" for k, ty, v in bad)
+        return arguments, (
+            f"Error: invalid argument type(s) — {parts}. "
+            f"Re-call the tool with the correct types."
+        )
+    return arguments, None
+
+
 class FunctionManager:
     
     def __init__(self):
@@ -974,6 +1043,17 @@ class FunctionManager:
         """Get list of currently enabled function names (mode-filtered)."""
         return [tool['function']['name'] for tool in self.enabled_tools]
 
+    def _get_tool_parameters(self, function_name):
+        """Return a tool's JSON-Schema `parameters` dict, or None if unavailable.
+        Used by execute_function() to coerce arg types. Reads the internal
+        (pre-mode-filter) list so the schema is found even when the executing
+        tool isn't in the current mode-filtered view."""
+        for tool in self._enabled_tools:
+            fn = tool.get('function', {})
+            if fn.get('name') == function_name:
+                return fn.get('parameters')
+        return None
+
     def has_network_tools_enabled(self) -> bool:
         """Check if any currently enabled tools require network access."""
         enabled_names = set(self.get_enabled_function_names())
@@ -1143,6 +1223,17 @@ class FunctionManager:
             return error_msg
 
         logger.info(f"Executing function: {function_name}")
+
+        # Coerce arg types against the tool schema BEFORE the pre_execute hook,
+        # so plugins and the executor both see typed args. Fixes the common
+        # local-model failure where numbers arrive stringified ("2", "1,2,3").
+        params = self._get_tool_parameters(function_name)
+        if params and isinstance(arguments, dict):
+            arguments, type_err = _coerce_args(arguments, params)
+            if type_err:
+                logger.warning(f"Arg type coercion failed for '{function_name}': {type_err}")
+                self._log_tool_call(function_name, arguments, type_err, time.time() - start_time, False)
+                return type_err
 
         # pre_execute hook — plugins can mutate arguments or skip execution
         from core.hooks import hook_runner, HookEvent

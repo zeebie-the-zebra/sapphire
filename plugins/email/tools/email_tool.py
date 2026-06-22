@@ -610,11 +610,22 @@ def _fetch_and_cache(imap, uids_newest_first, folder, unseen_uids, cache):
     on them by index) and return the messages. Shared by get_inbox + search."""
     messages = []
     raw_messages = []
-    for i, uid in enumerate(uids_newest_first, 1):
-        _, msg_data = imap.uid('fetch', uid, '(RFC822)')
+    kept_uids = []
+    for uid in uids_newest_first:
+        typ, msg_data = imap.uid('fetch', uid, '(RFC822)')
+        # A UID can vanish between SEARCH and FETCH (expunged by another client,
+        # or inside our own cache window). Skip it rather than crash the whole
+        # batch — kept_uids keeps messages/raw/msg_ids index-aligned for the
+        # downstream read/reply/archive/delete-by-index callers.
+        if typ != 'OK' or not msg_data or not isinstance(msg_data[0], tuple):
+            continue
         raw_email = msg_data[0][1]
+        if not raw_email:
+            continue
         msg = email.message_from_bytes(raw_email)
         raw_messages.append(msg)
+        kept_uids.append(uid)
+        i = len(kept_uids)
 
         date_str = msg.get('Date', '')
         try:
@@ -641,7 +652,7 @@ def _fetch_and_cache(imap, uids_newest_first, folder, unseen_uids, cache):
         "folder": folder,
         "messages": messages,
         "raw": raw_messages,
-        "msg_ids": uids_newest_first,
+        "msg_ids": kept_uids,
         "timestamp": time.time(),
     })
     return messages
@@ -712,9 +723,10 @@ def _get_inbox(count=20, folder="inbox"):
             imap.logout()
             return f"Could not find {folder} folder on mail server.", False
 
-        # Use UIDs — stable across sessions (unlike sequence numbers)
-        _, data = imap.uid('search', None, 'ALL')
-        uids = data[0].split()
+        # Use UIDs — stable across sessions (unlike sequence numbers).
+        # _uid_search guards a non-OK / empty response instead of crashing on
+        # data[0].split() when the server returns [None] / 'NO'.
+        uids = _uid_search(imap, None, [])
         if not uids:
             imap.logout()
             cache.update({"folder": folder, "messages": [], "raw": [], "msg_ids": [], "timestamp": time.time()})
@@ -723,8 +735,7 @@ def _get_inbox(count=20, folder="inbox"):
         # Get unseen UIDs (only meaningful for inbox)
         unseen_uids = set()
         if folder == "inbox":
-            _, unseen_data = imap.uid('search', None, 'UNSEEN')
-            unseen_uids = set(unseen_data[0].split())
+            unseen_uids = set(_uid_search(imap, None, ['UNSEEN']))
 
         # Fetch latest N (newest first)
         latest = uids[-count:]
@@ -823,8 +834,7 @@ def _search_emails(sender=None, content=None, date=None, folder="inbox", count=2
 
         unseen_uids = set()
         if folder == "inbox":
-            _, unseen_data = imap.uid('search', None, 'UNSEEN')
-            unseen_uids = set(unseen_data[0].split())
+            unseen_uids = set(_uid_search(imap, None, ['UNSEEN']))
 
         cache = _get_cache()
         messages = _fetch_and_cache(imap, uids, folder, unseen_uids, cache)

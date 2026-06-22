@@ -7,6 +7,7 @@
   "icon": "🖥️",
   "priority": 50,
   "default_enabled": false,
+  "pip_dependencies": ["mss"],
   "settingsUI": "auto",
   "capabilities": {
     "tools": ["tools/screenshot.py"],
