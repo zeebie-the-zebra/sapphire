@@ -410,6 +410,16 @@ function renderInput(key, value, type) {
             ${opts.map(([v, l]) => `<option value="${v}" ${value === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select>`;
     }
+    if (key === 'CONVERSATION_DTLN') {
+        const opts = [
+            ['none', 'None — headphones (no echo cancel)'],
+            ['256',  'DTLN 256 — open speakers (fast, ~26 dB)'],
+            ['512',  'DTLN 512 — open speakers (stronger, ~31 dB)'],
+        ];
+        return `<select id="${id}" data-key="${key}">
+            ${opts.map(([v, l]) => `<option value="${v}" ${String(value) === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>`;
+    }
     if (key === 'LOG_LEVEL') {
         const opts = [
             ['DEBUG',   'DEBUG (verbose, dev only)'],

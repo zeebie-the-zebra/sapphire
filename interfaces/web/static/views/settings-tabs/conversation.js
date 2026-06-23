@@ -5,6 +5,7 @@ export default {
     icon: '💬',  // 💬
     description: 'True speech mode — continuous-listen tuning to cut false triggers',
     essentialKeys: [
+        'CONVERSATION_DTLN',
         'CONVERSATION_VAD_THRESHOLD',
         'CONVERSATION_BARGE_HOLD_MS',
         'CONVERSATION_MIN_SPEECH_MS',

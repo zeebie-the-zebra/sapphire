@@ -101,6 +101,10 @@
     "short": "Detection confidence threshold (0.0-1.0)",
     "long": "Minimum confidence score required to trigger wake word detection. Lower values (0.3-0.4) are more sensitive but may cause false positives. Higher values (0.6-0.8) require clearer pronunciation but reduce false triggers. Default 0.5 is a good balance for most environments."
   },
+  "CONVERSATION_DTLN": {
+    "short": "Echo cancel: None (headphones) / 256 / 512 (open speakers)",
+    "long": "Picks the conversation-mode mic path. None = headphone tier (no echo cancel) — clean on headphones, but on open speakers she hears herself. 256/512 = DTLN acoustic echo cancellation for open speakers (the duplex tier), so she doesn't barge-in on her own voice; 512 cancels harder than 256 at a little more CPU. Needs the DTLN onnx models in user/models/dtln/ — falls back to None if absent. Takes effect on the next conversation activation (toggle off/on)."
+  },
   "CONVERSATION_VAD_THRESHOLD": {
     "short": "Speech confidence to count as you talking (0.0-1.0)",
     "long": "How confidently silero must classify audio as speech before conversation mode treats it as you talking. Raise it (0.6-0.7) to reject keyboard noise, background TV, and quiet sounds; lower it if it misses your soft speech. Default 0.5."

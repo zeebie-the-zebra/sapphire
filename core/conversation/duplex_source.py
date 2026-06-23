@@ -221,16 +221,22 @@ class DuplexConversationSource:
         if self._playing:
             if self._guard_s > 0 and (time.time() - self._play_start) < self._guard_s:
                 return False
-            now = time.time()
-            if now - self._last_rms_log > 1.0:       # rate-limited residual + buffer calibration log
-                self._last_rms_log = now
-                with self._out_lock:
-                    buf_ms = int(sum(len(c) for c in self._out_chunks) / self._dev_rate * 1000)
-                logger.info(f"[CONV] playback: residual rms={rms:.4f} floor={self._barge_floor} | "
-                            f"out_buf={buf_ms}ms underflows={self._underflows}")
             if rms < self._barge_floor:
                 return False
         return is_sp
+
+    def _maybe_log_playback(self, rms):
+        """1/sec choppiness telemetry during her playback (independent of speech detection):
+        out_buf draining -> TTS below realtime/CPU-starved; underflows climbing -> callback late."""
+        if not self._playing:
+            return
+        now = time.time()
+        if now - self._last_rms_log > 1.0:
+            self._last_rms_log = now
+            with self._out_lock:
+                buf_ms = int(sum(len(c) for c in self._out_chunks) / self._dev_rate * 1000)
+            logger.info(f"[CONV] playback: out_buf={buf_ms}ms underflows={self._underflows} "
+                        f"released={self._released} residual_rms={rms:.4f}")
 
     def _vad_loop(self):
         while not self._closing.is_set():
@@ -240,6 +246,7 @@ class DuplexConversationSource:
                 continue
             try:
                 rms = float(np.sqrt(np.mean((blk.astype(np.float64) / 32768.0) ** 2)))
+                self._maybe_log_playback(rms)
                 is_sp = self._barge_ok(self._gate.is_speech(blk), rms)
                 self._driver.push_frame(blk.tobytes(), is_sp)
             except Exception as e:
@@ -262,7 +269,7 @@ class DuplexConversationSource:
         self._worker.start()
         self._stream = sd.Stream(
             samplerate=self._dev_rate, blocksize=self._blocksize, device=self._device,
-            channels=(1, 1), dtype="float32", latency="low", callback=self._callback,
+            channels=(1, 1), dtype="float32", latency="high", callback=self._callback,
         )
         self._stream.start()
         self._apply_aec_delay()        # align loopback to the mic echo (round-trip latency)
