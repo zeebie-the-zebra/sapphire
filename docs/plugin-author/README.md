@@ -38,12 +38,16 @@ In short, a plugin is an autonomous package that can reshape how Sapphire behave
 | [Routes](routes.md) | Custom HTTP endpoints — path params, auth enforcement, handler signature |
 | [Schedule](schedule.md) | Cron tasks — manifest fields, handler contract, examples |
 | [Daemons](daemons.md) | Background event listeners — Telegram, Discord, Email, custom sources |
+| [Subprocesses](subprocesses.md) | Running & supervising external programs — ProcessManager lifecycle, process-group cleanup, advanced async helper |
 | [Widgets](widgets.md) | Dashboard panels — manifest, render contract, settings schema, sample plugin |
+| [Apps](APPS.md) | Full-page plugin UIs in the Apps nav — render/cleanup contract, navrail promotion |
 | [Settings](settings.md) | Manifest-declared settings, custom web UI, settings API, danger confirms |
 | [Web UI](web-ui.md) | Shared JS modules, CSS variables, modals, CSRF, style injection |
+| [Themes](THEMES.md) | Custom themes — CSS, animated JS backgrounds, per-theme settings (Settings > Visual) |
 | [Signing](signing.md) | Verification states, sideloading, signing your own plugins |
 | [Lifecycle](lifecycle.md) | Startup, live toggle, hot reload, rescan, error isolation |
 | [Publishing](publishing.md) | How to structure your repo and submit to the Sapphire Store |
+| [Examples](examples.md) | Minimal working examples of every capability type — copy-paste templates |
 | [AI Reference](ai-reference.md) | Compact reference for Sapphire's own use when building plugins |
 
 ---

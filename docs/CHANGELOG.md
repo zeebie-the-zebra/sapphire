@@ -1,3 +1,6 @@
+# 2.7.10 - asyncio update
+- Added async_teardown for daemons that need async stdio child procs
+- Documented ProcessManager popen for plugins (simpler)
 # 2.7.9 - sd-server plugin
 - Slideshow support in Apps and Sidebar in chat
 - auto gen images with random prompt pieces
