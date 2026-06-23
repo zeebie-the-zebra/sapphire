@@ -25,23 +25,35 @@ class ConversationManager:
 
     def _default_local_source(self, driver, gate):
         import config
-        tier = str(getattr(config, "CONVERSATION_AUDIO_TIER", "duplex")).lower()
-        if tier == "headphone":
-            from core.conversation.local_source import LocalMicSource
-            src = LocalMicSource(driver, gate)
-            src.start()                            # raises on failure -> handoff restores wakeword
-            return src
-        # duplex tier (default): one sd.Stream doing mic-in + TTS-out, DTLN cancels her echo
-        # so she doesn't barge-in on herself through open speakers.
-        from core.conversation.duplex_source import DuplexConversationSource
-        model = str(getattr(config, "CONVERSATION_DTLN_MODEL", "256"))
-        delay = float(getattr(config, "CONVERSATION_AEC_DELAY_MS", 0))     # 0 off; <0 auto; >0 manual ms
-        guard = float(getattr(config, "CONVERSATION_BARGE_GUARD_MS", 300))
-        floor = float(getattr(config, "CONVERSATION_BARGE_RMS_FLOOR", 0.03))
-        src = DuplexConversationSource(driver, gate, dtln_model=model, aec_delay_ms=delay,
-                                       barge_guard_ms=guard, barge_rms_floor=floor)
-        src.start()                                # opens duplex stream; raises -> handoff restores wakeword
-        driver.set_sink(src)                       # the SAME object is the TTS sink
+        # Duplex/DTLN tier (echo cancel for open speakers) is OPT-IN, OFF by default. If it can't
+        # load — most commonly the DTLN onnx models are absent (they live in gitignored user/) — it
+        # falls back to the proven headphone tier so conversation mode never breaks.
+        tier = str(getattr(config, "CONVERSATION_AUDIO_TIER", "headphone")).lower()
+        if tier == "duplex":
+            src = None
+            try:
+                from core.conversation.duplex_source import DuplexConversationSource
+                model = str(getattr(config, "CONVERSATION_DTLN_MODEL", "256"))
+                delay = float(getattr(config, "CONVERSATION_AEC_DELAY_MS", 0))     # 0 off; <0 auto; >0 manual
+                guard = float(getattr(config, "CONVERSATION_BARGE_GUARD_MS", 300))
+                floor = float(getattr(config, "CONVERSATION_BARGE_RMS_FLOOR", 0.03))
+                src = DuplexConversationSource(driver, gate, dtln_model=model, aec_delay_ms=delay,
+                                               barge_guard_ms=guard, barge_rms_floor=floor)
+                src.start()
+                driver.set_sink(src)               # the SAME object is the TTS sink
+                logger.info("[CONV] using duplex/DTLN audio tier")
+                return src
+            except Exception as e:
+                logger.warning(f"[CONV] duplex/DTLN tier unavailable ({e}); falling back to headphone tier")
+                if src is not None:
+                    try:
+                        src.close()                # release any partial duplex stream before fallback
+                    except Exception:
+                        pass
+        # headphone tier (default): input-only mic, no DTLN, no model dependency
+        from core.conversation.local_source import LocalMicSource
+        src = LocalMicSource(driver, gate)
+        src.start()                                # raises on failure -> handoff restores wakeword
         return src
 
     def _build_gate(self):
