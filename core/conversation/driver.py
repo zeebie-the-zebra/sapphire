@@ -50,11 +50,17 @@ class ConversationDriver:
     def reset(self):
         self.engine.reset()
 
+    def set_sink(self, sink):
+        """Use an externally-built sink. The duplex source is its own sink (one stream,
+        both directions), so the manager wires it here instead of building a PumpkinChunker."""
+        self._sink = sink
+
     # ── engine callbacks ────────────────────────────────────────────────────
     def _on_turn(self, pcm):
         self._spawn(self._run_turn, pcm)           # non-blocking: STT/LLM/TTS off the audio path
 
     def _on_barge_in(self):
+        logger.info("[CONV] barge-in fired -> cancelling LLM + cutting audio")
         try:
             self.system.cancel_generation()        # sets cancel_flag -> chat_stream halts
         except Exception as e:
@@ -119,7 +125,11 @@ class ConversationDriver:
         return self._sink
 
     def _wait_sink(self, sink, timeout=180):
-        w = getattr(sink, "_worker", None)
+        waiter = getattr(sink, "wait", None)   # duplex sink: poll-drain (no per-turn worker)
+        if callable(waiter):
+            waiter(timeout=timeout)
+            return
+        w = getattr(sink, "_worker", None)     # PumpkinChunker: join the playback worker
         if w is not None and hasattr(w, "join"):
             w.join(timeout=timeout)
 
