@@ -233,6 +233,12 @@ class StreamingChat:
             cumulative_tokens = {"prompt": 0, "completion": 0, "thinking": 0, "total": 0,
                                  "cache_read": 0, "cache_write": 0, "iterations": 0}
 
+            # Bind the per-iteration vars the cancel-save path (below) reads, so a barge-in that
+            # sets cancel_flag before iteration 0 reaches their in-loop init can't UnboundLocalError.
+            current_content = ""
+            current_thinking = ""
+            metadata = None
+
             for iteration in range(config.MAX_TOOL_ITERATIONS):
                 if self.cancel_flag:
                     logger.info(f"[STOP] [STREAMING] Cancelled at iteration {iteration + 1}")
