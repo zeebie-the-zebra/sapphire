@@ -924,19 +924,16 @@ async def _import_persona_from_bundle(data):
     return {"status": "success", "name": sanitized}
 
 
-@router.post("/api/personas/import-card")
-async def import_persona_card(request: Request, file: UploadFile = File(...),
-                              overwrite_prompt: bool = Form(False),
-                              overwrite_avatar: bool = Form(False),
-                              _=Depends(require_login)):
-    """Import a persona from a PNG character card — reads the bundle from the
-    `sapphire_persona` chunk and uses the PNG's pixels as the avatar."""
+async def _import_persona_card_bytes(raw: bytes, overwrite_prompt: bool = False,
+                                     overwrite_avatar: bool = False):
+    """Import a persona from PNG card bytes — reads the bundle from the
+    `sapphire_persona` chunk and uses the PNG's pixels as the avatar. Shared by
+    the file-upload endpoint and the persona-store install route."""
     import base64
     import io
     import json
     from PIL import Image
 
-    raw = await file.read()
     if len(raw) > 6 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Card too large (max 6MB)")
     try:
@@ -960,6 +957,16 @@ async def import_persona_card(request: Request, file: UploadFile = File(...),
     data["overwrite_prompt"] = overwrite_prompt
     data["overwrite_avatar"] = overwrite_avatar
     return await _import_persona_from_bundle(data)
+
+
+@router.post("/api/personas/import-card")
+async def import_persona_card(request: Request, file: UploadFile = File(...),
+                              overwrite_prompt: bool = Form(False),
+                              overwrite_avatar: bool = Form(False),
+                              _=Depends(require_login)):
+    """Import a persona from an uploaded PNG character card."""
+    raw = await file.read()
+    return await _import_persona_card_bytes(raw, overwrite_prompt, overwrite_avatar)
 
 
 # =============================================================================

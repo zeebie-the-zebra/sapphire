@@ -1,5 +1,6 @@
 // API functions for Prompt Manager plugin
 import { fetchWithTimeout } from './fetch.js';
+import { refreshInitData } from './init-data.js';
 
 // Fetch fresh components from server (init cache goes stale when AI tools modify components)
 export async function getComponents() {
@@ -24,17 +25,21 @@ export async function getPrompt(name) {
 
 // Mutations - use fetchWithTimeout for session ID header
 export async function savePrompt(name, data) {
-  return await fetchWithTimeout(`/api/prompts/${encodeURIComponent(name)}`, {
+  const res = await fetchWithTimeout(`/api/prompts/${encodeURIComponent(name)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
   });
+  refreshInitData();  // bust cached prompt list so persona/chat dropdowns see the new/renamed prompt
+  return res;
 }
 
 export async function deletePrompt(name) {
-  return await fetchWithTimeout(`/api/prompts/${encodeURIComponent(name)}`, {
+  const res = await fetchWithTimeout(`/api/prompts/${encodeURIComponent(name)}`, {
     method: 'DELETE'
   });
+  refreshInitData();  // bust cached prompt list so persona/chat dropdowns drop the deleted prompt
+  return res;
 }
 
 export async function saveComponent(type, key, value) {

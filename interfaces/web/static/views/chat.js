@@ -1322,7 +1322,24 @@ function escapeHtml(str) {
 // Helpers
 function getVal(c, sel) { return c.querySelector(sel)?.value || ''; }
 function setVal(c, sel, v) { const el = c.querySelector(sel); if (el) el.value = v; }
-function setSelect(sel, v) { sel.value = v; if (sel.selectedIndex === -1 && sel.options.length) sel.selectedIndex = 0; }
+function setSelect(sel, v) {
+    sel.value = v;
+    if (sel.selectedIndex === -1) {
+        // The saved value isn't among the options (e.g. a stale/missing list).
+        // Inject it as a synthetic option rather than silently snapping to
+        // option 0 — that snap is the "wrong-prompt" class of bug. Empty/null
+        // values keep the old fall-to-first behavior.
+        if (v != null && v !== '') {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v;
+            sel.insertBefore(opt, sel.firstChild);
+            sel.value = v;
+        } else if (sel.options.length) {
+            sel.selectedIndex = 0;
+        }
+    }
+}
 function getChecked(c, sel) { return c.querySelector(sel)?.checked || false; }
 function setChecked(c, sel, v) { const el = c.querySelector(sel); if (el) el.checked = v; }
 function getToggle(c, sel) { return c.querySelector(sel)?.dataset.active === 'true'; }

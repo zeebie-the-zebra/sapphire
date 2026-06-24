@@ -8653,6 +8653,143 @@ a.gallery-caption:hover {
     padding-top: 4px;
 }
 
+/* Persona store cards — horizontal: full-height image left, text right. */
+.store-card.store-persona-card {
+    flex-direction: row;
+    align-items: stretch;
+    padding: 0;
+    gap: 0;
+    overflow: hidden;
+}
+.store-persona-thumb {
+    position: relative;
+    flex: 0 0 104px;
+    align-self: stretch;
+    min-height: 116px;
+}
+.store-persona-thumb-letter {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+.store-persona-thumb img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.store-persona-body {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.store-persona-body .store-card-name { white-space: normal; }
+.store-persona-by { font-size: var(--font-xs); color: var(--text-muted); }
+.store-persona-by a { color: var(--text-secondary); text-decoration: none; }
+.store-persona-by a:hover { color: var(--trim); text-decoration: underline; }
+.store-persona-motto {
+    margin: 2px 0;
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.store-persona-cat { font-size: var(--font-xs); color: var(--text-muted); }
+.store-persona-body .store-card-actions { margin-top: auto; padding-top: 8px; }
+
+/* Persona detail masthead — big image left, stacked info right. */
+.store-persona-masthead {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    margin-bottom: 18px;
+}
+.store-persona-masthead-img {
+    position: relative;
+    flex: 0 0 132px;
+    width: 132px;
+    height: 132px;
+    border-radius: 12px;
+    overflow: hidden;
+}
+.store-persona-masthead-img .store-persona-thumb-letter { font-size: 60px; }
+.store-persona-masthead-img img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.store-persona-masthead-info {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.store-persona-masthead-info .store-detail-name { margin: 0 0 4px; }
+.store-persona-info-row { font-size: var(--font-sm); color: var(--text-secondary); }
+.store-persona-info-row .lbl {
+    display: inline-block;
+    min-width: 64px;
+    color: var(--text-muted);
+    margin-right: 6px;
+}
+.store-persona-info-row a { color: var(--text-secondary); text-decoration: none; }
+.store-persona-info-row a:hover { color: var(--trim); text-decoration: underline; }
+.store-persona-masthead-tagline {
+    margin: 8px 0 0;
+    color: var(--text-secondary);
+    font-style: italic;
+    line-height: 1.4;
+}
+.store-persona-masthead-actions { margin-top: 12px; }
+.store-prompt-heading {
+    margin: 4px 0 10px;
+    font-size: var(--font-base);
+    color: var(--text-bright);
+}
+.store-prompt-acc {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: var(--bg-secondary);
+}
+.store-prompt-acc > summary {
+    cursor: pointer;
+    padding: 8px 12px;
+    font-weight: 600;
+    color: var(--text-bright);
+    text-transform: capitalize;
+}
+.store-prompt-text {
+    margin: 0;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: var(--font-xs);
+    color: var(--text-secondary);
+    line-height: 1.45;
+    max-height: 340px;
+    overflow: auto;
+}
+
 .store-trust-badge {
     font-size: var(--font-xs);
     padding: 1px 7px;

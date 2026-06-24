@@ -55,3 +55,43 @@ export async function installFromStore({ githubUrl, storeSlug }) {
         body: fd,
     });
 }
+
+
+/* ── Persona store (sapphire-prompts/v1) ──────────────────────────────────── */
+
+export async function listStorePersonas({
+    q = null,
+    category = null,
+    featured = null,
+    sort = null,
+    page = 1,
+    perPage = 20,
+} = {}) {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (category) params.set('category', category);
+    if (featured === true) params.set('featured', 'true');
+    if (sort) params.set('sort', sort);
+    if (page && page !== 1) params.set('page', String(page));
+    if (perPage && perPage !== 20) params.set('per_page', String(perPage));
+    const qs = params.toString();
+    return fetchWithTimeout(`/api/store/personas/list${qs ? '?' + qs : ''}`);
+}
+
+
+export async function getStorePersona(slug) {
+    return fetchWithTimeout(`/api/store/personas/${encodeURIComponent(slug)}`);
+}
+
+
+export async function getStorePersonaCategories() {
+    return fetchWithTimeout('/api/store/personas/categories');
+}
+
+
+/** Download a persona's PNG card server-side and import it. */
+export async function installPersonaFromStore(slug) {
+    return fetchWithTimeout(`/api/store/personas/${encodeURIComponent(slug)}/install`, {
+        method: 'POST',
+    });
+}

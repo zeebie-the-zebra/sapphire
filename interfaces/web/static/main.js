@@ -518,7 +518,7 @@ function initEventBus() {
         ui.showToast(`Plugin '${data?.plugin || 'unknown'}' reloaded`, 'success');
         reloadPluginScripts();
     });
-    document.addEventListener('sapphire:plugin_toggled', () => reloadPluginScripts());
+    document.addEventListener('sapphire:plugin_toggled', () => { refreshInitData(); reloadPluginScripts(); });
 
     // Plugin load errors — sticky toast for missing deps, timed for other errors
     eventBus.on(eventBus.Events.PLUGIN_LOAD_ERROR, (data) => {

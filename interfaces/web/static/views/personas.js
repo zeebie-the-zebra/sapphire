@@ -359,25 +359,41 @@ function renderSettingField(key, label, settings, optionsHtml, opts = {}) {
     `;
 }
 
+// Safety net (shared by the three builders below): if the persona's saved
+// value isn't in the (possibly stale) list, show it as a synthetic selected
+// option rather than letting the <select> silently fall to the first option.
+function _withMissing(opts, list, current, keyFn) {
+    if (current && !list.some(keyFn)) {
+        opts.unshift(`<option value="${current}" selected>${current}</option>`);
+    }
+    return opts;
+}
+
 function renderPromptOptions(current) {
     const list = initData?.prompts?.list || [];
-    return list.map(p =>
+    const opts = list.map(p =>
         `<option value="${p.name}"${p.name === current ? ' selected' : ''}>${p.name}</option>`
-    ).join('') || `<option value="${current || 'default'}">${current || 'default'}</option>`;
+    );
+    return _withMissing(opts, list, current, p => p.name === current).join('')
+        || `<option value="${current || 'default'}">${current || 'default'}</option>`;
 }
 
 function renderToolsetOptions(current) {
     const list = (initData?.toolsets?.list || []).filter(t => t.type !== 'module');
-    return list.map(t =>
+    const opts = list.map(t =>
         `<option value="${t.name}"${t.name === current ? ' selected' : ''}>${t.name} (${t.function_count})</option>`
-    ).join('') || `<option value="${current || 'all'}">${current || 'all'}</option>`;
+    );
+    return _withMissing(opts, list, current, t => t.name === current).join('')
+        || `<option value="${current || 'all'}">${current || 'all'}</option>`;
 }
 
 function renderSpiceSetOptions(current) {
     const list = initData?.spice_sets?.list || [];
-    return list.map(s =>
+    const opts = list.map(s =>
         `<option value="${s.name}"${s.name === current ? ' selected' : ''}>${s.emoji ? s.emoji + ' ' : ''}${s.name}</option>`
-    ).join('') || `<option value="${current || 'default'}">${current || 'default'}</option>`;
+    );
+    return _withMissing(opts, list, current, s => s.name === current).join('')
+        || `<option value="${current || 'default'}">${current || 'default'}</option>`;
 }
 
 function renderVoiceOptions(current) {

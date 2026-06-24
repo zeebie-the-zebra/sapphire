@@ -1,5 +1,6 @@
 // shared/persona-api.js - Persona API helpers
 import { fetchWithTimeout } from './fetch.js';
+import { refreshInitData } from './init-data.js';
 
 export const listPersonas = () => fetchWithTimeout('/api/personas');
 
@@ -74,14 +75,20 @@ export const importPersonaCard = async (file, { overwrite_prompt = false, overwr
     formData.append('overwrite_avatar', overwrite_avatar ? 'true' : 'false');
     const res = await fetch('/api/personas/import-card', { method: 'POST', headers: { 'X-CSRF-Token': csrf }, body: formData });
     if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Import failed'); }
-    return res.json();
+    const data = await res.json();
+    refreshInitData();  // import creates a prompt server-side — bust cache so the persona's prompt shows
+    return data;
 };
 
-export const importPersona = (data) => fetchWithTimeout('/api/personas/import', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-});
+export const importPersona = async (data) => {
+    const res = await fetchWithTimeout('/api/personas/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    refreshInitData();  // import creates a prompt server-side — bust cache so the persona's prompt shows
+    return res;
+};
 
 export function avatarImg(name, color, cls, avatar) {
     const fb = avatarFallback(name, color);
