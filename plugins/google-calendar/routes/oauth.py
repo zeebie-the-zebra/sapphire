@@ -165,6 +165,14 @@ def handle_callback(request=None, query=None, settings=None, **_):
 
     credentials.update_gcal_tokens(scope, refresh_token, access_token, expires_at)
 
+    # Tell the UI a gcal scope/account appeared so sidebar scope dropdowns refresh
+    # without a reload. Defensive — never let a publish failure break the redirect.
+    try:
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "gcal", "action": "connected", "name": scope})
+    except Exception:
+        pass
+
     logger.info(f"[GCAL] OAuth2 authorization successful for scope '{scope}'")
     return RedirectResponse(url="/#settings", status_code=302)
 

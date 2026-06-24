@@ -60,6 +60,15 @@ export function renderAIConfig(t, data, opts = {}) {
     // renderAIConfig just drops a placeholder <div id="ed-scope-dropdowns"></div>
     const { isHeartbeat } = opts;
 
+    // Synthetic option for a saved value that's no longer in its list (the
+    // prompt/toolset/persona was renamed or deleted elsewhere). Show it as
+    // "(missing)" instead of silently snapping to the first option — Save reads
+    // .value blind, so a snap would overwrite the task's real binding.
+    const missingOpt = (value, known) =>
+        (value && !known.includes(value))
+            ? `<option value="${_esc(value)}" selected>${_esc(value)} (missing)</option>`
+            : '';
+
     const enabledProviders = providers.filter(p => p.enabled);
     const coreProvs = enabledProviders.filter(p => p.is_core);
     const customProvs = enabledProviders.filter(p => !p.is_core);
@@ -74,6 +83,9 @@ export function renderAIConfig(t, data, opts = {}) {
             const model = p.model ? ` (${p.model.split('/').pop()})` : '';
             return `<option value="${p.key}" ${t.provider === p.key ? 'selected' : ''}>${p.display_name}${model}</option>`;
         }).join('');
+    if (t.provider && t.provider !== 'auto' && !enabledProviders.some(p => p.key === t.provider)) {
+        providerOpts = `<option value="${_esc(t.provider)}" selected>${_esc(t.provider)} (missing)</option>` + providerOpts;
+    }
 
     let voiceOpts = voices.map(v =>
         `<option value="${v.voice_id}" ${t.voice === v.voice_id ? 'selected' : ''}>${v.name}${v.category ? ' (' + v.category + ')' : ''}</option>`
@@ -89,6 +101,7 @@ export function renderAIConfig(t, data, opts = {}) {
             <label>\uD83D\uDC64 Persona <span class="help-tip" data-tip="Auto-fills prompt, voice, toolset, model, scopes, and more from a persona profile. You can still override individual settings below.">?</span></label>
             <select id="ed-persona">
                 <option value="">None (manual settings)</option>
+                ${missingOpt(t.persona, personas.map(p => p.name))}
                 ${personas.map(p => `<option value="${p.name}" ${t.persona === p.name ? 'selected' : ''}>${p.name}${p.tagline ? ' \u2014 ' + p.tagline : ''}</option>`).join('')}
             </select>
         </div>
@@ -103,6 +116,7 @@ export function renderAIConfig(t, data, opts = {}) {
                         <label>Prompt</label>
                         <select id="ed-prompt">
                             <option value="default">default</option>
+                            ${missingOpt(t.prompt, ['default', ...prompts.map(p => p.name)])}
                             ${prompts.map(p => `<option value="${p.name}" ${t.prompt === p.name ? 'selected' : ''}>${p.name}</option>`).join('')}
                         </select>
                     </div>
@@ -111,6 +125,7 @@ export function renderAIConfig(t, data, opts = {}) {
                         <select id="ed-toolset">
                             <option value="none" ${t.toolset === 'none' ? 'selected' : ''}>none</option>
                             <option value="default" ${t.toolset === 'default' ? 'selected' : ''}>default</option>
+                            ${missingOpt(t.toolset, ['none', 'default', ...toolsets.map(ts => ts.name)])}
                             ${toolsets.map(ts => `<option value="${ts.name}" ${t.toolset === ts.name ? 'selected' : ''}>${ts.name}</option>`).join('')}
                         </select>
                     </div>

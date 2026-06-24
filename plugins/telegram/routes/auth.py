@@ -112,6 +112,8 @@ async def start_bot_auth(**kwargs):
         state.update_with_lock("accounts", _add, default={})
 
         logger.info(f"[TELEGRAM] Bot '{account_name}' authenticated as @{me.username or me.first_name}")
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "telegram", "action": "added", "name": account_name})
 
         # Hot-connect to running daemon
         try:
@@ -276,6 +278,8 @@ async def delete_account(**kwargs):
     state.update_with_lock("accounts", _remove, default={})
 
     logger.info(f"[TELEGRAM] Deleted account '{account_name}'")
+    from core.event_bus import publish, Events
+    publish(Events.SCOPE_CHANGED, {"kind": "telegram", "action": "deleted", "name": account_name})
     return {"status": "deleted", "account_name": account_name}
 
 
@@ -313,6 +317,8 @@ async def _finalize_auth(account_name, client, phone):
     _pending_auth.pop(account_name, None)
 
     logger.info(f"[TELEGRAM] Account '{account_name}' authenticated as @{me.username or me.first_name}")
+    from core.event_bus import publish, Events
+    publish(Events.SCOPE_CHANGED, {"kind": "telegram", "action": "added", "name": account_name})
 
     # Try to connect in the running daemon
     try:

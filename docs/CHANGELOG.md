@@ -1,3 +1,5 @@
+# 2.7.11 - UI stale cache
+- Found multiple stale UI paths, fixed
 # 2.7.10 - asyncio update
 - Added async_teardown for daemons that need async stdio child procs
 - Documented ProcessManager popen for plugins (simpler)

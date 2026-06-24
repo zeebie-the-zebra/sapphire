@@ -74,6 +74,8 @@ async def add_account(**kwargs):
         pass
 
     logger.info(f"[DISCORD] Added account '{account_name}'")
+    from core.event_bus import publish, Events
+    publish(Events.SCOPE_CHANGED, {"kind": "discord", "action": "added", "name": account_name})
     return {"status": "added", "account_name": account_name}
 
 
@@ -108,6 +110,8 @@ async def delete_account(**kwargs):
     state.update_with_lock("accounts", _remove, default={})
 
     logger.info(f"[DISCORD] Deleted account '{account_name}'")
+    from core.event_bus import publish, Events
+    publish(Events.SCOPE_CHANGED, {"kind": "discord", "action": "deleted", "name": account_name})
     return {"status": "deleted", "account_name": account_name}
 
 

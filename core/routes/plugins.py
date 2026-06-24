@@ -1667,6 +1667,8 @@ async def set_email_account(scope: str, request: Request, _=Depends(require_logi
         app_password = existing.get('app_password', '')
 
     if credentials.set_email_account(scope, address, app_password, imap_server, smtp_server, imap_port, smtp_port):
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "email", "action": "saved", "name": scope})
         return {"success": True}
     raise HTTPException(status_code=500, detail="Failed to save email account")
 
@@ -1676,6 +1678,8 @@ async def delete_email_account(scope: str, request: Request, _=Depends(require_l
     """Delete an email account."""
     from core.credentials_manager import credentials
     if credentials.delete_email_account(scope):
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "email", "action": "deleted", "name": scope})
         return {"success": True}
     raise HTTPException(status_code=404, detail=f"Email account '{scope}' not found")
 
@@ -1778,6 +1782,8 @@ async def set_bitcoin_wallet(scope: str, request: Request, _=Depends(require_log
         raise HTTPException(status_code=400, detail=f"Invalid WIF key: {e}")
 
     if credentials.set_bitcoin_wallet(scope, wif, label):
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "bitcoin", "action": "saved", "name": scope})
         return {"success": True, "address": address}
     raise HTTPException(status_code=500, detail="Failed to save bitcoin wallet")
 
@@ -1787,6 +1793,8 @@ async def delete_bitcoin_wallet(scope: str, request: Request, _=Depends(require_
     """Delete a bitcoin wallet."""
     from core.credentials_manager import credentials
     if credentials.delete_bitcoin_wallet(scope):
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "bitcoin", "action": "deleted", "name": scope})
         return {"success": True}
     raise HTTPException(status_code=404, detail=f"Bitcoin wallet '{scope}' not found")
 
@@ -1936,6 +1944,8 @@ async def set_gcal_account(scope: str, request: Request, _=Depends(require_login
     refresh_token = existing.get('refresh_token', '')
 
     if credentials.set_gcal_account(scope, client_id, client_secret, calendar_id, refresh_token, label):
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "gcal", "action": "saved", "name": scope})
         return {"success": True}
     raise HTTPException(status_code=500, detail="Failed to save gcal account")
 
@@ -1945,6 +1955,8 @@ async def delete_gcal_account(scope: str, request: Request, _=Depends(require_lo
     """Delete a Google Calendar account."""
     from core.credentials_manager import credentials
     if credentials.delete_gcal_account(scope):
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "gcal", "action": "deleted", "name": scope})
         return {"success": True}
     raise HTTPException(status_code=404, detail=f"Google Calendar account '{scope}' not found")
 
@@ -1980,6 +1992,8 @@ async def set_github_account(scope: str, request: Request, _=Depends(require_log
         raise HTTPException(status_code=400, detail="Personal access token is required")
 
     if credentials.set_github_account(scope, username, pat, label):
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "github", "action": "saved", "name": scope})
         return {"success": True}
     raise HTTPException(status_code=500, detail="Failed to save github account")
 
@@ -1989,6 +2003,8 @@ async def delete_github_account(scope: str, request: Request, _=Depends(require_
     """Delete a GitHub account."""
     from core.credentials_manager import credentials
     if credentials.delete_github_account(scope):
+        from core.event_bus import publish, Events
+        publish(Events.SCOPE_CHANGED, {"kind": "github", "action": "deleted", "name": scope})
         return {"success": True}
     raise HTTPException(status_code=404, detail=f"GitHub account '{scope}' not found")
 
