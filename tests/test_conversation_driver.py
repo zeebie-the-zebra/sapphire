@@ -10,11 +10,44 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.conversation.driver import ConversationDriver
+from core.conversation.driver import ConversationDriver, match_start_word
 from core.conversation.engine import IDLE, RESPONDING, USER_SPEAKING
 from core.event_bus import Events
 
 SR = 16000
+
+
+# ── start-word gate ──
+def test_start_word_off_passes_through():
+    assert match_start_word("what time is it", "") == "what time is it"
+    assert match_start_word("what time is it", "   ") == "what time is it"
+
+
+def test_start_word_exact_prefix_strips():
+    assert match_start_word("hey sapphire what time is it", "hey sapphire") == "what time is it"
+    assert match_start_word("Hey Sapphire, what's up?", "hey sapphire") == "what's up?"
+
+
+def test_start_word_fuzzy_near_miss():
+    assert match_start_word("hey sapphir what time", "hey sapphire", 0.7) == "what time"
+
+
+def test_start_word_fuzzy_word_split():
+    # STT split "sapphire" -> "staff fire": window matching strips all 3 leading words
+    assert match_start_word("hey staff fire turn on lights", "hey sapphire", 0.5) == "turn on lights"
+
+
+def test_start_word_no_match_gates():
+    assert match_start_word("random youtube lyrics here", "hey sapphire") is None
+
+
+def test_start_word_only_returns_empty():
+    assert match_start_word("hey sapphire", "hey sapphire") == ""
+
+
+def test_start_word_multiple_phrases():
+    assert match_start_word("sapphire what time", "hey sapphire, sapphire") == "what time"
+    assert match_start_word("nope nothing matches", "hey sapphire, sapphire") is None
 
 
 def frame(ms, speech):

@@ -420,6 +420,9 @@ function renderInput(key, value, type) {
             ${opts.map(([v, l]) => `<option value="${v}" ${String(value) === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select>`;
     }
+    if (key === 'CONVERSATION_START_WORD') {
+        return `<input type="text" id="${id}" data-key="${key}" value="${escapeAttr(String(value))}" placeholder="hey sapphire">`;
+    }
     if (key === 'LOG_LEVEL') {
         const opts = [
             ['DEBUG',   'DEBUG (verbose, dev only)'],

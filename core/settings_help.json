@@ -105,6 +105,14 @@
     "short": "Echo cancel: None (headphones) / 256 / 512 (open speakers)",
     "long": "Picks the conversation-mode mic path. None = headphone tier (no echo cancel) — clean on headphones, but on open speakers she hears herself. 256/512 = DTLN acoustic echo cancellation for open speakers (the duplex tier), so she doesn't barge-in on her own voice; 512 cancels harder than 256 at a little more CPU. Needs the DTLN onnx models in user/models/dtln/ — falls back to None if absent. Takes effect on the next conversation activation (toggle off/on)."
   },
+  "CONVERSATION_START_WORD": {
+    "short": "Require a spoken start word, e.g. 'hey sapphire' (blank = off, respond to everything)",
+    "long": "An STT-based start word (not a wakeword — no pause). When set, conversation mode only acts on utterances that BEGIN with this phrase, then strips it and answers the rest. Great for rejecting background TV/music that would otherwise trigger her. Comma-separate multiple phrases (e.g. 'hey sapphire, sapphire'). Fuzzy-matched, so 'hey staff fire' still works (see the fuzzy threshold). Blank = off."
+  },
+  "CONVERSATION_START_WORD_FUZZY": {
+    "short": "How close a match the start word needs (0.0-1.0, default 0.7)",
+    "long": "Similarity threshold for the start word, since STT mishears ('hey staff fire' for 'hey sapphire'). 1.0 = exact only; lower (0.6) is more forgiving but may let near-misses through. 0.7 is a good balance. Only used when a start word is set."
+  },
   "CONVERSATION_VAD_THRESHOLD": {
     "short": "Speech confidence to count as you talking (0.0-1.0)",
     "long": "How confidently silero must classify audio as speech before conversation mode treats it as you talking. Raise it (0.6-0.7) to reject keyboard noise, background TV, and quiet sounds; lower it if it misses your soft speech. Default 0.5."

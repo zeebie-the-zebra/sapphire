@@ -14,8 +14,10 @@ NOTE: local audio depends on TTS streaming being enabled (chat_stream's pump onl
 emits tts_chunk events then). With it off, the UI still streams but she's silent —
 a fallback (tts.speak final) is a later add. STT/stream/sink are injectable for tests.
 """
+import difflib
 import logging
 import os
+import re
 import tempfile
 import threading
 import uuid
@@ -27,15 +29,49 @@ from core.event_bus import publish, Events
 logger = logging.getLogger(__name__)
 
 
+def _norm(s):
+    return re.sub(r"[^\w\s]", "", s.lower()).strip()
+
+
+def match_start_word(text, phrases_csv, threshold=0.7):
+    """STT-based start-word gate (no wakeword pause). `phrases_csv` = comma-separated start phrases
+    (e.g. "hey sapphire, sapphire"). If `text` fuzzily begins with any phrase, return the remainder
+    with that prefix stripped (may be ""). Return None if none match. Empty phrases_csv = feature
+    OFF -> returns `text` unchanged so the caller doesn't gate."""
+    phrases = [p.strip() for p in (phrases_csv or "").split(",") if p.strip()]
+    if not phrases:
+        return text                                # feature off
+    words = text.split()
+    best_ratio, best_strip = 0.0, 0
+    for phrase in phrases:
+        pn = _norm(phrase)
+        base = len(pn.split())
+        if base == 0:
+            continue
+        # Try a few leading-word windows so STT splitting one word into two still matches
+        # (e.g. "sapphire" -> "staff fire" makes a 2-word phrase span 3 leading words).
+        for k in range(max(1, base - 1), base + 3):
+            if k > len(words):
+                break
+            r = difflib.SequenceMatcher(None, _norm(" ".join(words[:k])), pn).ratio()
+            if r > best_ratio:
+                best_ratio, best_strip = r, k
+    if best_ratio >= threshold:
+        return " ".join(words[best_strip:]).strip()  # strip the matched prefix
+    return None                                      # no phrase matched -> gate
+
+
 class ConversationDriver:
     def __init__(self, system, transcribe_fn=None, sink_factory=None,
-                 sample_rate=16000, **engine_kw):
+                 sample_rate=16000, start_word="", start_word_fuzzy=0.7, **engine_kw):
         self.system = system
         self.sample_rate = sample_rate
         self._transcribe_fn = transcribe_fn or self._whisper_transcribe
         self._sink_factory = sink_factory          # injectable; default = PumpkinChunker
         self._sink = None
         self._active_sink = None                   # set during a turn so barge-in can reach it
+        self._start_word = start_word or ""        # STT start-word gate (off when empty)
+        self._start_word_fuzzy = float(start_word_fuzzy)
         self.engine = ConversationEngine(
             on_turn=self._on_turn,
             on_barge_in=self._on_barge_in,
@@ -79,6 +115,14 @@ class ConversationDriver:
             text = self._transcribe_fn(pcm)
             if not (text and text.strip()):
                 logger.info("[CONV] turn: no usable speech, skipping")
+                return
+            gated = match_start_word(text, self._start_word, self._start_word_fuzzy)
+            if gated is None:
+                logger.info("[CONV] turn: start word not matched, ignoring utterance")
+                return
+            text = gated.strip()
+            if not text:
+                logger.info("[CONV] turn: start word only, nothing to act on")
                 return
             logger.info("[CONV] turn: transcribed user utterance -> streaming")
 

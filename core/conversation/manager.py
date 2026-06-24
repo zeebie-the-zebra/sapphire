@@ -75,6 +75,8 @@ class ConversationManager:
         # Rebuild driver + gate from current settings so tuning applies without restart.
         self.driver = ConversationDriver(
             self.system,
+            start_word=str(getattr(config, "CONVERSATION_START_WORD", "")),
+            start_word_fuzzy=float(getattr(config, "CONVERSATION_START_WORD_FUZZY", 0.7)),
             endpoint_silence_ms=int(getattr(config, "CONVERSATION_ENDPOINT_SILENCE_MS", 700)),
             min_speech_ms=int(getattr(config, "CONVERSATION_MIN_SPEECH_MS", 200)),
             barge_hold_ms=int(getattr(config, "CONVERSATION_BARGE_HOLD_MS", 90)),
