@@ -80,6 +80,23 @@ async def download_backup(filename: str, request: Request, _=Depends(require_log
         raise HTTPException(status_code=404, detail="Backup not found")
 
 
+@router.post("/api/backup/estimate")
+async def estimate_backup(request: Request, _=Depends(require_login)):
+    """Estimate the uncompressed backup size with the given (live/unsaved)
+    exclude patterns + a per-folder breakdown — for tuning excludes on the page."""
+    from core.backup import backup_manager
+    data = await request.json() or {}
+    patterns = data.get("patterns")
+    if patterns is not None and not isinstance(patterns, list):
+        patterns = None
+    extra = data.get("extra_patterns")
+    if not isinstance(extra, list):
+        extra = []
+    clean = None if patterns is None else [str(p).strip() for p in patterns if str(p).strip()]
+    extra = [str(p).strip() for p in extra if str(p).strip()]
+    return backup_manager.estimate_size(patterns=clean, extra_patterns=extra)
+
+
 # =============================================================================
 # AUDIO DEVICE ROUTES
 # =============================================================================

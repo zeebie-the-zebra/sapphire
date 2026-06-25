@@ -1,4 +1,5 @@
 import os
+import fnmatch
 import tarfile
 import sqlite3
 import logging
@@ -10,35 +11,54 @@ import config
 logger = logging.getLogger(__name__)
 
 
-# File-pattern exclusions for the tar filter. Skip:
-#  - quarantined corrupted state files (may contain stale OAuth tokens,
-#    session strings, etc. — leaking them in a shared backup is a privacy
-#    violation). Pattern: `*.bad-<timestamp>` from PluginState._load.
-#  - in-flight tmp files from atomic-rename writes. They may be truncated
-#    JSON and pollute the backup with partial state.
-_BACKUP_EXCLUDE_SUFFIXES = ('.tmp',)
+# Privacy floor — ALWAYS excluded from backups, regardless of user settings:
+#  - `.bad-<ts>` quarantined corrupted-state files (may hold stale OAuth/session
+#    strings) — `*.bad-<timestamp>` from PluginState._load.
+#  - `.tmp` / `.tmp.<pid>` in-flight atomic-rename files (possibly-truncated JSON).
+#  - `*_mcp_key.json` (inbound MCP bearer keys) + `mcp_client.json` (outbound
+#    bearer tokens) — plaintext live credentials; backups land on RAID + offsite,
+#    and these are re-issuable in the plugin/MCP admin UI. Witch-hunt findings
+#    C5 (2026-04-21) + MCP C1 (2026-05-07).
+def _privacy_excluded(rel: str) -> bool:
+    if '.bad-' in rel:
+        return True
+    if rel.endswith('.tmp') or '.tmp.' in rel:
+        return True
+    if rel.endswith('_mcp_key.json') or rel.endswith('mcp_client.json'):
+        return True
+    return False
+
+
+def _exclude_patterns_setting():
+    """User-defined exclude globs from settings (tolerates list OR newline string)."""
+    raw = getattr(config, 'BACKUPS_EXCLUDE_PATTERNS', None) or []
+    if isinstance(raw, str):
+        raw = raw.splitlines()
+    return [str(p).strip() for p in raw if str(p).strip()]
+
+
+def _is_excluded(rel: str, user_patterns=None) -> bool:
+    """True if a `user/`-relative path should be excluded — the privacy floor
+    (always) plus user-defined fnmatch globs (`*` crosses `/`, e.g. `rag/*`,
+    `*.log`). Shared by the tar filter and the size estimator so the preview
+    matches the real backup exactly."""
+    if _privacy_excluded(rel):
+        return True
+    for pat in (user_patterns or []):
+        if not pat:
+            continue
+        p = pat.rstrip('/')
+        # Bare name → exclude the whole subtree (`piper-voices` skips
+        # `piper-voices/...`); plus normal fnmatch globs (`rag/*`, `*.log`).
+        if rel == p or rel.startswith(p + '/') or fnmatch.fnmatch(rel, pat):
+            return True
+    return False
+
+
 def _backup_filter(tarinfo):
     name = tarinfo.name
-    # `.bad-<timestamp>` suffix from corrupted-state quarantine
-    if '.bad-' in name:
-        return None
-    # .tmp rename files + .tmp.<pid>.<id> from PluginState._save
-    if name.endswith('.tmp') or '.tmp.' in name:
-        return None
-    # MCP bearer key files (any plugin) — plaintext live credentials. Backups
-    # land on RAID + offsite sync; including these spreads the key everywhere.
-    # Krem keeps them recoverable via re-generation in the plugin UI; backup
-    # exclusion is the right tradeoff. Witch-hunt 2026-04-21 finding C5.
-    if name.endswith('_mcp_key.json'):
-        return None
-    # mcp_client.json holds OUTBOUND bearer tokens (Authorization headers)
-    # for MCP servers Sapphire connects to as a client. Different naming
-    # convention from `*_mcp_key.json` (which is the inbound auth pattern),
-    # so the rule above didn't catch it. Same blast radius — plaintext
-    # credentials riding into RAID + offsite. Re-issuable from the MCP
-    # server's admin UI, so excluding from backups is the right tradeoff.
-    # Wildcard scout 2026-05-07 MCP C1.
-    if name.endswith('mcp_client.json'):
+    rel = name[len("user/"):] if name.startswith("user/") else name
+    if _is_excluded(rel, _exclude_patterns_setting()):
         return None
     return tarinfo
 
@@ -362,6 +382,49 @@ class Backup:
             backups[backup_type].sort(key=lambda x: x["filename"], reverse=True)
 
         return backups
+
+    def estimate_size(self, patterns=None, extra_patterns=None):
+        """Estimate the UNCOMPRESSED backup size ('before zip') with exclusions
+        applied, plus a per-top-level-folder breakdown. `patterns` (if given) is
+        the full user pattern list — used to preview unsaved edits on the page;
+        otherwise the saved `BACKUPS_EXCLUDE_PATTERNS` is used. `extra_patterns`
+        always adds on top (offsite plugin). The privacy floor always applies."""
+        base = _exclude_patterns_setting() if patterns is None else list(patterns)
+        all_patterns = [str(p).strip() for p in (base + list(extra_patterns or [])) if str(p).strip()]
+
+        total = 0
+        excluded = 0
+        breakdown = {}
+        if self.user_dir.exists():
+            for root, _dirs, files in os.walk(self.user_dir):
+                for fn in files:
+                    fp = Path(root) / fn
+                    try:
+                        rel = fp.relative_to(self.user_dir).as_posix()
+                        sz = fp.stat().st_size
+                    except (OSError, ValueError):
+                        continue
+                    if _is_excluded(rel, all_patterns):
+                        excluded += sz
+                        continue
+                    total += sz
+                    # Top-level entry (du --max-depth=1 style): history, rag,
+                    # memory.db, … The page hides the tiny ones behind "see all".
+                    top = rel.split('/', 1)[0]
+                    breakdown[top] = breakdown.get(top, 0) + sz
+
+        warn_mb = float(getattr(config, 'BACKUPS_MAX_SIZE_WARN_MB', 2048) or 0)
+        breakdown_list = sorted(
+            ({"name": k, "bytes": v} for k, v in breakdown.items()),
+            key=lambda x: x["bytes"], reverse=True,
+        )
+        return {
+            "total_bytes": total,
+            "excluded_bytes": excluded,
+            "breakdown": breakdown_list,
+            "warn_mb": warn_mb,
+            "over_warn": bool(warn_mb > 0 and total > warn_mb * 1024 * 1024),
+        }
 
     def delete_backup(self, filename):
         """Delete a specific backup file."""

@@ -55,7 +55,11 @@
     "short": "Number of manual backups to retain",
     "long": "How many manual backup files to keep. Manual backups are triggered via the Backup Now button in the UI. Oldest backups are deleted first when the limit is exceeded."
   },
-  
+  "BACKUPS_MAX_SIZE_WARN_MB": {
+    "short": "Warn when a backup grows past this size (MB)",
+    "long": "If the estimated backup size (after exclusions) exceeds this many megabytes, the Backup page shows a warning so you can exclude large folders. Soft warning only — it does not block backups. Set 0 to disable."
+  },
+
   "AUDIO_INPUT_DEVICE": {
     "short": "Input device index (null = auto-detect)",
     "long": "Specific audio input device to use by index number. Set to null for automatic detection which tries preferred devices first (pipewire, pulse on Linux). Use the Audio tab test feature to find your device index. Useful when you have multiple microphones."

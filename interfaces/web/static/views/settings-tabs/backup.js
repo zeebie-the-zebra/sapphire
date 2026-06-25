@@ -9,7 +9,7 @@ export default {
     name: 'Backup',
     icon: '\uD83D\uDCBE',
     description: 'Automatic and manual backups of user data',
-    keys: ['BACKUPS_ENABLED', 'BACKUPS_KEEP_DAILY', 'BACKUPS_KEEP_WEEKLY', 'BACKUPS_KEEP_MONTHLY', 'BACKUPS_KEEP_MANUAL'],
+    keys: ['BACKUPS_ENABLED', 'BACKUPS_HOUR', 'BACKUPS_KEEP_DAILY', 'BACKUPS_KEEP_WEEKLY', 'BACKUPS_KEEP_MONTHLY', 'BACKUPS_KEEP_MANUAL', 'BACKUPS_MAX_SIZE_WARN_MB'],
 
     render(ctx) {
         return `
@@ -43,6 +43,24 @@ export default {
                 `}
             </div>
 
+            <div class="backup-section-divider" style="margin-top:16px">
+                <h4 style="margin:0 0 8px;font-size:var(--font-sm)">Exclude from backups</h4>
+                <div style="font-size:var(--font-xs);color:var(--text-muted);margin-bottom:6px;line-height:1.7">
+                    Skip folders or files you don't want backed up &mdash; one per line.<br>
+                    Type a folder name to skip it &nbsp;&rarr;&nbsp; <code>piper-voices</code> &nbsp;&middot;&nbsp; <code>rag</code><br>
+                    Use a star <code>*</code> for "anything" &nbsp;&rarr;&nbsp; <code>*.log</code> (all log files) &nbsp;&middot;&nbsp; <code>history/*</code> (everything in history)<br>
+                    Saves automatically. Your passwords and keys are never backed up either way.
+                </div>
+                <textarea id="backup-excludes" rows="4" spellcheck="false"
+                    style="width:100%;font-family:var(--font-mono,monospace);font-size:var(--font-xs);padding:8px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-bright);resize:vertical;box-sizing:border-box"
+                    placeholder="rag/*&#10;*.log"></textarea>
+                <div style="display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap">
+                    <button class="btn-sm" id="backup-checksize">Check size</button>
+                    <span id="backup-size-result" style="font-size:var(--font-sm);color:var(--text-secondary)"></span>
+                </div>
+                <div id="backup-size-breakdown" style="margin-top:8px"></div>
+            </div>
+
             <div class="backup-section-divider">
                 <h4 style="margin:0 0 10px;font-size:var(--font-sm)">Backup Files</h4>
                 <div id="backup-lists"></div>
@@ -52,6 +70,72 @@ export default {
 
     async attachListeners(ctx, el) {
         await this.loadBackups(el);
+
+        // Exclude patterns — prefill from saved, AUTO-SAVE on blur + debounced
+        // typing (no Save Changes needed; backups read it live).
+        const exTa = el.querySelector('#backup-excludes');
+        if (exTa) {
+            const cur = ctx.getValue('BACKUPS_EXCLUDE_PATTERNS');
+            const arr = Array.isArray(cur) ? cur : (typeof cur === 'string' ? cur.split('\n') : []);
+            exTa.value = arr.join('\n');
+
+            let saveT = null, lastSaved = exTa.value;
+            const saveExcludes = async () => {
+                if (exTa.value === lastSaved) return;
+                lastSaved = exTa.value;
+                const lines = exTa.value.split('\n').map(s => s.trim()).filter(Boolean);
+                try {
+                    await fetch('/api/settings/batch', {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                        },
+                        body: JSON.stringify({ settings: { BACKUPS_EXCLUDE_PATTERNS: lines } })
+                    });
+                    if (ctx.settings) ctx.settings.BACKUPS_EXCLUDE_PATTERNS = lines;
+                } catch (_) { lastSaved = null; }  // allow retry on failure
+            };
+            exTa.addEventListener('input', () => { clearTimeout(saveT); saveT = setTimeout(saveExcludes, 1200); });
+            exTa.addEventListener('blur', () => { clearTimeout(saveT); saveExcludes(); });
+        }
+
+        el.querySelector('#backup-checksize')?.addEventListener('click', async () => {
+            const btn = el.querySelector('#backup-checksize');
+            const result = el.querySelector('#backup-size-result');
+            const breakdown = el.querySelector('#backup-size-breakdown');
+            const patterns = (exTa?.value || '').split('\n').map(s => s.trim()).filter(Boolean);
+            btn.disabled = true; result.textContent = 'Calculating…';
+            try {
+                const res = await fetch('/api/backup/estimate', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ patterns })
+                });
+                const r = await res.json();
+                result.innerHTML = `Backup size: <strong>${fmtSize(r.total_bytes)}</strong>`
+                    + (r.excluded_bytes ? ` <span style="color:var(--text-muted)">(excluded ${fmtSize(r.excluded_bytes)})</span>` : '')
+                    + (r.over_warn ? ` <span style="color:var(--danger,#e06c6c)">⚠ over ${r.warn_mb} MB — trim excludes</span>` : '');
+                const THRESH = 200 * 1024;  // hide the tiny stuff behind "see all"
+                const all = r.breakdown || [];
+                const big = all.filter(b => b.bytes >= THRESH);
+                const small = all.filter(b => b.bytes < THRESH);
+                const row = b => `<div style="display:flex;justify-content:space-between;gap:12px;font-size:var(--font-xs);padding:3px 0;border-bottom:1px solid var(--border)"><span style="font-family:var(--font-mono,monospace);overflow:hidden;text-overflow:ellipsis">${esc(b.name)}</span><span style="white-space:nowrap">${fmtSize(b.bytes)}</span></div>`;
+                breakdown.innerHTML = (big.map(row).join('') || '<div style="font-size:var(--font-xs);color:var(--text-muted)">Nothing over 200 KB</div>')
+                    + (small.length
+                        ? `<div id="bk-small" style="display:none">${small.map(row).join('')}</div>`
+                          + `<button id="bk-seeall" style="background:none;border:none;color:var(--trim);cursor:pointer;font-size:var(--font-xs);padding:6px 0">See all (${small.length} smaller)</button>`
+                        : '');
+                const seeAll = breakdown.querySelector('#bk-seeall');
+                if (seeAll) seeAll.addEventListener('click', () => {
+                    const sm = breakdown.querySelector('#bk-small');
+                    const open = sm.style.display !== 'none';
+                    sm.style.display = open ? 'none' : 'block';
+                    seeAll.textContent = open ? `See all (${small.length} smaller)` : 'Show less';
+                });
+            } catch (e) {
+                result.textContent = 'Estimate failed';
+            } finally { btn.disabled = false; }
+        });
 
         el.querySelector('#backup-now')?.addEventListener('click', async () => {
             const btn = el.querySelector('#backup-now');
@@ -160,7 +244,8 @@ function fmtSize(bytes) {
     if (!bytes) return '0 B';
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
 
 function esc(s) {
