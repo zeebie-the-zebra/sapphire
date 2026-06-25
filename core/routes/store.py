@@ -32,39 +32,24 @@ SYSTEM_PLUGINS_DIR = PROJECT_ROOT / "plugins"
 USER_PLUGINS_DIR = PROJECT_ROOT / "user" / "plugins"
 
 # ── Cache ────────────────────────────────────────────────────────────
-# Keyed by (path, sorted query string). Stores (expires_at, payload).
-# In-memory and per-process — restart clears it.
-_cache: dict[tuple, tuple[float, dict]] = {}
+# Keyed by (namespace, path, sorted query). Stores {expires_at, payload, etag}.
+# In-memory and per-process — restart clears it. Conditional GET: when an entry
+# is stale but we hold its ETag, we revalidate with If-None-Match and a 304
+# reuses the cached body (zero re-download) — once the store sends ETags.
+_cache: dict[tuple, dict] = {}
 _cache_lock = asyncio.Lock()
 
 
 def _cache_ttl() -> float:
     try:
-        return float(config.STORE_CACHE_TTL_SECONDS or 300)
+        return float(config.STORE_CACHE_TTL_SECONDS or 1800)
     except AttributeError:
-        return 300.0
+        return 1800.0
 
 
 def _cache_key(path: str, params: dict, namespace: Optional[str] = None) -> tuple:
     items = tuple(sorted((k, str(v)) for k, v in params.items() if v is not None))
     return (namespace or "", path, items)
-
-
-async def _cache_get(key: tuple) -> Optional[dict]:
-    async with _cache_lock:
-        entry = _cache.get(key)
-        if not entry:
-            return None
-        expires_at, payload = entry
-        if time.monotonic() > expires_at:
-            _cache.pop(key, None)
-            return None
-        return payload
-
-
-async def _cache_set(key: tuple, payload: dict) -> None:
-    async with _cache_lock:
-        _cache[key] = (time.monotonic() + _cache_ttl(), payload)
 
 
 # ── Store URL helpers ────────────────────────────────────────────────
@@ -221,29 +206,57 @@ def _annotate_item(item: dict, install_index: dict[str, dict]) -> dict:
 async def _proxy_get(path: str, params: Optional[dict] = None,
                      namespace: Optional[str] = None) -> dict:
     """
-    Proxy a GET to the store. Caches successful responses for STORE_CACHE_TTL_SECONDS.
-    On unreachable / non-2xx, returns last cached value if present, else
-    a graceful-empty payload so the UI can render an empty state.
+    Proxy a GET to the store, cached for STORE_CACHE_TTL_SECONDS. A fresh entry
+    is served from cache (no network). A stale entry is revalidated with a
+    conditional GET (If-None-Match) — a 304 reuses the cached body and resets
+    the timer. On error / non-2xx, serves the last cached body if we have one,
+    else a graceful-empty payload so the UI renders cleanly.
     """
     params = params or {}
     key = _cache_key(path, params, namespace)
-    cached = await _cache_get(key)
-    if cached is not None:
-        return cached
+    now = time.monotonic()
+
+    async with _cache_lock:
+        entry = _cache.get(key)
+    if entry and now <= entry["expires_at"]:
+        return entry["payload"]  # fresh — no network
+
+    headers = {}
+    if entry and entry.get("etag"):
+        headers["If-None-Match"] = entry["etag"]
 
     url = f"{_store_base(namespace)}{path}"
     try:
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
-            resp = await client.get(url, params={k: v for k, v in params.items() if v is not None})
-        if resp.status_code != 200:
-            logger.warning(f"[store] {path} returned {resp.status_code}")
-            return _graceful_empty(path, params)
-        data = resp.json()
-        await _cache_set(key, data)
-        return data
-    except (httpx.HTTPError, ValueError) as e:
+            resp = await client.get(
+                url,
+                params={k: v for k, v in params.items() if v is not None},
+                headers=headers,
+            )
+    except httpx.HTTPError as e:
         logger.warning(f"[store] fetch failed: {path} — {e}")
-        return _graceful_empty(path, params)
+        return entry["payload"] if entry else _graceful_empty(path, params)
+
+    if resp.status_code == 304 and entry:
+        async with _cache_lock:
+            entry["expires_at"] = now + _cache_ttl()
+            _cache[key] = entry
+        return entry["payload"]  # unchanged — zero re-download
+
+    if resp.status_code != 200:
+        logger.warning(f"[store] {path} returned {resp.status_code}")
+        return entry["payload"] if entry else _graceful_empty(path, params)
+
+    try:
+        data = resp.json()
+    except ValueError as e:
+        logger.warning(f"[store] bad json: {path} — {e}")
+        return entry["payload"] if entry else _graceful_empty(path, params)
+
+    async with _cache_lock:
+        _cache[key] = {"expires_at": now + _cache_ttl(), "payload": data,
+                       "etag": resp.headers.get("ETag")}
+    return data
 
 
 async def _proxy_get_bytes(path: str, namespace: Optional[str] = None) -> Optional[bytes]:
@@ -384,8 +397,18 @@ async def store_personas_list(
 ):
     """List or search personas."""
     _ensure_enabled()
-    return await _items_query(q, category, featured, sort, page, per_page,
+    data = await _items_query(q, category, featured, sort, page, per_page,
                               namespace=PERSONA_NAMESPACE, annotate=False)
+    # The grid only needs display fields. Drop export_content (the full prompt
+    # bundle — ~82% of the payload); the detail/import path re-fetches it per
+    # persona. Build new item dicts so the in-memory cache copy stays intact.
+    if isinstance(data.get("items"), list):
+        data = dict(data)
+        data["items"] = [
+            {k: v for k, v in it.items() if k != "export_content"}
+            for it in data["items"]
+        ]
+    return data
 
 
 @router.get("/api/store/personas/categories")
