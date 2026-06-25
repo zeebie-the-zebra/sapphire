@@ -56,3 +56,9 @@ claude
 infra
 tools/mjolnir/output/
 tools/mjolnir/silent.ogg
+
+# Restore scratch + rollback (full private copies of user/ — never commit these)
+user.old
+user.old.prev
+user.new
+user_restore

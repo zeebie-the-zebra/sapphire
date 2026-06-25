@@ -431,7 +431,33 @@ class CredentialsManager:
             except Exception as e:
                 logger.error(f"Failed to save credentials to {CREDENTIALS_FILE}: {e}")
                 return False
-    
+
+    # =========================================================================
+    # Backup encryption password — scrambled at rest in credentials.json
+    # (~/.config/sapphire), never inside the user/ backup archive.
+    # =========================================================================
+
+    def set_backup_password(self, password: str) -> bool:
+        """Store (or clear with '') the backup-encryption password."""
+        with self._lock:
+            try:
+                self._credentials['backup_password'] = self._scramble(password) if password else ''
+                if not self._save():
+                    return False
+                logger.info("Backup encryption password " + ("set" if password else "cleared"))
+                return True
+            except Exception as e:
+                logger.error(f"Failed to set backup password: {e}")
+                return False
+
+    def get_backup_password(self) -> str:
+        """Plaintext backup password (machine-bound unscramble), or '' if unset."""
+        raw = (self._credentials or {}).get('backup_password', '')
+        return self._unscramble(raw) if raw else ''
+
+    def has_backup_password(self) -> bool:
+        return bool((self._credentials or {}).get('backup_password'))
+
     # =========================================================================
     # Scramble (reversible encryption for sensitive fields)
     # =========================================================================

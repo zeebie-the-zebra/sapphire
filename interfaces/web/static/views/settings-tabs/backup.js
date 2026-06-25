@@ -61,15 +61,30 @@ export default {
                 <div id="backup-size-breakdown" style="margin-top:8px"></div>
             </div>
 
+            <div class="backup-section-divider" style="margin-top:16px">
+                <h4 style="margin:0 0 8px;font-size:var(--font-sm)">Encryption</h4>
+                <div id="backup-enc"></div>
+            </div>
+
             <div class="backup-section-divider">
                 <h4 style="margin:0 0 10px;font-size:var(--font-sm)">Backup Files</h4>
                 <div id="backup-lists"></div>
+            </div>
+
+            <div class="backup-section-divider" style="margin-top:16px">
+                <h4 style="margin:0 0 8px;font-size:var(--font-sm)">Restore from a file</h4>
+                <div style="font-size:var(--font-xs);color:var(--text-muted);margin-bottom:6px;line-height:1.6">
+                    Upload a backup (<code>.tar.gz</code> or <code>.sapphirebak</code>) of a <code>user/</code> folder. Sapphire checks it, then restarts and swaps it in. Your current data is kept as <code>user.old</code> for rollback.
+                </div>
+                <button class="btn-sm" id="backup-restore-upload">Choose a backup file…</button>
+                <input type="file" id="backup-restore-file" accept=".tar.gz,.gz,.sapphirebak" style="display:none">
             </div>
         `;
     },
 
     async attachListeners(ctx, el) {
         await this.loadBackups(el);
+        await this.loadEncryption(el);
 
         // Exclude patterns — prefill from saved, AUTO-SAVE on blur + debounced
         // typing (no Save Changes needed; backups read it live).
@@ -137,6 +152,32 @@ export default {
             } finally { btn.disabled = false; }
         });
 
+        // Restore from an uploaded file
+        const upBtn = el.querySelector('#backup-restore-upload');
+        const upInput = el.querySelector('#backup-restore-file');
+        upBtn?.addEventListener('click', () => upInput.click());
+        upInput?.addEventListener('change', async () => {
+            const f = upInput.files[0];
+            if (!f) return;
+            let password = '';
+            if (f.name.endsWith('.sapphirebak')) {
+                password = await passwordPrompt(`"${f.name}" looks encrypted. Enter the backup password:`);
+                if (password === null) { upInput.value = ''; return; }
+            }
+            if (!confirm(`Restore from "${f.name}"?\n\nThis RESTARTS Sapphire and replaces your current user data.\nYour current data is kept as "user.old" for rollback.`)) {
+                upInput.value = ''; return;
+            }
+            const fd = new FormData();
+            fd.append('file', f);
+            fd.append('password', password || '');
+            try {
+                const res = await fetch('/api/backup/restore-upload', { method: 'POST', headers: { 'X-CSRF-Token': csrf() }, body: fd });
+                if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || 'Restore failed'); }
+                ui.showToast('Restoring… Sapphire is restarting. This page will reconnect shortly.', 'success', 9000);
+            } catch (e) { ui.showToast(`Restore failed: ${e.message}`, 'error'); }
+            finally { upInput.value = ''; }
+        });
+
         el.querySelector('#backup-now')?.addEventListener('click', async () => {
             const btn = el.querySelector('#backup-now');
             btn.disabled = true;
@@ -170,6 +211,74 @@ export default {
         this.renderBackups(el);
     },
 
+    async loadEncryption(el) {
+        const box = el.querySelector('#backup-enc');
+        if (!box) return;
+        let s = { enabled: false, has_password: false };
+        try { s = await (await fetch('/api/backup/encryption-status')).json(); } catch {}
+
+        box.innerHTML = `
+            <div style="font-size:var(--font-xs);color:var(--text-muted);line-height:1.6;margin-bottom:8px">
+                Encrypts every backup with a password only you know. Required for offsite backups.
+            </div>
+            <div style="background:rgba(224,108,108,0.12);border:1px solid var(--danger,#e06c6c);border-radius:6px;padding:10px;font-size:var(--font-xs);line-height:1.6;margin-bottom:10px">
+                &#9888; <strong>Write your password down.</strong> If you lose it, your encrypted backups are <strong>gone for good</strong> &mdash; there is no recovery. Not even us.
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;font-size:var(--font-sm);margin-bottom:10px">
+                <input type="checkbox" id="enc-toggle" ${s.enabled ? 'checked' : ''} ${s.has_password ? '' : 'disabled'}>
+                Encrypt backups ${s.has_password ? '' : '<span style="color:var(--text-muted)">&mdash; set a password first</span>'}
+            </label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+                <input type="password" id="enc-pw" autocomplete="new-password" placeholder="${s.has_password ? 'Change password…' : 'Set a password…'}"
+                    style="flex:1;min-width:180px;padding:7px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-bright);box-sizing:border-box">
+                <button class="btn-sm" id="enc-setpw">${s.has_password ? 'Change' : 'Set password'}</button>
+                ${s.has_password ? '<button class="btn-sm" id="enc-test">Test</button>' : ''}
+                <span id="enc-msg" style="font-size:var(--font-xs);color:var(--text-secondary)"></span>
+            </div>
+            ${s.has_password ? '<div style="font-size:var(--font-xs);color:var(--text-muted)">&#10003; Password is set.</div>' : ''}
+        `;
+
+        box.querySelector('#enc-toggle')?.addEventListener('change', async (e) => {
+            const on = e.target.checked;
+            try {
+                const r = await fetch('/api/settings/batch', {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
+                    body: JSON.stringify({ settings: { BACKUPS_ENCRYPT: on } })
+                });
+                if (!r.ok) throw new Error();
+                ui.showToast(on ? 'Backups will be encrypted' : 'Encryption turned off', 'success');
+            } catch { e.target.checked = !on; ui.showToast('Failed to change setting', 'error'); }
+        });
+
+        box.querySelector('#enc-setpw')?.addEventListener('click', async () => {
+            const pw = box.querySelector('#enc-pw').value;
+            const msg = box.querySelector('#enc-msg');
+            if (!pw) { msg.textContent = 'Enter a password first'; return; }
+            try {
+                const r = await fetch('/api/backup/password', {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
+                    body: JSON.stringify({ password: pw })
+                });
+                if (!r.ok) throw new Error();
+                ui.showToast('Password saved — write it down!', 'success');
+                await this.loadEncryption(el);
+            } catch { msg.textContent = 'Failed to save'; }
+        });
+
+        box.querySelector('#enc-test')?.addEventListener('click', async () => {
+            const msg = box.querySelector('#enc-msg');
+            msg.textContent = 'Testing…';
+            try {
+                const r = await (await fetch('/api/backup/test-encryption', {
+                    method: 'POST', headers: { 'X-CSRF-Token': csrf() }
+                })).json();
+                msg.innerHTML = r.ok
+                    ? '<span style="color:#6c6">&#10003; Encryption works</span>'
+                    : `<span style="color:var(--danger,#e06c6c)">&#10007; ${esc(r.error || 'failed')}</span>`;
+            } catch { msg.textContent = 'Test failed'; }
+        });
+    },
+
     renderBackups(el) {
         const lists = el.querySelector('#backup-lists');
         const stats = el.querySelector('#backup-stats');
@@ -198,9 +307,10 @@ export default {
                     <div class="backup-type-body" style="display:${isOpen ? 'block' : 'none'}">
                         ${items.length ? items.map(b => `
                             <div class="backup-item" data-filename="${esc(b.filename)}">
-                                <span class="backup-item-date">${b.date} ${b.time}</span>
+                                <span class="backup-item-date">${b.encrypted ? '🔒 ' : ''}${b.date} ${b.time}</span>
                                 <span class="backup-item-size">${fmtSize(b.size)}</span>
                                 <div class="backup-item-actions">
+                                    <button class="btn-icon backup-restore" data-filename="${esc(b.filename)}" data-enc="${b.encrypted ? '1' : ''}" title="Restore this backup (restarts Sapphire)">\u21BB</button>
                                     <a class="btn-icon backup-dl" href="/api/backup/download/${encodeURIComponent(b.filename)}" download title="Download">\u2B07</a>
                                     <button class="btn-icon danger backup-del" data-filename="${esc(b.filename)}" title="Delete">\u2715</button>
                                 </div>
@@ -237,6 +347,28 @@ export default {
                 } catch { ui.showToast('Delete failed', 'error'); }
             });
         });
+
+        // Restore buttons — destructive: restarts Sapphire and swaps user/.
+        lists.querySelectorAll('.backup-restore').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const filename = btn.dataset.filename;
+                let password = '';
+                if (btn.dataset.enc === '1') {
+                    password = await passwordPrompt(`"${filename}" is encrypted. Enter the backup password:`);
+                    if (password === null) return;
+                }
+                if (!confirm(`Restore "${filename}"?\n\nThis RESTARTS Sapphire and replaces your current user data.\nYour current data is kept as "user.old" for rollback.`)) return;
+                try {
+                    const res = await fetch('/api/backup/restore', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
+                        body: JSON.stringify({ filename, password })
+                    });
+                    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || 'Restore failed'); }
+                    ui.showToast('Restoring… Sapphire is restarting. This page will reconnect shortly.', 'success', 9000);
+                } catch (e) { ui.showToast(`Restore failed: ${e.message}`, 'error'); }
+            });
+        });
     }
 };
 
@@ -251,4 +383,39 @@ function fmtSize(bytes) {
 function esc(s) {
     if (!s) return '';
     return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function csrf() {
+    return document.querySelector('meta[name="csrf-token"]')?.content || '';
+}
+
+// Masked password prompt (window.prompt shows plaintext). Resolves the value, or
+// null if cancelled.
+function passwordPrompt(message) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay active';
+        overlay.innerHTML = `
+            <div class="modal-base" style="max-width:420px;width:92vw;padding:18px">
+                <div style="font-size:var(--font-sm);margin-bottom:10px;line-height:1.5">${esc(message)}</div>
+                <input type="password" id="pwp-input" autocomplete="off"
+                    style="width:100%;padding:8px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-bright);box-sizing:border-box;margin-bottom:12px">
+                <div class="modal-actions" style="display:flex;gap:8px;justify-content:flex-end">
+                    <button class="btn-sm" id="pwp-cancel">Cancel</button>
+                    <button class="btn-sm" id="pwp-ok">OK</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('#pwp-input');
+        input.focus();
+        const done = (val) => { document.removeEventListener('keydown', onKey); overlay.remove(); resolve(val); };
+        const onKey = (e) => {
+            if (e.key === 'Escape') done(null);
+            else if (e.key === 'Enter') done(input.value);
+        };
+        document.addEventListener('keydown', onKey);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+        overlay.querySelector('#pwp-cancel').addEventListener('click', () => done(null));
+        overlay.querySelector('#pwp-ok').addEventListener('click', () => done(input.value));
+    });
 }

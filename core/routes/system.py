@@ -97,6 +97,153 @@ async def estimate_backup(request: Request, _=Depends(require_login)):
     return backup_manager.estimate_size(patterns=clean, extra_patterns=extra)
 
 
+@router.get("/api/backup/encryption-status")
+async def backup_encryption_status(request: Request, _=Depends(require_login)):
+    """Is backup encryption on, and is a password set?"""
+    from core.credentials_manager import credentials
+    return {
+        "enabled": bool(getattr(config, 'BACKUPS_ENCRYPT', False)),
+        "has_password": credentials.has_backup_password(),
+    }
+
+
+@router.put("/api/backup/password")
+async def set_backup_password(request: Request, _=Depends(require_login)):
+    """Set (or clear with empty) the backup-encryption password. Stored
+    scrambled in ~/.config/sapphire — never inside the backup archive."""
+    from core.credentials_manager import credentials
+    data = await request.json() or {}
+    password = data.get("password", "")
+    if not isinstance(password, str):
+        raise HTTPException(status_code=400, detail="password must be a string")
+    if credentials.set_backup_password(password):
+        return {"status": "success", "has_password": credentials.has_backup_password()}
+    raise HTTPException(status_code=500, detail="Failed to store backup password")
+
+
+@router.post("/api/backup/test-encryption")
+async def test_backup_encryption(request: Request, _=Depends(require_login)):
+    """Round-trip a small sample through the stored password to prove encryption
+    is operational (crypto present, password set, encrypt→decrypt matches)."""
+    from core.credentials_manager import credentials
+    pw = credentials.get_backup_password()
+    if not pw:
+        raise HTTPException(status_code=400, detail="No backup password is set")
+    import os
+    import shutil
+    import tempfile
+    from core import backup_crypto
+    d = tempfile.mkdtemp()
+    try:
+        src, enc, out = (os.path.join(d, n) for n in ("s", "e", "o"))
+        sample = os.urandom(4096)
+        with open(src, "wb") as f:
+            f.write(sample)
+        backup_crypto.encrypt_file(src, enc, pw)
+        backup_crypto.decrypt_file(enc, out, pw)
+        with open(out, "rb") as f:
+            ok = f.read() == sample
+        return {"ok": bool(ok)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _schedule_restart():
+    """Trigger a restart shortly after the response flushes (mirrors the update
+    route). main.py applies the staged restore before re-spawning sapphire.py."""
+    import asyncio
+    from core.api_fastapi import get_restart_callback
+    cb = get_restart_callback()
+    if not cb:
+        raise HTTPException(status_code=503, detail="Restart not available — cannot apply restore")
+
+    async def _delayed():
+        await asyncio.sleep(0.8)
+        try:
+            cb()
+        except Exception:
+            pass
+    asyncio.create_task(_delayed())
+
+
+def _stage_restore_from(source_path, password: str, source_label: str, trusted: bool = False):
+    """Decrypt (if needed), validate (real tar.gz rooted at user/), and stage the
+    backup for a restart-time swap. Returns the archive's top-level entries.
+    `trusted` = the user's own backup (faithful extract); False = uploaded (strict).
+    Raises HTTPException on any problem (wrong password, not a backup, etc.)."""
+    import tarfile
+    import uuid
+    from core import backup_crypto
+    from core import restore as restore_mod
+    restore_mod.RESTORE_DIR.mkdir(parents=True, exist_ok=True)
+    tar_path = restore_mod.RESTORE_DIR / f"staging.{uuid.uuid4().hex}.tar.gz"
+
+    try:
+        if backup_crypto.is_encrypted_backup(source_path):
+            if not password:
+                raise HTTPException(status_code=400, detail="This backup is encrypted — a password is required")
+            try:
+                backup_crypto.decrypt_file(source_path, tar_path, password)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+        else:
+            import shutil as _sh
+            _sh.copy2(source_path, tar_path)
+
+        try:
+            roots = restore_mod.validate_tar(tar_path)
+        except (ValueError, tarfile.TarError) as e:
+            raise HTTPException(status_code=400, detail=f"Not a valid Sapphire backup: {e}")
+
+        restore_mod.request_restore(tar_path, source=source_label, trusted=trusted)
+        return roots
+    except HTTPException:
+        tar_path.unlink(missing_ok=True)
+        raise
+
+
+@router.post("/api/backup/restore")
+async def restore_backup(request: Request, _=Depends(require_login)):
+    """Restore one of the existing backups over user/. Validates + decrypts (if
+    encrypted), stages it, and restarts — main.py swaps user/ before sapphire
+    re-spawns (the current user/ is kept as user.old for rollback)."""
+    from core.backup import backup_manager
+    data = await request.json() or {}
+    filename = data.get("filename")
+    password = data.get("password", "")
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename required")
+    path = backup_manager.get_backup_path(filename)
+    if not path:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    roots = _stage_restore_from(path, password, f"backup:{filename}", trusted=True)
+    _schedule_restart()
+    return {"status": "restoring", "roots": roots}
+
+
+@router.post("/api/backup/restore-upload")
+async def restore_backup_upload(request: Request, file: UploadFile = File(...),
+                                password: str = Form(""), _=Depends(require_login)):
+    """Restore from an uploaded .tar.gz / .sapphirebak of a user/ folder."""
+    from core import restore as restore_mod
+    restore_mod.RESTORE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = restore_mod.RESTORE_DIR / "upload.tmp"
+    try:
+        with open(tmp, "wb") as f:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+        roots = _stage_restore_from(tmp, password, f"upload:{file.filename}")
+    finally:
+        tmp.unlink(missing_ok=True)
+    _schedule_restart()
+    return {"status": "restoring", "roots": roots}
+
+
 # =============================================================================
 # AUDIO DEVICE ROUTES
 # =============================================================================

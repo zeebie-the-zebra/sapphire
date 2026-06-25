@@ -125,6 +125,18 @@ class Backup:
             self.rotate_backups()
         return f"Scheduled backup complete: {', '.join(results)}"
 
+    def _encryption_password(self):
+        """The backup-encryption password if encryption is enabled AND a
+        password is set, else None (→ unencrypted backup)."""
+        if not getattr(config, 'BACKUPS_ENCRYPT', False):
+            return None
+        try:
+            from core.credentials_manager import credentials
+            return credentials.get_backup_password() or None
+        except Exception as e:
+            logger.warning(f"Could not read backup password: {e}")
+            return None
+
     def create_backup(self, backup_type="manual"):
         """Create a backup of the user/ directory.
 
@@ -139,9 +151,18 @@ class Backup:
             return None
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        filename = f"sapphire_{timestamp}_{backup_type}.tar.gz"
+        password = self._encryption_password()
+        encrypt = password is not None
+        if getattr(config, 'BACKUPS_ENCRYPT', False) and not encrypt:
+            logger.warning("BACKUPS_ENCRYPT is on but no backup password is set — "
+                           "writing an UNENCRYPTED backup. Set a password on the Backup page.")
+        ext = "sapphirebak" if encrypt else "tar.gz"
+        filename = f"sapphire_{timestamp}_{backup_type}.{ext}"
         filepath = self.backup_dir / filename
-        partial = filepath.with_suffix('.gz.partial')
+        # Plaintext tar is always written here first; when encrypting it's an
+        # intermediate that gets encrypted into `filepath`, then deleted.
+        partial = self.backup_dir / f"sapphire_{timestamp}_{backup_type}.tar.gz.partial"
+        enc_partial = self.backup_dir / (filename + ".partial")
 
         try:
             # Checkpoint SQLite WAL files before backup. DBs whose checkpoint
@@ -166,30 +187,43 @@ class Backup:
             with tarfile.open(partial, "w:gz") as tar:
                 tar.add(self.user_dir, arcname="user",
                         filter=(_filter_with_busy if failed_checkpoints else _backup_filter))
-            # Restrict perms BEFORE rename — backup contains credentials.json
-            # (which is itself 0600). Without this, the tarball is world-readable
-            # by default umask. Multi-user system risk; single-user is fine but
-            # belt-and-suspenders. Day-ruiner scout 2026-05-07 #L.
-            try:
-                os.chmod(partial, 0o600)
-            except OSError as _e:
-                logger.warning(f"Could not chmod backup: {_e}")
-            # Atomic rename — `list_backups` glob excludes `.partial` so a
-            # truncated archive never appears as a legitimate backup.
-            partial.replace(filepath)
+            # chmod 0600 BEFORE rename — backups contain credentials.json (0600);
+            # without this the archive is world-readable by default umask.
+            # Day-ruiner scout 2026-05-07 #L.
+            if encrypt:
+                # Encrypt the plaintext tar into the final .sapphirebak, drop the
+                # plaintext intermediate.
+                from core.backup_crypto import encrypt_file
+                encrypt_file(partial, enc_partial, password)
+                try:
+                    os.chmod(enc_partial, 0o600)
+                except OSError as _e:
+                    logger.warning(f"Could not chmod backup: {_e}")
+                enc_partial.replace(filepath)   # atomic; list_backups skips .partial
+                try:
+                    partial.unlink()
+                except OSError:
+                    pass
+            else:
+                try:
+                    os.chmod(partial, 0o600)
+                except OSError as _e:
+                    logger.warning(f"Could not chmod backup: {_e}")
+                partial.replace(filepath)
 
             size_mb = filepath.stat().st_size / (1024 * 1024)
-            logger.info(f"Created backup: {filename} ({size_mb:.2f} MB)")
+            logger.info(f"Created {'encrypted ' if encrypt else ''}backup: {filename} ({size_mb:.2f} MB)")
             return filename
         except Exception as e:
             logger.error(f"Backup failed: {e}")
-            # Clean up partial on failure so it doesn't accumulate.
-            try:
-                partial.unlink()
-            except FileNotFoundError:
-                pass
-            except Exception as cleanup_err:
-                logger.warning(f"Backup partial cleanup failed: {cleanup_err}")
+            # Clean up both partials on failure so they don't accumulate.
+            for p in (partial, enc_partial):
+                try:
+                    p.unlink()
+                except FileNotFoundError:
+                    pass
+                except Exception as cleanup_err:
+                    logger.warning(f"Backup partial cleanup failed: {cleanup_err}")
             return None
 
     def _checkpoint_databases(self):
@@ -362,7 +396,8 @@ class Backup:
         if not self.backup_dir.exists():
             return backups
 
-        for f in self.backup_dir.glob("sapphire_*.tar.gz"):
+        for f in (list(self.backup_dir.glob("sapphire_*.tar.gz"))
+                  + list(self.backup_dir.glob("sapphire_*.sapphirebak"))):
             try:
                 parts = f.stem.split("_")
                 if len(parts) >= 4:
@@ -373,7 +408,8 @@ class Backup:
                             "date": parts[1],
                             "time": parts[2],
                             "size": f.stat().st_size,
-                            "path": str(f)
+                            "path": str(f),
+                            "encrypted": f.name.endswith(".sapphirebak"),
                         })
             except Exception as e:
                 logger.warning(f"Could not parse backup filename {f.name}: {e}")
@@ -434,7 +470,7 @@ class Backup:
         filepath = self.backup_dir / filename
         if not filepath.exists():
             return False
-        if not filepath.suffix == ".gz" or not filename.startswith("sapphire_"):
+        if filepath.suffix not in (".gz", ".sapphirebak") or not filename.startswith("sapphire_"):
             return False
 
         try:
