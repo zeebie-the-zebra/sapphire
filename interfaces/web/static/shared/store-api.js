@@ -90,8 +90,14 @@ export async function getStorePersonaCategories() {
 
 
 /** Download a persona's PNG card server-side and import it. */
-export async function installPersonaFromStore(slug) {
-    return fetchWithTimeout(`/api/store/personas/${encodeURIComponent(slug)}/install`, {
+export async function installPersonaFromStore(slug, { overwrite_prompt = false, overwrite_avatar = false, overwrite_persona = false, keep_components = [] } = {}) {
+    const qs = new URLSearchParams();
+    if (overwrite_prompt) qs.set('overwrite_prompt', 'true');
+    if (overwrite_avatar) qs.set('overwrite_avatar', 'true');
+    if (overwrite_persona) qs.set('overwrite_persona', 'true');
+    if (keep_components && keep_components.length) qs.set('keep_components', keep_components.join(','));
+    const q = qs.toString();
+    return fetchWithTimeout(`/api/store/personas/${encodeURIComponent(slug)}/install${q ? '?' + q : ''}`, {
         method: 'POST',
     });
 }

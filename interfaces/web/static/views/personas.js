@@ -3,6 +3,7 @@ import { listPersonas, getPersona, createPersona, updatePersona, deletePersona,
          duplicatePersona, loadPersona, createFromChat, uploadAvatar, deleteAvatar,
          importPersona, importPersonaCard,
          avatarUrl, avatarImg, avatarFallback } from '../shared/persona-api.js';
+import { confirmPersonaImport, extractBundleFromPng } from '../shared/persona-import-confirm.js';
 import { PERSONA_TABS } from '../shared/persona-tabs.js';
 import { mountScenePicker } from '../shared/scene-picker.js';
 import { renderSectionTabs, bindSectionTabs } from '../shared/section-tabs.js';
@@ -609,63 +610,57 @@ function bindEvents() {
 
     // Import (accepts both persona bundles and plain prompt exports)
     container.querySelector('#pa-import')?.addEventListener('click', () => {
+        // Collision + overwrite (with the piece-preview) is handled by
+        // confirmPersonaImport — the dialog is just the file picker now.
+        // onImport/onImportFile return false so the dialog skips its own toast.
         showImportDialog({
             type: 'Persona or Prompt',
             fileAccept: '.json,.png',
-            overwrites: [
-                { key: 'prompt', label: 'Overwrite prompt if it already exists' },
-                { key: 'avatar', label: 'Overwrite avatar if it already exists' },
-            ],
-            existingNames: personas.map(p => p.name),
+            existingNames: [],
             validate: (d) => {
-                // Full persona bundle
                 if (d.sapphire_export && d.type === 'persona') return null;
-                // Prompt export (sapphire_export format)
                 if (d.sapphire_export && d.type === 'prompt' && d.prompt) return null;
-                // Legacy prompt export (just {name, prompt, components})
                 if (d.prompt && (d.prompt.type || d.prompt.content)) return null;
                 return 'Not a valid Sapphire persona or prompt export';
             },
             getName: (d) => d.name || 'imported',
-            onImport: async (parsed, { name, overwrites }) => {
+            onImport: async (parsed, { name }) => {
                 let bundle;
                 if (parsed.sapphire_export && parsed.type === 'persona') {
-                    // Full persona — pass through
                     bundle = parsed;
                 } else {
                     // Prompt-only — wrap into a persona bundle with defaults
                     const promptData = parsed.prompt || {};
                     const promptName = parsed.name || name;
                     bundle = {
-                        sapphire_export: true,
-                        type: 'persona',
-                        version: 1,
-                        name,
-                        tagline: '',
-                        trim_color: '',
-                        voice: {},
-                        avatar: null,
+                        sapphire_export: true, type: 'persona', version: 1,
+                        name, tagline: '', trim_color: '', voice: {}, avatar: null,
                         prompt: { name: promptName, data: promptData },
                     };
                     if (parsed.components) bundle.components = parsed.components;
                 }
                 bundle.name = name;
-                bundle.overwrite_prompt = overwrites.prompt || false;
-                bundle.overwrite_avatar = overwrites.avatar || false;
-                await importPersona(bundle);
-                selectedName = name.replace(/\s+/g, '_').toLowerCase();
-            },
-            onImportFile: async (file, { overwrites }) => {
-                const r = await importPersonaCard(file, {
-                    overwrite_prompt: overwrites.prompt,
-                    overwrite_avatar: overwrites.avatar,
+                await confirmPersonaImport({
+                    bundle,
+                    doImport: (flags) => importPersona({ ...bundle, ...flags }),
+                    onDone: async () => {
+                        selectedName = name.replace(/\s+/g, '_').toLowerCase();
+                        await loadData(); render();
+                    },
                 });
-                selectedName = r.name;
-                return r.name;
+                return false;
             },
-            onDone: async () => {
-                await loadData();
-                render();
+            onImportFile: async (file) => {
+                const bundle = (await extractBundleFromPng(file)) || { name: file.name.replace(/\.png$/i, '') };
+                await confirmPersonaImport({
+                    bundle,
+                    doImport: (flags) => importPersonaCard(file, flags),
+                    onDone: async () => {
+                        selectedName = (bundle.name || '').replace(/\s+/g, '_').toLowerCase();
+                        await loadData(); render();
+                    },
+                });
+                return false;
             },
         });
     });

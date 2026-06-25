@@ -831,9 +831,22 @@ async def _import_persona_from_bundle(data):
     name = data.get("name", "imported")
     overwrite_prompt = data.get("overwrite_prompt", False)
     overwrite_avatar = data.get("overwrite_avatar", False)
+    overwrite_persona = data.get("overwrite_persona", False)
 
-    # Check persona name collision (frontend handles rename prompt)
-    if persona_manager.exists(name):
+    # Per-piece keep-list ("type/key" strings the user unchecked) — even with
+    # overwrite_prompt, these specific components keep their local value.
+    _keep = set()
+    for kc in (data.get("keep_components") or []):
+        if isinstance(kc, str) and "/" in kc:
+            t, k = kc.split("/", 1)
+            _keep.add((t, k))
+
+    # Collision: a persona with this (sanitized) name already exists. Block with
+    # 409 unless the caller explicitly opted into overwrite — the import-confirm
+    # UI shows what will be replaced before setting this flag.
+    safe_name = persona_manager._sanitize_name(name)
+    persona_exists = persona_manager.exists(safe_name)
+    if persona_exists and not overwrite_persona:
         raise HTTPException(status_code=409, detail=f"Persona '{name}' already exists")
 
     # Import prompt + components first
@@ -866,6 +879,8 @@ async def _import_persona_from_bundle(data):
                     if not isinstance(defs, dict):
                         continue
                     for key, value in defs.items():
+                        if (comp_type, key) in _keep:
+                            continue  # user unchecked this piece — keep local value
                         existing_piece = prompt_manager.components.get(comp_type, {}).get(key)
                         if existing_piece and not overwrite_prompt:
                             continue
@@ -890,13 +905,17 @@ async def _import_persona_from_bundle(data):
     if data.get("trim_color"):
         persona_settings["trim_color"] = data["trim_color"]
 
-    # Create persona
+    # Create or overwrite the persona record
     persona_data = {
         "name": name,
         "tagline": data.get("tagline", ""),
         "settings": persona_settings,
     }
-    if not persona_manager.create(name, persona_data):
+    if persona_exists:
+        # Update in place — no "name" key so update() doesn't trigger a rename.
+        if not persona_manager.update(safe_name, {"tagline": persona_data["tagline"], "settings": persona_settings}):
+            raise HTTPException(status_code=500, detail="Failed to overwrite persona")
+    elif not persona_manager.create(name, persona_data):
         raise HTTPException(status_code=500, detail="Failed to create persona")
 
     # Import avatar
@@ -925,7 +944,9 @@ async def _import_persona_from_bundle(data):
 
 
 async def _import_persona_card_bytes(raw: bytes, overwrite_prompt: bool = False,
-                                     overwrite_avatar: bool = False):
+                                     overwrite_avatar: bool = False,
+                                     overwrite_persona: bool = False,
+                                     keep_components: list = None):
     """Import a persona from PNG card bytes — reads the bundle from the
     `sapphire_persona` chunk and uses the PNG's pixels as the avatar. Shared by
     the file-upload endpoint and the persona-store install route."""
@@ -956,6 +977,8 @@ async def _import_persona_card_bytes(raw: bytes, overwrite_prompt: bool = False,
     data["avatar"] = f"data:image/png;base64,{base64.b64encode(raw).decode('ascii')}"
     data["overwrite_prompt"] = overwrite_prompt
     data["overwrite_avatar"] = overwrite_avatar
+    data["overwrite_persona"] = overwrite_persona
+    data["keep_components"] = keep_components or []
     return await _import_persona_from_bundle(data)
 
 
@@ -963,10 +986,13 @@ async def _import_persona_card_bytes(raw: bytes, overwrite_prompt: bool = False,
 async def import_persona_card(request: Request, file: UploadFile = File(...),
                               overwrite_prompt: bool = Form(False),
                               overwrite_avatar: bool = Form(False),
+                              overwrite_persona: bool = Form(False),
+                              keep_components: str = Form(""),
                               _=Depends(require_login)):
     """Import a persona from an uploaded PNG character card."""
     raw = await file.read()
-    return await _import_persona_card_bytes(raw, overwrite_prompt, overwrite_avatar)
+    keep = [s for s in keep_components.split(",") if s]
+    return await _import_persona_card_bytes(raw, overwrite_prompt, overwrite_avatar, overwrite_persona, keep)
 
 
 # =============================================================================

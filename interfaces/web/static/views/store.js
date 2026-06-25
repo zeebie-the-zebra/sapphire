@@ -24,6 +24,7 @@ import {
 import { renderMarkdown } from '../shared/markdown.js';
 import { isSafeHref } from '../shared/url-safety.js';
 import { refreshInitData } from '../shared/init-data.js';
+import { confirmPersonaImport } from '../shared/persona-import-confirm.js';
 import * as ui from '../ui.js';
 
 const SUBMIT_URL = 'https://sapphireblue.dev/plugins/submit-your-plugin/';
@@ -712,42 +713,19 @@ async function confirmAndImportPersona(slug) {
         return;
     }
 
-    const name = item.sapphire_name || item.name || 'this persona';
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay store-install-modal';
-    overlay.innerHTML = `
-    <div class="modal store-install-dialog">
-        <h2>Import ${_esc(name)}?</h2>
-        <p class="store-install-byline">by ${_esc(item.author || 'Unknown')}</p>
-        <p class="store-install-desc">${_esc(item.tagline || item.description || '')}</p>
-        <div class="modal-actions">
-            <button class="store-btn store-btn-secondary" data-modal-action="cancel">Cancel</button>
-            <button class="store-btn store-btn-install" data-modal-action="confirm">Import</button>
-        </div>
-    </div>`;
-    document.body.appendChild(overlay);
-
-    const close = () => overlay.remove();
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    overlay.querySelector('[data-modal-action="cancel"]').addEventListener('click', close);
-    overlay.querySelector('[data-modal-action="confirm"]').addEventListener('click', async () => {
-        const confirmBtn = overlay.querySelector('[data-modal-action="confirm"]');
-        confirmBtn.disabled = true;
-        confirmBtn.textContent = 'Importing...';
-        try {
-            const res = await installPersonaFromStore(slug);
-            // Bust the cached /api/init so the Personas view picks up the new
-            // prompt + persona — without this the prompt dropdown falls back to
-            // a stale option (the import itself succeeded server-side).
-            await refreshInitData();
-            ui.showToast(`Imported "${res?.name || name}" — find it in Personas.`, 'success');
-            close();
-        } catch (e) {
-            // 409 surfaces here as "Persona 'X' already exists" (v1 blocks re-import).
-            ui.showToast(`Import failed: ${e.message}`, 'error');
-            confirmBtn.disabled = false;
-            confirmBtn.textContent = 'Import';
-        }
+    // The store's bundle is in export_content — use it for the collision +
+    // piece-preview; the actual import still pulls the PNG card server-side
+    // (export_content carries no avatar). Same shared confirm as the local import.
+    let bundle = null;
+    try { bundle = item.export_content ? JSON.parse(item.export_content) : null; } catch (_) {}
+    if (!bundle) {
+        const nm = item.sapphire_name || item.name;
+        bundle = { name: nm, prompt: { name: nm } };
+    }
+    await confirmPersonaImport({
+        bundle,
+        doImport: (flags) => installPersonaFromStore(slug, flags),
+        onDone: () => { refreshInitData(); },
     });
 }
 

@@ -407,12 +407,18 @@ async def store_personas_detail(slug: str, _=Depends(require_login)):
 
 
 @router.post("/api/store/personas/{slug}/install")
-async def store_personas_install(slug: str, _=Depends(require_login)):
+async def store_personas_install(slug: str,
+                                 overwrite_prompt: bool = False,
+                                 overwrite_avatar: bool = False,
+                                 overwrite_persona: bool = False,
+                                 keep_components: str = "",
+                                 _=Depends(require_login)):
     """Download a persona's PNG card and import it through the app's existing
-    card importer. 409 if a persona with that name already exists."""
+    card importer. 409 if a persona exists and overwrite_persona isn't set."""
     _ensure_enabled()
     raw = await _proxy_get_bytes(f"/items/{slug}/card", namespace=PERSONA_NAMESPACE)
     if not raw:
         raise HTTPException(status_code=502, detail="Could not download persona card.")
     from core.routes.content import _import_persona_card_bytes
-    return await _import_persona_card_bytes(raw)
+    keep = [s for s in keep_components.split(",") if s]
+    return await _import_persona_card_bytes(raw, overwrite_prompt, overwrite_avatar, overwrite_persona, keep)
