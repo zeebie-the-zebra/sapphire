@@ -1,3 +1,10 @@
+# 2.7.13 - Backup Restore + Encryption
+- time of day settable
+- encrypted backups
+- restore backups from UI
+- tools/decrypt_backup.py for manual restore
+# 2.7.12 - Exclude in backup
+- exclude files, estimate backup pre-gz size
 # 2.7.11 - UI stale cache
 - Found multiple stale UI paths, fixed
 # 2.7.10 - asyncio update
