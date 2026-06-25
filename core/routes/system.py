@@ -244,6 +244,21 @@ async def restore_backup_upload(request: Request, file: UploadFile = File(...),
     return {"status": "restoring", "roots": roots}
 
 
+@router.get("/api/backup/restore-result")
+async def get_restore_result(request: Request, _=Depends(require_login)):
+    """Outcome of the last restore, for the post-reboot banner. {} if none."""
+    from core import restore as restore_mod
+    return restore_mod.read_restore_result(clear=False) or {}
+
+
+@router.delete("/api/backup/restore-result")
+async def clear_restore_result(request: Request, _=Depends(require_login)):
+    """Dismiss the restore-result banner."""
+    from core import restore as restore_mod
+    restore_mod.read_restore_result(clear=True)
+    return {"status": "cleared"}
+
+
 # =============================================================================
 # AUDIO DEVICE ROUTES
 # =============================================================================

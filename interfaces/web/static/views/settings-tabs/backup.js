@@ -13,6 +13,7 @@ export default {
 
     render(ctx) {
         return `
+            <div id="backup-restore-banner"></div>
             ${ctx.renderFields(this.keys)}
 
             <div class="backup-hero">
@@ -85,6 +86,7 @@ export default {
     async attachListeners(ctx, el) {
         await this.loadBackups(el);
         await this.loadEncryption(el);
+        await this.loadRestoreResult(el);
 
         // Exclude patterns — prefill from saved, AUTO-SAVE on blur + debounced
         // typing (no Save Changes needed; backups read it live).
@@ -209,6 +211,31 @@ export default {
             }
         } catch {}
         this.renderBackups(el);
+    },
+
+    async loadRestoreResult(el) {
+        const box = el.querySelector('#backup-restore-banner');
+        if (!box) return;
+        let r = null;
+        try { r = await (await fetch('/api/backup/restore-result')).json(); } catch {}
+        if (!r || r.ok === undefined) { box.innerHTML = ''; return; }
+        const ok = r.ok === true;
+        const src = (r.source || '').replace(/^backup:|^upload:/, '');
+        box.innerHTML = `
+            <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;padding:10px 12px;border-radius:8px;line-height:1.5;
+                background:${ok ? 'rgba(108,204,108,0.12)' : 'rgba(224,108,108,0.12)'};
+                border:1px solid ${ok ? 'rgba(108,204,108,0.5)' : 'var(--danger,#e06c6c)'}">
+                <div style="flex:1;font-size:var(--font-sm)">
+                    ${ok
+                        ? `&#10003; <strong>Restore complete.</strong> Your data was restored${src ? ` from <code>${esc(src)}</code>` : ''}. The previous data is kept in <code>user.old</code>.`
+                        : `&#10007; <strong>Restore failed</strong> &mdash; your data was left untouched (rolled back).${r.error ? ` <span style="color:var(--text-secondary)">${esc(r.error)}</span>` : ''}`}
+                </div>
+                <button class="btn-icon" id="restore-banner-x" title="Dismiss" style="flex:none">&#10005;</button>
+            </div>`;
+        box.querySelector('#restore-banner-x')?.addEventListener('click', async () => {
+            box.innerHTML = '';
+            try { await fetch('/api/backup/restore-result', { method: 'DELETE', headers: { 'X-CSRF-Token': csrf() } }); } catch {}
+        });
     },
 
     async loadEncryption(el) {

@@ -22,6 +22,35 @@ USER = BASE / "user"
 USER_NEW = BASE / "user.new"
 USER_OLD = BASE / "user.old"
 USER_OLD_PREV = BASE / "user.old.prev"
+# Outcome of the last restore, written by apply_pending_restore() at boot and
+# surfaced to the UI on reconnect. Lives in user_restore/ (survives the swap,
+# gitignored, never in a backup).
+RESULT = RESTORE_DIR / "last_restore_result.json"
+
+
+def _write_result(ok: bool, source: str = "", error: str = ""):
+    try:
+        RESTORE_DIR.mkdir(parents=True, exist_ok=True)
+        RESULT.write_text(json.dumps({
+            "ok": bool(ok), "source": source, "error": error,
+            "ts": time.strftime("%Y-%m-%d_%H%M%S"),
+        }), encoding="utf-8")
+    except Exception:
+        pass  # feedback is best-effort; never let it break the boot
+
+
+def read_restore_result(clear: bool = False):
+    """Return the last restore outcome dict, or None. clear=True removes it."""
+    if not RESULT.exists():
+        return None
+    try:
+        data = json.loads(RESULT.read_text(encoding="utf-8"))
+    except Exception:
+        RESULT.unlink(missing_ok=True)
+        return None
+    if clear:
+        RESULT.unlink(missing_ok=True)
+    return data
 
 
 def validate_tar(path):
@@ -79,10 +108,12 @@ def apply_pending_restore(log=print):
         MARKER.unlink(missing_ok=True)
         return None
 
+    source = info.get("source", "")
     staged = Path(info.get("staged") or STAGED)
     if not staged.exists():
         log("[Restore] staged backup missing — aborting")
         MARKER.unlink(missing_ok=True)
+        _write_result(False, source, "staged backup file was missing")
         return False
 
     try:
@@ -113,6 +144,7 @@ def apply_pending_restore(log=print):
         except OSError:
             pass
         log("[Restore] applied — previous user/ preserved at user.old (delete it once you're happy)")
+        _write_result(True, source)
         return True
     except Exception as e:
         # If we moved user aside but didn't finish, put it back.
@@ -125,4 +157,5 @@ def apply_pending_restore(log=print):
             shutil.rmtree(USER_NEW, ignore_errors=True)
         MARKER.unlink(missing_ok=True)  # never loop-retry a broken restore
         log(f"[Restore] FAILED — kept existing user/: {e}")
+        _write_result(False, source, str(e))
         return False
