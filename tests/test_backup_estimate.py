@@ -49,3 +49,58 @@ def test_estimate_size_with_exclusions(tmp_path, monkeypatch):
     assert r2["total_bytes"] == 1000
     assert r2["excluded_bytes"] == 999 + 5000
     assert r2["breakdown"][0]["name"] == "history"
+
+
+def test_rotation_keep_zero_retains_tier(tmp_path, monkeypatch):
+    """keep<=0 = pause the tier (retain existing), NEVER purge it. War-campaign fix D."""
+    import core.backup as B
+    bdir = tmp_path / "backups"
+    bdir.mkdir()
+    for ts in ("2026-06-20_010101", "2026-06-21_010101", "2026-06-22_010101"):
+        (bdir / f"sapphire_{ts}_daily.tar.gz").write_bytes(b"x")
+    monkeypatch.setattr(B.backup_manager, "backup_dir", bdir)
+
+    class Cfg:
+        BACKUPS_KEEP_DAILY = 0
+        BACKUPS_KEEP_WEEKLY = 4
+        BACKUPS_KEEP_MONTHLY = 3
+        BACKUPS_KEEP_MANUAL = 5
+    monkeypatch.setattr(B, "config", Cfg)
+
+    assert B.backup_manager.rotate_backups() == 0
+    assert len(list(bdir.glob("sapphire_*_daily.tar.gz"))) == 3   # retained, not purged
+
+
+def test_create_backup_refuses_empty(tmp_path, monkeypatch):
+    """A too-broad exclude (`*`) → 0 files → refuse, never write an empty 'success'
+    that rotation would keep while aging out the good ones. War-campaign fix A."""
+    import core.backup as B
+    user = tmp_path / "user"
+    user.mkdir()
+    (user / "settings.json").write_text("{}")
+    bdir = tmp_path / "backups"
+    bdir.mkdir()
+    monkeypatch.setattr(B.backup_manager, "user_dir", user)
+    monkeypatch.setattr(B.backup_manager, "backup_dir", bdir)
+
+    class Cfg:
+        BACKUPS_EXCLUDE_PATTERNS = ["*"]
+        BACKUPS_ENCRYPT = False
+    monkeypatch.setattr(B, "config", Cfg)
+
+    assert B.backup_manager.create_backup("manual") is None
+    assert list(bdir.glob("sapphire_*")) == []   # nothing written, not even a partial
+
+
+def test_backup_filter_skips_symlinks():
+    """Symlinks/hardlinks are dropped from backups — path leak + cross-platform
+    restore hazard. War-campaign fix E."""
+    import tarfile
+    from core.backup import _backup_filter
+    sym = tarfile.TarInfo("user/plugins/drives")
+    sym.type = tarfile.SYMTYPE
+    sym.linkname = "/mnt/private"
+    assert _backup_filter(sym) is None
+    reg = tarfile.TarInfo("user/history/chat.db")
+    reg.type = tarfile.REGTYPE
+    assert _backup_filter(reg) is not None

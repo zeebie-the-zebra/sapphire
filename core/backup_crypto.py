@@ -57,9 +57,12 @@ def decrypt_file(src_path, dst_path, password: str):
     with open(src_path, "rb") as fin, open(dst_path, "wb") as fout:
         if fin.read(len(MAGIC)) != MAGIC:
             raise ValueError("Not a Sapphire encrypted backup (bad magic header)")
-        hlen = struct.unpack(">I", fin.read(4))[0]
-        hdr = json.loads(fin.read(hlen).decode("utf-8"))
-        aes = AESGCM(_derive(password, bytes.fromhex(hdr["salt"]), hdr["n"], hdr["r"], hdr["p"]))
+        try:
+            hlen = struct.unpack(">I", fin.read(4))[0]
+            hdr = json.loads(fin.read(hlen).decode("utf-8"))
+            aes = AESGCM(_derive(password, bytes.fromhex(hdr["salt"]), hdr["n"], hdr["r"], hdr["p"]))
+        except (struct.error, ValueError, KeyError, TypeError, UnicodeDecodeError) as e:
+            raise ValueError(f"Corrupt or unsupported backup header: {e}")
         i = 0
         while True:
             lenb = fin.read(4)

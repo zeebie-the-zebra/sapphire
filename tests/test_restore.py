@@ -80,12 +80,14 @@ def test_rollback_rotation_keeps_original(env):
     assert (R.USER_OLD_PREV / "f.txt").read_text() == "GOOD"  # original survives a double-restore
 
 
-def test_trusted_restores_symlink(env):
+def test_restore_skips_symlinks(env):
+    """Symlinks are skipped on restore (path leak / needs admin on Windows / not
+    data) — real files still restore. War-campaign fix E."""
     R.USER.mkdir()
     R.request_restore(_backup(env, "sym", "x", symlink="/mnt/drive"), trusted=True)
     assert R.apply_pending_restore(lambda m: None) is True
-    link = R.USER / "plugins" / "drives"
-    assert link.is_symlink() and os.readlink(link) == "/mnt/drive"
+    assert (R.USER / "f.txt").read_text() == "x"          # real file restored
+    assert not (R.USER / "plugins" / "drives").exists()    # symlink skipped
 
 
 def test_failure_leaves_user_untouched(env):

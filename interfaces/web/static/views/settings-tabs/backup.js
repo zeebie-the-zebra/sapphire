@@ -245,6 +245,10 @@ export default {
         try { s = await (await fetch('/api/backup/encryption-status')).json(); } catch {}
 
         box.innerHTML = `
+            ${s.password_status === 'unreadable' ? `
+            <div style="background:rgba(224,108,108,0.2);border:1px solid var(--danger,#e06c6c);border-radius:6px;padding:10px 12px;font-size:var(--font-xs);line-height:1.6;margin-bottom:10px">
+                &#9888; <strong>Encryption is ON but the saved password can't be read.</strong> This usually means the config was reset or you moved machines. <strong>New backups are NOT being encrypted.</strong> Re-enter your password below to fix it. (Your existing encrypted backups are fine &mdash; the password still decrypts them.)
+            </div>` : ''}
             <div style="font-size:var(--font-xs);color:var(--text-muted);line-height:1.6;margin-bottom:8px">
                 Encrypts every backup with a password only you know. Required for offsite backups.
             </div>

@@ -58,6 +58,11 @@ def _is_excluded(rel: str, user_patterns=None) -> bool:
 def _backup_filter(tarinfo):
     name = tarinfo.name
     rel = name[len("user/"):] if name.startswith("user/") else name
+    # Skip symlinks/hardlinks: tar stores the target PATH (a private-location leak
+    # once backups go offsite) and they don't restore cleanly cross-platform
+    # (Windows needs admin to recreate a symlink). They're config, not data.
+    if tarinfo.issym() or tarinfo.islnk():
+        return None
     if _is_excluded(rel, _exclude_patterns_setting()):
         return None
     return tarinfo
@@ -184,9 +189,32 @@ class Backup:
                         if src == db or src == Path(str(db) + "-wal") or src == Path(str(db) + "-shm"):
                             return None
                 return tarinfo
+            kept_files = [0]
+            base_filter = _filter_with_busy if failed_checkpoints else _backup_filter
+            def _counting_filter(tarinfo):
+                ti = base_filter(tarinfo)
+                if ti is not None and ti.isfile():
+                    kept_files[0] += 1
+                return ti
             with tarfile.open(partial, "w:gz") as tar:
-                tar.add(self.user_dir, arcname="user",
-                        filter=(_filter_with_busy if failed_checkpoints else _backup_filter))
+                tar.add(self.user_dir, arcname="user", filter=_counting_filter)
+            if kept_files[0] == 0:
+                # 0 files after exclusions (a too-broad pattern like `*`, or an empty
+                # user/) — refuse the useless "successful" empty backup that rotation
+                # would then keep while aging out the good ones. War-campaign fix A.
+                logger.error("Backup aborted: 0 files after exclusions — "
+                             "check BACKUPS_EXCLUDE_PATTERNS")
+                try:
+                    partial.unlink()
+                except OSError:
+                    pass
+                return None
+            # Protect the plaintext tar immediately — in the encrypt path it lives
+            # briefly as cleartext before being encrypted + unlinked.
+            try:
+                os.chmod(partial, 0o600)
+            except OSError:
+                pass
             # chmod 0600 BEFORE rename — backups contain credentials.json (0600);
             # without this the archive is world-readable by default umask.
             # Day-ruiner scout 2026-05-07 #L.
@@ -494,6 +522,8 @@ class Backup:
         deleted = 0
         for backup_type, backup_list in backups.items():
             limit = limits.get(backup_type, 5)
+            if limit <= 0:
+                continue  # keep<=0 = "pause this tier": retain existing, never purge
             if len(backup_list) > limit:
                 for backup in backup_list[limit:]:
                     if self.delete_backup(backup["filename"]):

@@ -53,3 +53,16 @@ def test_plain_file_not_detected_as_encrypted(tmp_path):
     with open(p, "wb") as f:
         f.write(b"not encrypted")
     assert not is_encrypted_backup(p)
+
+
+def test_corrupt_header_raises_valueerror(tmp_path):
+    """Bad magic-but-garbage header → ValueError (not struct.error/KeyError), so the
+    route returns a clean 400 instead of a 500. War-campaign fix H."""
+    import struct
+    from core.backup_crypto import MAGIC
+    src = str(tmp_path / "c.sapphirebak")
+    out = str(tmp_path / "o")
+    with open(src, "wb") as f:
+        f.write(MAGIC + struct.pack(">I", 999999) + b"not json at all")
+    with pytest.raises(ValueError):
+        decrypt_file(src, out, "pw")

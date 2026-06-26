@@ -75,11 +75,19 @@ def request_restore(staged_tar, source: str = "", trusted: bool = False) -> None
     `trusted` = the user's own backup (restore faithfully, symlinks and all);
     False = an uploaded archive (extract under the strict 'data' filter)."""
     RESTORE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        RESTORE_DIR.chmod(0o700)   # holds plaintext staging — owner-only
+    except OSError:
+        pass
     staged_tar = Path(staged_tar)
     if staged_tar != STAGED:
         if STAGED.exists():
             STAGED.unlink()
         shutil.move(str(staged_tar), str(STAGED))
+    try:
+        STAGED.chmod(0o600)
+    except OSError:
+        pass
     MARKER.write_text(json.dumps({
         "staged": str(STAGED), "source": source, "trusted": bool(trusted),
         "ts": time.strftime("%Y-%m-%d_%H%M%S"),
@@ -87,14 +95,15 @@ def request_restore(staged_tar, source: str = "", trusted: bool = False) -> None
 
 
 def _extract(tar, dest, trusted):
-    # Own backups (trusted) restore faithfully — including legit symlinks like
-    # plugins/drives. Uploaded archives (untrusted) get the strict 'data' filter
-    # (blocks traversal + escaping links). Fall back for pre-backport Pythons.
+    # Extract regular files + dirs ONLY — skip symlinks/hardlinks/devices. They
+    # leak target paths, need admin to recreate on Windows, and aren't data. New
+    # backups no longer capture them; old/uploaded archives still might.
+    members = [m for m in tar.getmembers() if m.isfile() or m.isdir()]
     filt = "fully_trusted" if trusted else "data"
     try:
-        tar.extractall(dest, filter=filt)
+        tar.extractall(dest, members=members, filter=filt)
     except TypeError:
-        tar.extractall(dest)
+        tar.extractall(dest, members=members)
 
 
 def apply_pending_restore(log=print):
@@ -120,6 +129,10 @@ def apply_pending_restore(log=print):
         if USER_NEW.exists():
             shutil.rmtree(USER_NEW)
         USER_NEW.mkdir(parents=True)
+        try:
+            USER_NEW.chmod(0o700)
+        except OSError:
+            pass
         with tarfile.open(staged, "r:gz") as t:
             _extract(t, USER_NEW, bool(info.get("trusted")))
         new_user = USER_NEW / "user"
@@ -135,6 +148,10 @@ def apply_pending_restore(log=print):
             USER_OLD.replace(USER_OLD_PREV)
         if USER.exists():
             USER.replace(USER_OLD)
+            try:
+                USER_OLD.chmod(0o700)   # full plaintext copy of private data — owner-only
+            except OSError:
+                pass
         new_user.replace(USER)
 
         shutil.rmtree(USER_NEW, ignore_errors=True)

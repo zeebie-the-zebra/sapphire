@@ -458,6 +458,19 @@ class CredentialsManager:
     def has_backup_password(self) -> bool:
         return bool((self._credentials or {}).get('backup_password'))
 
+    def backup_password_status(self) -> str:
+        """'missing' (none stored), 'unreadable' (stored but won't decrypt — salt
+        lost / machine moved), or 'ok'. Lets the UI shout when encryption is on but
+        the saved password can no longer be read (silent-plaintext guard)."""
+        raw = (self._credentials or {}).get('backup_password', '')
+        if not raw:
+            return 'missing'
+        try:
+            self._unscramble_strict(raw)
+            return 'ok'
+        except Exception:
+            return 'unreadable'
+
     # =========================================================================
     # Scramble (reversible encryption for sensitive fields)
     # =========================================================================

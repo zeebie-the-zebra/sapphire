@@ -56,6 +56,15 @@ async def create_backup(request: Request, _=Depends(require_login)):
         if filename:
             backup_manager.rotate_backups()
             return {"status": "success", "filename": filename}
+    # Explain the most common failure: nothing left after exclusions.
+    try:
+        if backup_manager.estimate_size().get("total_bytes", 1) == 0:
+            raise HTTPException(status_code=400, detail="Backup would be empty — your exclude "
+                                "patterns match every file. Check 'Exclude from backups'.")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
     raise HTTPException(status_code=500, detail="Backup creation failed")
 
 
@@ -99,11 +108,14 @@ async def estimate_backup(request: Request, _=Depends(require_login)):
 
 @router.get("/api/backup/encryption-status")
 async def backup_encryption_status(request: Request, _=Depends(require_login)):
-    """Is backup encryption on, and is a password set?"""
+    """Is backup encryption on, is a password set, and can it still be read?"""
     from core.credentials_manager import credentials
+    status = credentials.backup_password_status()
     return {
         "enabled": bool(getattr(config, 'BACKUPS_ENCRYPT', False)),
-        "has_password": credentials.has_backup_password(),
+        "has_password": status != 'missing',
+        "password_ok": status == 'ok',
+        "password_status": status,
     }
 
 
@@ -191,6 +203,10 @@ def _stage_restore_from(source_path, password: str, source_label: str, trusted: 
         else:
             import shutil as _sh
             _sh.copy2(source_path, tar_path)
+        try:
+            tar_path.chmod(0o600)  # plaintext at rest — restrict before it lingers
+        except OSError:
+            pass
 
         try:
             roots = restore_mod.validate_tar(tar_path)
@@ -200,8 +216,14 @@ def _stage_restore_from(source_path, password: str, source_label: str, trusted: 
         restore_mod.request_restore(tar_path, source=source_label, trusted=trusted)
         return roots
     except HTTPException:
-        tar_path.unlink(missing_ok=True)
         raise
+    except Exception as e:
+        # Any unexpected failure (corrupt header, disk, etc.) → clean 400, not 500.
+        raise HTTPException(status_code=400, detail=f"Could not read backup: {e}")
+    finally:
+        # Never leak the plaintext staging file on a failure (success moved it away).
+        if tar_path.exists():
+            tar_path.unlink(missing_ok=True)
 
 
 @router.post("/api/backup/restore")
@@ -227,9 +249,10 @@ async def restore_backup(request: Request, _=Depends(require_login)):
 async def restore_backup_upload(request: Request, file: UploadFile = File(...),
                                 password: str = Form(""), _=Depends(require_login)):
     """Restore from an uploaded .tar.gz / .sapphirebak of a user/ folder."""
+    import uuid
     from core import restore as restore_mod
     restore_mod.RESTORE_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = restore_mod.RESTORE_DIR / "upload.tmp"
+    tmp = restore_mod.RESTORE_DIR / f"upload.{uuid.uuid4().hex}.tmp"   # per-request → no collision
     try:
         with open(tmp, "wb") as f:
             while True:
@@ -237,6 +260,10 @@ async def restore_backup_upload(request: Request, file: UploadFile = File(...),
                 if not chunk:
                     break
                 f.write(chunk)
+        try:
+            tmp.chmod(0o600)
+        except OSError:
+            pass
         roots = _stage_restore_from(tmp, password, f"upload:{file.filename}")
     finally:
         tmp.unlink(missing_ok=True)
