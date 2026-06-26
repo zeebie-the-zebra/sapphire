@@ -472,6 +472,44 @@ class CredentialsManager:
             return 'unreadable'
 
     # =========================================================================
+    # Remembrance offsite-backup vault — connection lives here (api_key scrambled),
+    # never inside user/ backups. Single vault (v1).
+    # =========================================================================
+
+    def get_offsite_account(self) -> dict:
+        """Vault connection with api_key unscrambled. Empty strings if unset."""
+        acct = (self._credentials or {}).get('offsite_account', {})
+        return {
+            'server_url': acct.get('server_url', ''),
+            'tenant_id': acct.get('tenant_id', ''),
+            'api_key': self._unscramble(acct.get('api_key', '')),
+        }
+
+    def set_offsite_account(self, server_url: str, tenant_id: str, api_key: str = '') -> bool:
+        """Store the vault connection; api_key scrambled. An empty api_key keeps the
+        existing one (so URL/tenant can be edited without re-entering the secret)."""
+        with self._lock:
+            try:
+                existing = self._credentials.get('offsite_account', {})
+                stored_key = existing.get('api_key', '') if not api_key else self._scramble(api_key)
+                self._credentials['offsite_account'] = {
+                    'server_url': (server_url or '').strip().rstrip('/'),
+                    'tenant_id': (tenant_id or '').strip(),
+                    'api_key': stored_key,
+                }
+                if not self._save():
+                    return False
+                logger.info("Set Remembrance offsite account")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to set offsite account: {e}")
+                return False
+
+    def has_offsite_account(self) -> bool:
+        acct = (self._credentials or {}).get('offsite_account', {})
+        return bool(acct.get('server_url') and acct.get('tenant_id') and acct.get('api_key'))
+
+    # =========================================================================
     # Scramble (reversible encryption for sensitive fields)
     # =========================================================================
 

@@ -142,7 +142,7 @@ class Backup:
             logger.warning(f"Could not read backup password: {e}")
             return None
 
-    def create_backup(self, backup_type="manual"):
+    def create_backup(self, backup_type="manual", extra_patterns=None, password=None, dest_dir=None):
         """Create a backup of the user/ directory.
 
         Writes to `<filename>.partial` first, atomic-renames to final name on
@@ -150,24 +150,33 @@ class Backup:
         `.tar.gz` that `list_backups` parses as legitimate, and rotation may
         delete older valid backups in favor of the partial. Witch-hunt
         2026-04-21 finding H13.
+
+        Optional (offsite path; defaults reproduce the local behavior exactly):
+          extra_patterns — extra exclude globs merged with the page settings.
+          password       — force-encrypt with this key (overrides the toggle).
+          dest_dir       — write the blob here instead of user_backups/.
         """
         if not self.user_dir.exists():
             logger.error(f"User directory not found: {self.user_dir}")
             return None
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        password = self._encryption_password()
-        encrypt = password is not None
-        if getattr(config, 'BACKUPS_ENCRYPT', False) and not encrypt:
+        # `password` param (if given) forces encryption with that key — the offsite
+        # encrypt-or-refuse path. Else fall back to the global toggle.
+        pw = password if password is not None else self._encryption_password()
+        encrypt = pw is not None
+        if password is None and getattr(config, 'BACKUPS_ENCRYPT', False) and not encrypt:
             logger.warning("BACKUPS_ENCRYPT is on but no backup password is set — "
                            "writing an UNENCRYPTED backup. Set a password on the Backup page.")
         ext = "sapphirebak" if encrypt else "tar.gz"
         filename = f"sapphire_{timestamp}_{backup_type}.{ext}"
-        filepath = self.backup_dir / filename
+        out_dir = Path(dest_dir) if dest_dir else self.backup_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        filepath = out_dir / filename
         # Plaintext tar is always written here first; when encrypting it's an
         # intermediate that gets encrypted into `filepath`, then deleted.
-        partial = self.backup_dir / f"sapphire_{timestamp}_{backup_type}.tar.gz.partial"
-        enc_partial = self.backup_dir / (filename + ".partial")
+        partial = out_dir / f"sapphire_{timestamp}_{backup_type}.tar.gz.partial"
+        enc_partial = out_dir / (filename + ".partial")
 
         try:
             # Checkpoint SQLite WAL files before backup. DBs whose checkpoint
@@ -176,8 +185,18 @@ class Backup:
             # torn state that won't restore cleanly. The next scheduled
             # backup will retry. Day-ruiner scout 2026-05-07 #K.
             failed_checkpoints = self._checkpoint_databases()
+            # Exclusions = page patterns + any caller extras (offsite-only excludes).
+            merged_patterns = _exclude_patterns_setting() + (extra_patterns or [])
+            def _patterns_filter(tarinfo):
+                name = tarinfo.name
+                rel = name[len("user/"):] if name.startswith("user/") else name
+                if tarinfo.issym() or tarinfo.islnk():
+                    return None
+                if _is_excluded(rel, merged_patterns):
+                    return None
+                return tarinfo
             def _filter_with_busy(tarinfo):
-                base = _backup_filter(tarinfo)
+                base = _patterns_filter(tarinfo)
                 if base is None:
                     return None
                 # Drop the failed DB and its WAL/SHM siblings so we don't
@@ -190,7 +209,7 @@ class Backup:
                             return None
                 return tarinfo
             kept_files = [0]
-            base_filter = _filter_with_busy if failed_checkpoints else _backup_filter
+            base_filter = _filter_with_busy if failed_checkpoints else _patterns_filter
             def _counting_filter(tarinfo):
                 ti = base_filter(tarinfo)
                 if ti is not None and ti.isfile():
@@ -222,7 +241,7 @@ class Backup:
                 # Encrypt the plaintext tar into the final .sapphirebak, drop the
                 # plaintext intermediate.
                 from core.backup_crypto import encrypt_file
-                encrypt_file(partial, enc_partial, password)
+                encrypt_file(partial, enc_partial, pw)
                 try:
                     os.chmod(enc_partial, 0o600)
                 except OSError as _e:

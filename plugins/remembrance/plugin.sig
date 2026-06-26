@@ -1,0 +1,15 @@
+{
+  "plugin": "remembrance",
+  "version": "1.0.0",
+  "files": {
+    "README.md": "sha256:76b21603cc87870ef44f5a50c68e27ad4af68c12ed1f31b5335dbd783456e715",
+    "client.py": "sha256:81bb25c0d9e8e1a2aa5b83ad0e8caa3d83d7da91d97476c145e929c3c6995c4b",
+    "ops.py": "sha256:46c2ea563339ef0e68083e46766ecc09f856e95a50de214485aa49dce9635f0c",
+    "plugin.json": "sha256:7e2da16fc50515a179d993f11bd4144886cf3f57c766a2e5f9e2cb28e7d84bb3",
+    "routes/manage.py": "sha256:6250814c0cd09d433ce590f8c7577827a4f3f6407a2577cc51d7201e8e7f7dd0",
+    "schedule.py": "sha256:f60f884331b3346a3c48e51020e661f6746a9abbe910fa608a2446f3bbbda0ff",
+    "tools/remembrance.py": "sha256:f60f6976747be8e750021b7c43512ac571999cc5aa83af7aedfd725ad74e2f69",
+    "web/index.js": "sha256:ec0b0f7f2e8eb8de4f7b542fef38d12385e96781053686e0116b54aaec7b4ac4"
+  },
+  "signature": "bDrkLKsiDvzqOspgooDucPOsYIPQN/Jgc1ysCZ21d4n72IkF7Hz9IXK5CQezA6HnckONaQN996uKNvun115+Cw=="
+}

@@ -92,6 +92,39 @@ def test_create_backup_refuses_empty(tmp_path, monkeypatch):
     assert list(bdir.glob("sapphire_*")) == []   # nothing written, not even a partial
 
 
+def test_create_backup_offsite_params(tmp_path, monkeypatch):
+    """create_backup(extra_patterns=, password=, dest_dir=) → forced-encrypted blob in
+    dest_dir with the extra excludes applied, even when the global toggle is OFF.
+    Stage 5 core change."""
+    import tarfile
+    import core.backup as B
+    from core import backup_crypto
+    user = tmp_path / "user"
+    (user / "keep").mkdir(parents=True)
+    (user / "skipme").mkdir(parents=True)
+    (user / "keep" / "a.txt").write_text("KEEP")
+    (user / "skipme" / "b.txt").write_text("SKIP")
+    dest = tmp_path / "offsite"
+    monkeypatch.setattr(B.backup_manager, "user_dir", user)
+
+    class Cfg:
+        BACKUPS_EXCLUDE_PATTERNS = []
+        BACKUPS_ENCRYPT = False   # global OFF — the password param must still force encryption
+    monkeypatch.setattr(B, "config", Cfg)
+
+    fn = B.backup_manager.create_backup("offsite", extra_patterns=["skipme"],
+                                        password="offpw", dest_dir=dest)
+    assert fn and fn.endswith(".sapphirebak")          # forced-encrypted despite toggle off
+    blob = dest / fn
+    assert backup_crypto.is_encrypted_backup(blob)
+    out = tmp_path / "out.tar.gz"
+    backup_crypto.decrypt_file(blob, out, "offpw")
+    with tarfile.open(out) as t:
+        names = t.getnames()
+    assert any(n.endswith("keep/a.txt") for n in names)     # kept
+    assert not any("skipme" in n for n in names)            # extra-excluded
+
+
 def test_backup_filter_skips_symlinks():
     """Symlinks/hardlinks are dropped from backups — path leak + cross-platform
     restore hazard. War-campaign fix E."""
