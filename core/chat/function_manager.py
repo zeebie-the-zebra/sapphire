@@ -30,10 +30,6 @@ logger = logging.getLogger(__name__)
 scope_rag:       ContextVar       = ContextVar('scope_rag',       default=None)
 scope_private:   ContextVar[bool] = ContextVar('scope_private',   default=False)
 
-# Not a scope — the name of the chat the current turn runs in, exposed so tools
-# can tell where they were called from (e.g. round-trip routing back to it).
-current_chat:    ContextVar       = ContextVar('current_chat',    default=None)
-
 # Scope registry — single source of truth for all scope operations.
 # Only rag + private at module load; everything else added by plugin_loader.
 # 'setting' is the key in chat_settings dict (None = not user-settable via sidebar).
@@ -1108,11 +1104,7 @@ class FunctionManager:
     # Their wrappers stay as thin convenience methods. Per-scope setters for the 7 plugin-style
     # scopes (memory/goal/knowledge/people/email/bitcoin/gcal) were deleted in v7 — use the
     # generic set_scope('memory', val) / get_scope('memory') at lines 632-638 instead.
-    def set_rag_scope(self, s):
-        scope_rag.set(s)
-        # s is "__rag__:{chat_name}" — also expose the bare chat name for tools.
-        if isinstance(s, str) and s.startswith("__rag__:"):
-            current_chat.set(s[len("__rag__:"):])
+    def set_rag_scope(self, s): scope_rag.set(s)
     def set_private_chat(self, enabled): scope_private.set(bool(enabled))
 
     def snapshot_scopes(self) -> dict:
