@@ -306,7 +306,6 @@ class ContinuityScheduler:
             "prompt": data.get("prompt", "default"),
             "toolset": data.get("toolset", "none"),
             "chat_target": data.get("chat_target", ""),
-            "dynamic_chat": data.get("dynamic_chat", False),
             "initial_message": data.get("initial_message", "Hello."),
             "tts_enabled": data.get("tts_enabled", True),
             "browser_tts": data.get("browser_tts", False),
@@ -380,7 +379,7 @@ class ContinuityScheduler:
             from core.chat.function_manager import scope_setting_keys
             allowed = {
                 "name", "type", "enabled", "schedule", "trigger_config", "chance",
-                "provider", "model", "prompt", "toolset", "chat_target", "dynamic_chat",
+                "provider", "model", "prompt", "toolset", "chat_target",
                 "initial_message", "tts_enabled", "browser_tts", "inject_datetime",
                 "persona", "voice", "pitch", "speed",
                 "heartbeat", "emoji",
@@ -840,10 +839,11 @@ class ContinuityScheduler:
                         break
                     active_task = dict(live_task)
 
-                # Dynamic return-chat: a webhook task that opts in (dynamic_chat)
-                # lets the secret-gated event payload route the reply to a chat it
-                # names. Override on the copy only (never the stored task).
-                if active_task.get("dynamic_chat"):
+                # "Webhook specifies chat name" (trigger_config.chat_from_payload):
+                # the secret-gated payload names the chat — route there (and that chat
+                # answers with its own settings; see executor._run_foreground).
+                # Override on the copy only (never the stored task).
+                if active_task.get("trigger_config", {}).get("chat_from_payload"):
                     try:
                         _ev = json.loads(cur_event_data) if isinstance(cur_event_data, str) else cur_event_data
                         if isinstance(_ev, dict) and _ev.get("chat_target"):

@@ -549,8 +549,22 @@ class ContinuityExecutor:
                     target_chat = normalized
                     publish(Events.CHAT_CREATED, {"name": target_chat})
 
-            # Build ExecutionContext — isolated, no singleton mutation
-            task_settings = self._extract_task_settings(task)
+            # Build ExecutionContext — isolated, no singleton mutation.
+            # "Webhook specifies chat name" (trigger_config.chat_from_payload): the
+            # named chat answers with ITS OWN settings, not the task's — so the reply
+            # runs as if typed in that chat (persona/toolset/scopes come from the chat).
+            if task.get("trigger_config", {}).get("chat_from_payload"):
+                from core.chat.function_manager import scope_setting_keys
+                cc = session_manager.read_chat_settings(target_chat) or {}
+                merged = {**task,
+                          "prompt": cc.get("persona") or cc.get("prompt") or "default",
+                          "toolset": cc.get("toolset") or cc.get("ability") or "none",
+                          "provider": cc.get("llm_primary") or "auto",
+                          "model": cc.get("llm_model") or "",
+                          **{k: cc[k] for k in scope_setting_keys() if k in cc}}
+                task_settings = self._extract_task_settings(merged)
+            else:
+                task_settings = self._extract_task_settings(task)
             ctx = ExecutionContext(
                 self.system.llm_chat.function_manager,
                 self.system.llm_chat.tool_engine,

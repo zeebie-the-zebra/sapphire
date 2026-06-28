@@ -39,7 +39,13 @@ export function renderEventTrigger(t, opts = {}) {
             </div>
             <div class="sched-field">
                 <label>Secret <span class="help-tip" data-tip="Optional. If set, incoming requests must include X-Webhook-Secret header or X-Hub-Signature-256 (GitHub-style HMAC). Leave empty for no auth.">?</span></label>
-                <input type="password" id="ed-webhook-secret" value="${_esc(secret)}" placeholder="Optional secret">
+                <div style="display:flex;align-items:center;gap:4px">
+                    <input type="password" id="ed-webhook-secret" value="${_esc(secret)}" placeholder="Optional secret" style="flex:1">
+                    <button type="button" id="ed-wh-gen-secret" title="Generate a random 32-char key" style="padding:2px 8px;cursor:pointer">🔑</button>
+                </div>
+            </div>
+            <div class="sched-checkbox">
+                <label><input type="checkbox" id="ed-wh-from-payload" ${triggerConfig.chat_from_payload ? 'checked' : ''}> Webhook specifies chat name <span class="help-tip" data-tip="The POST body names the chat to reply in (JSON field chat_target), and THAT chat answers with its own persona, tools, and memory. The AI and Chat settings below are then ignored. Use for round-trips where the caller picks the chat (e.g. Nova).">?</span></label>
             </div>
             <details class="sched-accordion" style="margin-top:8px">
                 <summary class="sched-acc-header">Filter <span class="sched-preview" id="ed-wh-filter-preview">${eventFilter ? 'active' : ''}</span></summary>
@@ -96,6 +102,35 @@ export function wireEventTrigger(modal, opts = {}) {
             const val = modal.querySelector('#ed-webhook-filter')?.value?.trim();
             if (preview) preview.textContent = val ? 'active' : '';
         });
+
+        // Generate a random 32-char alphanumeric secret on demand.
+        modal.querySelector('#ed-wh-gen-secret')?.addEventListener('click', () => {
+            const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            const key = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => A[b % A.length]).join('');
+            const inp = modal.querySelector('#ed-webhook-secret');
+            if (inp) { inp.type = 'text'; inp.value = key; }
+        });
+
+        // "Webhook specifies chat name": the named chat decides destination + AI,
+        // so grey out the Chat field and the AI section (they're ignored when on).
+        const fromPayload = modal.querySelector('#ed-wh-from-payload');
+        if (fromPayload) {
+            const ids = ['#ed-chat', '#ed-persona', '#ed-prompt', '#ed-toolset',
+                         '#ed-provider', '#ed-model', '#ed-model-custom'];
+            const applyGrey = () => {
+                const off = fromPayload.checked;
+                ids.forEach(sel => { const el = modal.querySelector(sel); if (el) el.disabled = off; });
+                const scopes = modal.querySelector('#ed-scope-dropdowns');
+                if (scopes) { scopes.style.opacity = off ? '0.4' : ''; scopes.style.pointerEvents = off ? 'none' : ''; }
+                // Dim the AI accordion, the Chat accordion, and the standalone Persona field.
+                [modal.querySelector('#ed-prompt')?.closest('details'),
+                 modal.querySelector('#ed-chat')?.closest('details'),
+                 modal.querySelector('#ed-persona')?.closest('.sched-field')
+                ].forEach(el => { if (el) el.style.opacity = off ? '0.45' : ''; });
+            };
+            fromPayload.addEventListener('change', applyGrey);
+            setTimeout(applyGrey, 0);
+        }
     }
 
     if (type === 'daemon') {
@@ -143,6 +178,7 @@ export function readEventTrigger(modal) {
                 method: modal.querySelector('#ed-webhook-method')?.value || 'POST',
                 ...(secret && { secret }),
                 ...(whFilter && { filter: whFilter }),
+                ...(modal.querySelector('#ed-wh-from-payload')?.checked && { chat_from_payload: true }),
             },
             schedule: '0 0 31 2 *', // never fires via cron (Feb 31)
             chance: 100,
