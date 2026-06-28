@@ -62,3 +62,4 @@ user.old
 user.old.prev
 user.new
 user_restore
+tmp/nova-vault.key
