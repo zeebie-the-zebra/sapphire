@@ -244,6 +244,13 @@ async def tts_status(request: Request, _=Depends(require_login), system=Depends(
 async def tts_stop(request: Request, _=Depends(require_login), system=Depends(get_system)):
     """Stop TTS playback (tts_client + the conversation-mode sink)."""
     system.tts.stop()
+    # Left-button "stop TTS": also mute the active stream's TTS pump so the synth
+    # backlog + any still-generating voice stop for THIS message — WITHOUT cancelling
+    # the LLM (that's the separate Stop button). Fixes "pump refills a beat after stop".
+    try:
+        system.llm_chat.stop_tts_streams()
+    except Exception:
+        pass
     # Conversation mode plays through PumpkinChunker (a separate sink) and the LLM may
     # still be streaming — stop both so the UI stop button actually silences her.
     if getattr(system, "conversation_mode_enabled", False):

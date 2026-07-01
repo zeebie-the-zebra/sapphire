@@ -20,6 +20,13 @@ class StreamingChat:
         self.tool_engine = main_chat.tool_engine
         self.cancel_flag = False
         self.current_stream = None
+        # Voice-mute for the current message (left-button "stop TTS"): drops this
+        # stream's TTS without cancelling the LLM. Read by the pump's cancel_check
+        # (flush_and_close bails) + set on the pump's _skip_turn (push no-ops). NOT
+        # the same as cancel_flag, which stops the LLM — TTS/STT is the left button's
+        # domain; the LLM has its own Stop button.
+        self.tts_stopped = False
+        self.tts_pump = None
         self.ephemeral = False
         self.is_streaming = False
         # Name of the chat currently streaming — lets /api/cancel refuse to
@@ -38,6 +45,20 @@ class StreamingChat:
                 logger.warning(f"[CLEANUP] Stream close warning: {e}")
             finally:
                 self.current_stream = None
+
+    def stop_tts(self):
+        """Left-button "stop TTS": mute her voice for THIS message without cancelling
+        the LLM. Sets tts_stopped (pump's flush_and_close bails within ~100ms via
+        cancel_check) + the pump's _skip_turn (push() stops submitting new synth).
+        Both are bool writes — safe from the API thread while the stream runs in its
+        own thread (no cross-thread list mutation). Idempotent."""
+        self.tts_stopped = True
+        p = self.tts_pump
+        if p is not None:
+            try:
+                p._skip_turn = True
+            except Exception as e:
+                logger.warning(f"[STREAMING] stop_tts failed: {e}")
 
     def chat_stream(self, user_input: str, prefill: str = None, skip_user_message: bool = False, images: list = None, files: list = None) -> Generator[Union[str, Dict[str, Any]], None, None]:
         """
@@ -78,8 +99,9 @@ class StreamingChat:
         # finishing (M7 stop coordination).
         tts_pump = StreamingTTSPump(
             system=self.main_chat.system,
-            cancel_check=lambda: self.cancel_flag,
+            cancel_check=lambda: self.cancel_flag or self.tts_stopped,
         )
+        self.tts_pump = tts_pump   # expose for stop_tts() (left-button voice mute)
 
         # Check if current prompt requires privacy mode
         try:
@@ -96,6 +118,7 @@ class StreamingChat:
         try:
             self.main_chat.refresh_spice_if_needed()
             self.cancel_flag = False
+            self.tts_stopped = False
             self.current_stream = None
             self.ephemeral = False
             try:

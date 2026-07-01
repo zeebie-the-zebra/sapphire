@@ -210,6 +210,7 @@
       "claude-fable-5": { "max_tokens": 16000 },
       "claude-opus-4-8": { "max_tokens": 16000 },
       "claude-opus-4-7": { "max_tokens": 16000 },
+      "claude-sonnet-5": { "max_tokens": 16000 },
       "claude-sonnet-4-6": { "max_tokens": 16000 },
       
       "gpt-4o": { "temperature": 0.8, "top_p": 0.95, "max_tokens": 4096, "presence_penalty": 0.1, "frequency_penalty": 0.1 },

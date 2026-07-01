@@ -364,6 +364,10 @@ let _ttsStreamAnyPlayed = false;
 // streaming" overlap that otherwise causes audio bleed across turns.
 // New stream with different id preempts the old one. 2026-05-18 herring #5.
 let _currentStreamId = null;
+// A stream the user just stopped (left-button "stop TTS"). Its already-in-flight
+// chunks must be DROPPED, not played — else the queue "refills" a beat after stop.
+// Cleared when a fresh stream starts. Pairs with the server-side pump mute.
+let _stoppedStreamId = null;
 // Per-turn playback diagnostics — the "black box". Reset on startTtsStream,
 // consumed (logged) at turn end. `played` counts chunks whose audio actually
 // PROGRESSED (currentTime advanced) — not chunks whose play() merely resolved,
@@ -610,6 +614,13 @@ const _ttsStreamPlayNext = (gen) => {
  */
 export const enqueueTtsChunk = ({ audio_b64, content_type, index, boundary, pause_after_ms, text, stream_id }) => {
     if (!audio_b64) return;
+    // Drop stragglers from a stream the user just stopped (left-button "stop TTS").
+    // Without this, chunks already in flight replay a beat after stop ("pump refill") —
+    // the old code nulled _currentStreamId on stop, which disabled the guard below.
+    if (stream_id && stream_id === _stoppedStreamId) {
+        console.warn('[TTS-STREAM] dropping straggler from stopped stream', stream_id);
+        return;
+    }
     // Drop chunks tagged with a stream we've already preempted. Without
     // this, an in-flight chunk from a cancelled chat/replay can bleed
     // into the new stream's playback. herring #5.
@@ -677,6 +688,7 @@ export const startTtsStream = (data = {}) => {
         _ttsStreamStop();
     }
     _currentStreamId = newId;
+    _stoppedStreamId = null;   // fresh stream — clear any prior stop guard
     _ttsStreamGen += 1;
     _ttsStreamQueue = [];
     _ttsStreamEnded = false;
@@ -722,6 +734,7 @@ const _ttsStreamStop = () => {
     _ttsStreamActive = false;
     _ttsStreamSawChunk = false;
     _ttsStreamAnyPlayed = false;
+    _stoppedStreamId = _currentStreamId || _stoppedStreamId;  // drop its in-flight stragglers
     _currentStreamId = null;  // herring #5 — no stream is current after stop
     _ttsStreamCleanupCurrent();
 };

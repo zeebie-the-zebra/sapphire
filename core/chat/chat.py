@@ -286,6 +286,24 @@ class LLMChat:
             s.cancel_flag = True
         return len(targets)
 
+    def stop_tts_streams(self, chat_name=None):
+        """Mute the VOICE on active streams (left-button "stop TTS") WITHOUT
+        cancelling generation — the LLM keeps writing, only this message's audio
+        stops. Mirrors cancel_streams' targeting. Returns count of streams muted.
+        """
+        with self._streams_lock:
+            if chat_name:
+                ids = list(self._streams_by_chat.get(chat_name, set()))
+            else:
+                ids = list(self._streams_by_id.keys())
+            targets = [self._streams_by_id[i] for i in ids if i in self._streams_by_id]
+        for s in targets:
+            try:
+                s.stop_tts()
+            except Exception:
+                pass
+        return len(targets)
+
     def any_streaming(self):
         """True if at least one stream is active."""
         with self._streams_lock:
