@@ -92,7 +92,7 @@ Hey I'm Chris, a solo dev with a burning passion for this project. Sapphire is a
 ## Windows Easy Installer
 This is our beta Windows 11 installer. It installs git, conda, and sapphire. You can use it as a launcher, to troubleshoot, or switch between dev and main branch. Use this if you want easy mode on Windows.
 
-[Download Sapphire Launcher](https://github.com/ddxfish/sapphire-launcher)
+[Download Sapphire Launcher](https://github.com/ddxfish/sapphire-launcher/releases)
 
 
 ## Quick Start
