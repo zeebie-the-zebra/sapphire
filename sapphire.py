@@ -418,15 +418,24 @@ class VoiceChatSystem:
             logger.error(f"[CONV] could not release wakeword mic ({e}); restoring, aborting")
             self._restore_wakeword()
             return False
-        time.sleep(0.2)  # device settle (PipeWire/WASAPI)
-
-        # Phase 2: acquire + verify conversation audio. ANY failure -> restore.
-        try:
-            session = acquire_audio()
-            if session is None:
-                raise RuntimeError("acquire_audio returned None")
-        except Exception as e:
-            logger.error(f"[CONV] audio acquisition failed ({e}); restoring wakeword")
+        # Phase 2: acquire + verify conversation audio. The just-released wakeword
+        # device can take a moment to free (PipeWire/WASAPI lag well past any fixed
+        # wait), so settle + retry with backoff rather than one blind attempt.
+        # ANY final failure -> restore wakeword (Sapphire is never left deaf).
+        session = None
+        last_err = None
+        for attempt in range(3):
+            time.sleep(0.2 * (attempt + 1))     # 0.2, 0.4, 0.6 — settle, then escalating backoff
+            try:
+                session = acquire_audio()
+                if session is None:
+                    raise RuntimeError("acquire_audio returned None")
+                break
+            except Exception as e:
+                last_err = e
+                logger.warning(f"[CONV] audio acquire attempt {attempt + 1}/3 failed ({e})")
+        if session is None:
+            logger.error(f"[CONV] audio acquisition failed after retries ({last_err}); restoring wakeword")
             self._restore_wakeword()
             return False
 

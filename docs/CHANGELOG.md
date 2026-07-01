@@ -1,3 +1,5 @@
+# 2.7.14 - Webhook per-chat
+- Webhooks can specify which chat they return to
 # 2.7.13 - Backup Restore + Encryption
 - time of day settable
 - encrypted backups

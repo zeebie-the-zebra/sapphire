@@ -8,8 +8,9 @@
     "plugin.json": "sha256:7e2da16fc50515a179d993f11bd4144886cf3f57c766a2e5f9e2cb28e7d84bb3",
     "routes/manage.py": "sha256:6250814c0cd09d433ce590f8c7577827a4f3f6407a2577cc51d7201e8e7f7dd0",
     "schedule.py": "sha256:f60f884331b3346a3c48e51020e661f6746a9abbe910fa608a2446f3bbbda0ff",
+    "tests/test_ops.py": "sha256:578ea095af8da298a112c577dbe259d289a20336860ffff48aa05563f8b66a2f",
     "tools/remembrance.py": "sha256:f60f6976747be8e750021b7c43512ac571999cc5aa83af7aedfd725ad74e2f69",
     "web/index.js": "sha256:ec0b0f7f2e8eb8de4f7b542fef38d12385e96781053686e0116b54aaec7b4ac4"
   },
-  "signature": "bDrkLKsiDvzqOspgooDucPOsYIPQN/Jgc1ysCZ21d4n72IkF7Hz9IXK5CQezA6HnckONaQN996uKNvun115+Cw=="
+  "signature": "anHp+chRI2DT59N0GrrYuxJ1PvhoCO0pWBDcTQztDBsua4QfdEVllsYRf83rgEFbFrPMHo7SV2muDRD23IaJDw=="
 }
