@@ -356,22 +356,23 @@ export function renderProviderToggles(key, config) {
     `;
   }
 
-  // OpenAI-compatible providers (LM Studio, generic openai-compat) get a
-  // Qwen-specific no-think toggle. Harmless on non-Qwen models — they
-  // ignore the /no_think token AND the chat_template_kwargs hint.
+  // OpenAI-compatible providers (LM Studio, generic openai-compat) get the
+  // universal best-effort disable-thinking toggle (family-gated in the backend,
+  // so it's harmless on models that don't support it). Advanced extra_body lives
+  // in the edit-provider modal.
   const isOpenAITemplate = (config.template === 'openai') || (config.provider === 'openai');
   if (isOpenAITemplate) {
-    const noThink = config.disable_thinking_qwen || false;
+    const noThink = (config.disable_thinking ?? config.disable_thinking_qwen) || false;
     return `
       <div class="provider-toggles">
         <div class="toggle-row">
           <label class="checkbox-inline toggle-label">
-            <input type="checkbox" class="provider-field" data-provider="${key}" data-field="disable_thinking_qwen"
+            <input type="checkbox" class="provider-field" data-provider="${key}" data-field="disable_thinking"
                    ${noThink ? 'checked' : ''}>
-            <span>Disable Qwen thinking (/no_think)</span>
+            <span>Disable thinking (best effort)</span>
           </label>
           <div class="toggle-value-hint" style="margin-left: 12px;">
-            For Qwen 3 models — skip the model's thinking stage. Other models ignore it.
+            Tries the right switch per model (GLM, Qwen, …). Cuts latency by skipping the reasoning phase.
           </div>
         </div>
       </div>

@@ -219,9 +219,12 @@ class ProviderRegistry(_BaseRegistry):
             # Config hints from presets
             'session_affinity': config.get('session_affinity', False),
             'strip_penalties': config.get('strip_penalties', False),
-            # Qwen no-think (LM Studio / OpenAI-compat) — read by openai_compat
-            # to inject chat_template_kwargs.enable_thinking=false + /no_think
-            # token on the last user message. Opt-in per-provider.
+            # Universal thinking-disable (per-provider, best-effort family dispatch)
+            # + raw extra_body passthrough — read by openai_compat's
+            # _inject_thinking_control. Replaces the old Qwen-only /no_think trick;
+            # `disable_thinking_qwen` kept for back-compat migration. Opt-in.
+            'disable_thinking': config.get('disable_thinking', False),
+            'extra_body': config.get('extra_body'),
             'disable_thinking_qwen': config.get('disable_thinking_qwen', False),
             # Vision override — config-driven supports_images, read by
             # BaseProvider.supports_images (and openai_compat's heuristic chain).

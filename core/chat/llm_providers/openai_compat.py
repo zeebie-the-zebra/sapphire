@@ -440,22 +440,9 @@ class OpenAICompatProvider(BaseProvider):
 
             clean.append(clean_msg)
 
-        # Qwen /no_think — opt-in. If provider config has
-        # `disable_thinking_qwen: true`, append the /no_think token to the
-        # final user message. Qwen 3 models honor it natively (chat template
-        # skips the thinking stage entirely). Non-Qwen models ignore the
-        # token, so this is safe to leave on for any LM Studio provider
-        # config that's serving Qwen. Off by default — users must opt in
-        # by setting the flag in their provider's advanced settings, which
-        # protects everyone else's setups.
-        if self.config.get('disable_thinking_qwen', False):
-            for i in range(len(clean) - 1, -1, -1):
-                m = clean[i]
-                if m.get('role') == 'user' and isinstance(m.get('content'), str):
-                    if not m['content'].rstrip().endswith('/no_think'):
-                        m['content'] = m['content'].rstrip() + ' /no_think'
-                    break
-
+        # (The old Qwen `/no_think` token trick was removed 2026-07-02 — it never
+        #  reliably worked. Thinking-disable now goes through _inject_thinking_control
+        #  via extra_body, which is the mechanism Qwen/vLLM actually honor.)
         return clean
     
     def chat_completion(
@@ -522,10 +509,9 @@ class OpenAICompatProvider(BaseProvider):
             # reduces the rejection surface with strict OpenAI-compat providers.
             # (Matches the Anthropic provider, which also never sets tool_choice.)
 
-        # Qwen disable-thinking via chat_template_kwargs. LM Studio (and
-        # vLLM) forward this to the model's chat template; Qwen 3 then
-        # skips the thinking stage entirely. Opt-in via provider config.
-        self._inject_qwen_no_think(request_kwargs)
+        # Thinking control (universal, family-gated) + raw extra_body passthrough.
+        self._inject_thinking_control(
+            request_kwargs, want_disable=(generation_params or {}).get('disable_thinking', False))
 
         # Wrap in retry for rate limiting
         response = retry_on_rate_limit(
@@ -535,21 +521,60 @@ class OpenAICompatProvider(BaseProvider):
 
         return self._parse_response(response)
 
-    def _inject_qwen_no_think(self, kwargs: dict) -> None:
-        """If provider config opts in, set chat_template_kwargs.enable_thinking=false.
+    def _inject_thinking_control(self, kwargs: dict, want_disable: bool = False) -> None:
+        """Merge thinking-control + a raw extra_body passthrough into the request.
 
-        Belt-and-suspenders with the /no_think suffix in _sanitize_messages:
-        some Qwen 3 variants honor the suffix, others need the template
-        kwarg. Setting both costs nothing for providers that ignore them.
+        Universal, best-effort, per-provider "disable thinking" (replaces the old
+        Qwen-only /no_think trick). Family-GATED: a model's own off-switch is sent
+        ONLY to that family, so a strict endpoint never sees a param it 400s on.
+        Unknown models are a logged no-op — the user's raw `extra_body` config is the
+        escape hatch for those. OFF path (no flag, no extra_body config) leaves kwargs
+        untouched → byte-identical to a no-op.
+
+        "Disable" comes from any of: the per-provider `disable_thinking` config (the
+        Settings checkbox), the per-request `disable_thinking` gen param (continue/
+        prefill), or the legacy `disable_thinking_qwen` flag (migrated transparently).
         """
-        if not self.config.get('disable_thinking_qwen', False):
-            return
-        existing = kwargs.get('extra_body') or {}
-        ctk = dict(existing.get('chat_template_kwargs') or {})
-        ctk['enable_thinking'] = False
-        existing['chat_template_kwargs'] = ctk
-        kwargs['extra_body'] = existing
-        logger.info(f"[OPENAI-COMPAT] disable_thinking_qwen ACTIVE → {self.model} (extra_body.chat_template_kwargs.enable_thinking=false)")
+        cfg = self.config
+        disable = (want_disable or cfg.get('disable_thinking', False)
+                   or cfg.get('disable_thinking_qwen', False))
+        raw = cfg.get('extra_body')
+        if not (disable or raw):
+            return                                    # OFF path — leave kwargs untouched
+
+        extra = dict(kwargs.get('extra_body') or {})
+
+        if disable:
+            model = (self.model or '').lower()
+            base = (self.base_url or '').lower()
+            if model.startswith('glm') or any(h in base for h in ('z.ai', 'bigmodel', 'zhipu')):
+                extra['thinking'] = {'type': 'disabled'}          # GLM / Z.AI convention
+                fam = 'glm'
+            elif 'qwen' in model:
+                ctk = dict(extra.get('chat_template_kwargs') or {})
+                ctk['enable_thinking'] = False                    # Qwen 3 (vLLM / LM Studio)
+                extra['chat_template_kwargs'] = ctk
+                fam = 'qwen'
+            else:
+                fam = None                                        # unknown → don't guess (avoid 400)
+            if fam:
+                logger.info(f"[OPENAI-COMPAT] disable_thinking ({fam}) → {self.model}")
+            else:
+                logger.info(f"[OPENAI-COMPAT] disable_thinking requested but no known switch "
+                            f"for {self.model}; set extra_body manually if it's a reasoning model")
+
+        if raw:
+            try:
+                rb = raw if isinstance(raw, dict) else json.loads(raw)
+                if isinstance(rb, dict):
+                    extra.update(rb)                              # user's raw extra_body wins
+                else:
+                    logger.warning("[OPENAI-COMPAT] extra_body config is not a JSON object; ignoring")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"[OPENAI-COMPAT] extra_body config not valid JSON, ignoring: {e}")
+
+        if extra:
+            kwargs['extra_body'] = extra
 
     def chat_completion_stream(
         self,
@@ -606,8 +631,9 @@ class OpenAICompatProvider(BaseProvider):
             # reduces the rejection surface with strict OpenAI-compat providers.
             # (Matches the Anthropic provider, which also never sets tool_choice.)
 
-        # Qwen disable-thinking — apply for streaming path too.
-        self._inject_qwen_no_think(request_kwargs)
+        # Thinking control (universal, family-gated) + raw extra_body — streaming path too.
+        self._inject_thinking_control(
+            request_kwargs, want_disable=(generation_params or {}).get('disable_thinking', False))
 
         logger.info(f"[OPENAI-COMPAT] Request params: model={request_kwargs.get('model')}, tools={len(request_kwargs.get('tools', []))}")
 

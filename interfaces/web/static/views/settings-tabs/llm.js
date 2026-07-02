@@ -135,7 +135,7 @@ export default {
 
                     let value = e.target.value;
                     if (field === 'timeout') value = parseFloat(value) || 5;
-                    if (['use_as_fallback', 'thinking_enabled', 'cache_enabled', 'disable_thinking_qwen'].includes(field)) value = e.target.checked;
+                    if (['use_as_fallback', 'thinking_enabled', 'cache_enabled', 'disable_thinking', 'disable_thinking_qwen'].includes(field)) value = e.target.checked;
                     await updateProvider(key, { [field]: value });
                     showToast('Provider settings saved', 'success', 2000);
                 } catch (err) {
@@ -519,12 +519,20 @@ function _showEditWizard(el, key, config, ctx) {
                     </div>
                     <div class="field-row" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
                         <label class="checkbox-inline">
-                            <input type="checkbox" id="edit-no-think" ${config.disable_thinking_qwen ? 'checked' : ''}>
-                            <span>Disable Qwen thinking (/no_think)</span>
+                            <input type="checkbox" id="edit-no-think" ${(config.disable_thinking ?? config.disable_thinking_qwen) ? 'checked' : ''}>
+                            <span>Disable thinking (best effort)</span>
                         </label>
                     </div>
                     <div class="text-muted" style="font-size:0.8em;margin-left:24px;margin-top:2px">
-                        For Qwen 3 models — sends chat_template_kwargs.enable_thinking=false. Other models ignore it.
+                        Tries the right switch per model — GLM/Z.AI, Qwen, Claude, Gemini. Some reasoning models (o1, DeepSeek-R1) can't fully disable. Cuts latency by skipping the reasoning phase.
+                    </div>
+                    <div class="field-row" style="margin-top:8px;align-items:flex-start">
+                        <label style="padding-top:4px">Extra body (JSON)</label>
+                        <textarea id="edit-extra-body" rows="2" style="flex:1;font-family:monospace;font-size:0.85em"
+                            placeholder='{"thinking": {"type": "disabled"}}'>${config.extra_body ? (typeof config.extra_body === 'string' ? config.extra_body : JSON.stringify(config.extra_body)) : ''}</textarea>
+                    </div>
+                    <div class="text-muted" style="font-size:0.8em;margin-left:24px;margin-top:2px">
+                        Advanced escape hatch — merged verbatim into the request. Use if the checkbox doesn't cover your model (it wins over the checkbox).
                     </div>
                 </div>
             </details>
@@ -580,9 +588,16 @@ function _showEditWizard(el, key, config, ctx) {
         if (!isNaN(maxTok)) updates.generation_params.max_tokens = maxTok;
         if (!isNaN(topP)) updates.generation_params.top_p = topP;
 
-        // Qwen no-think toggle — passes through to openai_compat as a
-        // provider-level config flag (chat_template_kwargs.enable_thinking).
-        updates.disable_thinking_qwen = wizard.querySelector('#edit-no-think')?.checked || false;
+        // Universal disable-thinking toggle + raw extra_body passthrough — both
+        // read by openai_compat's _inject_thinking_control (family-gated).
+        updates.disable_thinking = wizard.querySelector('#edit-no-think')?.checked || false;
+        const extraBodyRaw = (wizard.querySelector('#edit-extra-body')?.value || '').trim();
+        if (extraBodyRaw) {
+            try { JSON.parse(extraBodyRaw); updates.extra_body = extraBodyRaw; }
+            catch (e) { showToast('Extra body is not valid JSON — not saved', 'error'); return; }
+        } else {
+            updates.extra_body = '';
+        }
 
         try {
             await updateProvider(key, updates);
