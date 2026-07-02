@@ -83,6 +83,7 @@ class VoiceChatSystem:
         # NOT persisted — resets on restart. See enter/exit_conversation_mode.
         self.conversation_mode_enabled = False
         self.conversation_session = None
+        self.conversation_source = None      # "local" | "browser" | None
         self._conversation_manager = None  # lazy ConversationManager (true speech mode)
 
         self.history = ConversationHistory(max_history=config.LLM_MAX_HISTORY)
@@ -442,8 +443,53 @@ class VoiceChatSystem:
         # Phase 3: commit — only now is the wakeword fully yielded.
         self.conversation_session = session
         self.conversation_mode_enabled = True
-        publish(Events.CONVERSATION_MODE_CHANGED, {"enabled": True})
+        self.conversation_source = "local"
+        publish(Events.CONVERSATION_MODE_CHANGED, {"enabled": True, "source": "local"})
         logger.info("[CONV] conversation mode ON — wakeword suppressed")
+        return True
+
+    def enter_conversation_mode_browser(self, acquire_audio):
+        """Fail-safe handoff into BROWSER conversation mode (v3 browser endpoint).
+
+        The browser brings its own mic, so there is no server-device conflict:
+        wakeword is paused if it's running (she shouldn't wake-trigger mid-
+        conversation) but a missing/disabled wakeword does NOT block — a headless
+        box must still do browser conversation. No settle/retry either: nothing
+        contends for a device. On any acquire failure the wakeword is restored
+        (no-op if it was Null) — same never-left-deaf guarantee as local.
+        """
+        from core.wakeword.wakeword_null import NullWakeWordDetector
+        from core.event_bus import publish, Events
+
+        if self.conversation_mode_enabled:
+            return False                       # caller handles replace/reject
+
+        paused = False
+        if not isinstance(self.wake_detector, NullWakeWordDetector):
+            try:
+                self.wake_detector.stop_listening()
+                self.wake_word_recorder.stop_recording()
+                paused = True
+            except Exception as e:
+                # Partial pause is possible — restore below will re-arm whatever stopped.
+                logger.warning(f"[CONV] wakeword pause for browser mode failed ({e}); continuing")
+                paused = True
+
+        try:
+            session = acquire_audio()
+            if session is None:
+                raise RuntimeError("acquire_audio returned None")
+        except Exception as e:
+            logger.error(f"[CONV] browser audio acquisition failed ({e})")
+            if paused:
+                self._restore_wakeword()
+            return False
+
+        self.conversation_session = session
+        self.conversation_mode_enabled = True
+        self.conversation_source = "browser"
+        publish(Events.CONVERSATION_MODE_CHANGED, {"enabled": True, "source": "browser"})
+        logger.info("[CONV] browser conversation mode ON")
         return True
 
     def exit_conversation_mode(self):
@@ -455,6 +501,7 @@ class VoiceChatSystem:
         session = self.conversation_session
         self.conversation_session = None
         self.conversation_mode_enabled = False
+        self.conversation_source = None
         if session is not None:
             try:
                 close = getattr(session, "close", None)
@@ -463,7 +510,7 @@ class VoiceChatSystem:
             except Exception as e:
                 logger.warning(f"[CONV] conversation session close error: {e}")
         self._restore_wakeword()
-        publish(Events.CONVERSATION_MODE_CHANGED, {"enabled": False})
+        publish(Events.CONVERSATION_MODE_CHANGED, {"enabled": False, "source": None})
         logger.info("[CONV] conversation mode OFF — wakeword restored")
 
     def _restore_wakeword(self):

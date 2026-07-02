@@ -293,10 +293,10 @@
                             <button type="button" class="sb-toggle active" id="sb-spice-toggle" data-active="true">Spice &middot; 3</button>
                             <button type="button" class="sb-toggle" id="sb-datetime-toggle" data-active="false">Date/Time</button>
                         </div>
-                        <!-- System toggles (NOT per-chat): true speech mode + global thinking -->
+                        <!-- System toggles (NOT per-chat): true speech mode, local mic vs browser mic -->
                         <div class="sb-toggles">
-                            <button type="button" class="sb-toggle" id="sb-conversation-toggle" data-system data-active="false">Conversation</button>
-                            <button type="button" class="sb-toggle" id="sb-think-toggle" data-system data-active="false">Think</button>
+                            <button type="button" class="sb-toggle" id="sb-conversation-toggle" data-system data-active="false" title="Conversation mode on the server's mic">Convo: Local</button>
+                            <button type="button" class="sb-toggle" id="sb-conversation-browser-toggle" data-system data-active="false" title="Conversation mode using this browser's mic">Convo: Browser</button>
                         </div>
 
                         <!-- Mind Scopes Accordion — populated by shared/scope-dropdowns.js

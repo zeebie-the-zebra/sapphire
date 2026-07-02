@@ -230,7 +230,7 @@ export default {
         };
 
         // Toggle buttons (Spice, Date/Time) — PER-CHAT (saved via debouncedSave).
-        // [data-system] toggles (Conversation, Think) are excluded here and wired below.
+        // [data-system] toggles (Conversation local/browser) are excluded here and wired below.
         container.querySelectorAll('.sb-toggle:not([data-system])').forEach(btn => {
             btn.addEventListener('click', () => {
                 const active = btn.dataset.active !== 'true';
@@ -240,9 +240,12 @@ export default {
             });
         });
 
-        // System-level toggles (NOT per-chat). Conversation = true speech mode (runtime
-        // API); Think = global CLAUDE_THINKING_ENABLED (settings batch). Each calls its own
-        // API + reflects state; never touches per-chat settings.
+        // System-level toggles (NOT per-chat). Conversation (local) = true speech mode on
+        // the server mic (runtime API); Conversation (browser) = same mode fed by THIS
+        // browser's mic over a WebSocket — the WS connection itself is the mode switch,
+        // so its button state reflects only via conversation_mode_changed (no optimistic
+        // flip; mic-permission prompts make the start async). Mutually exclusive
+        // server-side. Never touches per-chat settings.
         const _csrf = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
         const convBtn = container.querySelector('#sb-conversation-toggle');
         if (convBtn) {
@@ -265,43 +268,44 @@ export default {
                 }
             });
         }
-        const thinkBtn = container.querySelector('#sb-think-toggle');
-        if (thinkBtn) {
-            thinkBtn.addEventListener('click', async () => {
-                const want = thinkBtn.dataset.active !== 'true';
-                thinkBtn.dataset.active = want; thinkBtn.classList.toggle('active', want);
+        const convBrowserBtn = container.querySelector('#sb-conversation-browser-toggle');
+        if (convBrowserBtn) {
+            convBrowserBtn.addEventListener('click', async () => {
+                const want = convBrowserBtn.dataset.active !== 'true';
                 try {
-                    const res = await fetch('/api/settings/batch', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': _csrf() },
-                        body: JSON.stringify({ settings: { CLAUDE_THINKING_ENABLED: want }, persist: true }),
-                    });
-                    if (!res.ok) {
-                        thinkBtn.dataset.active = String(!want); thinkBtn.classList.toggle('active', !want);
-                        ui.showToast?.('Could not toggle Think', 'error');
+                    const _v2 = window.__v ? `?v=${window.__v}` : '';
+                    const conv = await import(`../features/conversation.js${_v2}`);
+                    if (want) {
+                        const ok = await conv.start();
+                        if (!ok) ui.showToast?.('Could not start browser conversation (mic/connection)', 'error');
+                    } else {
+                        conv.stop();
                     }
                 } catch (e) {
-                    thinkBtn.dataset.active = String(!want); thinkBtn.classList.toggle('active', !want);
-                    ui.showToast?.('Network error toggling Think', 'error');
+                    ui.showToast?.('Browser conversation failed to load', 'error');
                 }
             });
         }
-        // Reflect Conversation state when the backend announces a change (tool / other tab).
+        // Reflect Conversation state when the backend announces a change (tool / other
+        // tab / WS connect+disconnect). `source` says which endpoint owns the mode.
         eventBus.on('conversation_mode_changed', (data) => {
-            const b = container.querySelector('#sb-conversation-toggle');
-            if (!b) return;
             const on = data?.enabled === true;
-            b.dataset.active = String(on); b.classList.toggle('active', on);
+            const src = data?.source || null;
+            const bl = container.querySelector('#sb-conversation-toggle');
+            const bb = container.querySelector('#sb-conversation-browser-toggle');
+            if (bl) { const a = on && src === 'local'; bl.dataset.active = String(a); bl.classList.toggle('active', a); }
+            if (bb) { const a = on && src === 'browser'; bb.dataset.active = String(a); bb.classList.toggle('active', a); }
         });
         // Initial state for the system toggles (not in per-chat settings).
         (async () => {
             try {
                 const r = await fetch('/api/runtime/true-speech');
-                if (r.ok) { const d = await r.json(); setToggle(container, '#sb-conversation-toggle', d.enabled === true, null); }
-            } catch (e) { /* ignore */ }
-            try {
-                const r = await fetch('/api/settings');
-                if (r.ok) { const s = await r.json(); const on = (s.CLAUDE_THINKING_ENABLED ?? s?.settings?.CLAUDE_THINKING_ENABLED) === true; setToggle(container, '#sb-think-toggle', on, null); }
+                if (r.ok) {
+                    const d = await r.json();
+                    const on = d.enabled === true;
+                    setToggle(container, '#sb-conversation-toggle', on && d.source !== 'browser', null);
+                    setToggle(container, '#sb-conversation-browser-toggle', on && d.source === 'browser', null);
+                }
             } catch (e) { /* ignore */ }
         })();
 

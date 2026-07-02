@@ -1128,6 +1128,11 @@ async def toggle_true_speech(request: Request, _=Depends(require_login), system=
     enabled = bool(data.get("enabled", False))
     mgr = system.get_conversation_manager()
     if enabled:
+        # Switching endpoints: an active BROWSER session yields to local (its
+        # source close sends "bye" so the tab shuts down cleanly). Browser mode
+        # itself engages via the WS connect (/ws/conversation), not this PUT.
+        if system.conversation_mode_enabled and getattr(system, "conversation_source", None) == "browser":
+            mgr.stop()
         ok = mgr.start_local()
         return {
             "status": "ok" if ok else "failed",
@@ -1141,4 +1146,5 @@ async def toggle_true_speech(request: Request, _=Depends(require_login), system=
 @router.get("/api/runtime/true-speech")
 async def get_true_speech(_=Depends(require_login), system=Depends(get_system)):
     """Current true speech mode state (system-level, ephemeral) — for UI load-state."""
-    return {"enabled": bool(getattr(system, "conversation_mode_enabled", False))}
+    return {"enabled": bool(getattr(system, "conversation_mode_enabled", False)),
+            "source": getattr(system, "conversation_source", None)}

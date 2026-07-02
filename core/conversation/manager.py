@@ -67,13 +67,10 @@ class ConversationManager:
     def active(self):
         return bool(getattr(self.system, "conversation_mode_enabled", False))
 
-    def start_local(self):
-        """Enter true speech mode on the local mic. Returns True if active."""
-        if self.active:
-            return True
+    def _build_driver(self):
+        """Fresh driver from current settings so tuning applies without restart."""
         import config
-        # Rebuild driver + gate from current settings so tuning applies without restart.
-        self.driver = ConversationDriver(
+        return ConversationDriver(
             self.system,
             start_word=str(getattr(config, "CONVERSATION_START_WORD", "")),
             start_word_fuzzy=float(getattr(config, "CONVERSATION_START_WORD_FUZZY", 0.7)),
@@ -81,6 +78,12 @@ class ConversationManager:
             min_speech_ms=int(getattr(config, "CONVERSATION_MIN_SPEECH_MS", 200)),
             barge_hold_ms=int(getattr(config, "CONVERSATION_BARGE_HOLD_MS", 90)),
         )
+
+    def start_local(self):
+        """Enter true speech mode on the local mic. Returns True if active."""
+        if self.active:
+            return True
+        self.driver = self._build_driver()
         gate = self._build_gate()
 
         def acquire():
@@ -89,6 +92,29 @@ class ConversationManager:
         ok = self.system.enter_conversation_mode(acquire)
         logger.info(f"[CONV] start_local -> {'ON' if ok else 'failed (wakeword intact)'}")
         return ok
+
+    def start_browser(self, send_fn):
+        """Enter true speech mode fed by a connected browser WS (v3 browser endpoint).
+
+        `send_fn(dict)` must be thread-safe and never raise — the WS route bridges
+        it onto its asyncio loop. Returns the BrowserConversationSource (the route
+        pumps PCM/control into it) or None if the mode couldn't start.
+        """
+        if self.active:
+            return None
+        self.driver = self._build_driver()
+        gate = self._build_gate()
+        from core.conversation.browser_source import BrowserConversationSource
+        src = BrowserConversationSource(self.driver, gate, send_fn)
+
+        def acquire():
+            src.start()
+            self.driver.set_sink(src)      # source IS the sink (duplex pattern)
+            return src
+
+        ok = self.system.enter_conversation_mode_browser(acquire)
+        logger.info(f"[CONV] start_browser -> {'ON' if ok else 'failed'}")
+        return src if ok else None
 
     def stop(self):
         """Exit true speech mode and restore wakeword (idempotent)."""

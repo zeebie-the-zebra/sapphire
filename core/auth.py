@@ -102,6 +102,31 @@ async def require_login(request: Request):
     raise HTTPException(status_code=307, headers={"Location": "/login"})
 
 
+async def require_login_ws(websocket) -> bool:
+    """WS analogue of require_login — session-cookie only (a browser-mic channel
+    has no business with Bearer/API-key callers). SessionMiddleware populates
+    sessions for websocket scopes too, so the cookie check is the same; the
+    Origin header must match Host (CSRF tokens don't cover WS handshakes —
+    same-origin fills that hole). Accepts then closes 4401 on failure so the
+    client gets a readable close code instead of a raw handshake reject."""
+    from urllib.parse import urlparse
+    from core.setup import is_setup_complete
+
+    ok = False
+    try:
+        if is_setup_complete() and websocket.session.get('logged_in'):
+            origin = websocket.headers.get('origin', '')
+            host = websocket.headers.get('host', '')
+            ok = bool(host) and urlparse(origin).netloc == host
+    except Exception as e:
+        logger.warning(f"WS auth check failed: {e!r}")
+    if not ok:
+        await websocket.accept()
+        await websocket.close(code=4401)
+        return False
+    return True
+
+
 async def require_setup(request: Request):
     """Dependency that requires setup to be complete."""
     from core.setup import is_setup_complete
