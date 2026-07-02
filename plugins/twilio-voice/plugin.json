@@ -1,0 +1,86 @@
+{
+  "name": "twilio-voice",
+  "short_display_name": "Twilio Voice",
+  "version": "0.1.0",
+  "description": "Sapphire answers real phone calls over Twilio SIP — no open ports (outbound SIP registration). Milestone 1: inbound calls, UDP transport.",
+  "author": "Sapphire Trinity",
+  "icon": "📞",
+  "priority": 50,
+  "default_enabled": true,
+  "capabilities": {
+    "daemon": {
+      "entry": "daemon.py",
+      "event_sources": [
+        {
+          "name": "incoming_call",
+          "label": "Incoming Phone Call",
+          "description": "A call arrived on the Twilio number and Sapphire answered",
+          "filter_fields": [
+            {"key": "caller", "label": "Caller number"}
+          ]
+        },
+        {
+          "name": "call_ended",
+          "label": "Phone Call Ended",
+          "description": "A phone call finished (hangup or rejected)",
+          "filter_fields": [
+            {"key": "caller", "label": "Caller number"},
+            {"key": "reason", "label": "End reason"}
+          ]
+        }
+      ]
+    },
+    "settings": [
+      {
+        "key": "sip_domain",
+        "type": "string",
+        "label": "Twilio SIP Domain",
+        "default": "",
+        "help": "e.g. yourname.sip.twilio.com — from Voice > SIP Domains. Enable SIP Registration and attach a Credential List."
+      },
+      {
+        "key": "sip_user",
+        "type": "string",
+        "label": "SIP Username",
+        "default": "",
+        "help": "Username from the Credential List attached to the SIP domain's registration."
+      },
+      {
+        "key": "sip_pass",
+        "type": "password",
+        "label": "SIP Password",
+        "default": "",
+        "help": "Password for that credential. Stored locally."
+      },
+      {
+        "key": "call_chat",
+        "type": "string",
+        "label": "Call Chat",
+        "default": "default",
+        "help": "Which chat phone conversations run in (persona + history + scopes come from it)."
+      },
+      {
+        "key": "greeting",
+        "type": "string",
+        "widget": "textarea",
+        "default": "Hello, this is Sapphire.",
+        "label": "Greeting",
+        "help": "Spoken when she answers, before the caller speaks. Leave blank for no greeting (she waits for the caller)."
+      },
+      {
+        "key": "sip_port",
+        "type": "number",
+        "label": "Local SIP Port",
+        "default": 5062,
+        "help": "UDP port for SIP signaling. Change only if it conflicts with another service."
+      },
+      {
+        "key": "rtp_port",
+        "type": "number",
+        "label": "Local RTP Port",
+        "default": 10080,
+        "help": "UDP port for call audio (RTP). Change only if it conflicts."
+      }
+    ]
+  }
+}

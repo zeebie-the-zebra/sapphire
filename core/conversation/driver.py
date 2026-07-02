@@ -63,9 +63,11 @@ def match_start_word(text, phrases_csv, threshold=0.7):
 
 class ConversationDriver:
     def __init__(self, system, transcribe_fn=None, sink_factory=None,
-                 sample_rate=16000, start_word="", start_word_fuzzy=0.7, **engine_kw):
+                 sample_rate=16000, start_word="", start_word_fuzzy=0.7,
+                 chat_name=None, **engine_kw):
         self.system = system
         self.sample_rate = sample_rate
+        self._chat_name = chat_name     # None = default chat (local/browser); set for phone calls
         self._transcribe_fn = transcribe_fn or self._whisper_transcribe
         self._sink_factory = sink_factory          # injectable; default = PumpkinChunker
         self._sink = None
@@ -131,7 +133,7 @@ class ConversationDriver:
             self._active_sink = sink
             publish(Events.VOICE_TURN_START, {"message_id": message_id, "user_text": text})
 
-            stream, sid, chat = self.system.llm_chat.begin_stream()
+            stream, sid, chat = self.system.llm_chat.begin_stream(self._chat_name)
             try:
                 for event in stream.chat_stream(text):
                     et = event.get("type") if isinstance(event, dict) else None

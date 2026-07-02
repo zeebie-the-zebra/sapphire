@@ -67,11 +67,13 @@ class ConversationManager:
     def active(self):
         return bool(getattr(self.system, "conversation_mode_enabled", False))
 
-    def _build_driver(self):
-        """Fresh driver from current settings so tuning applies without restart."""
+    def _build_driver(self, chat_name=None):
+        """Fresh driver from current settings so tuning applies without restart.
+        chat_name targets a specific chat (phone calls); None = default (local/browser)."""
         import config
         return ConversationDriver(
             self.system,
+            chat_name=chat_name,
             start_word=str(getattr(config, "CONVERSATION_START_WORD", "")),
             start_word_fuzzy=float(getattr(config, "CONVERSATION_START_WORD_FUZZY", 0.7)),
             endpoint_silence_ms=int(getattr(config, "CONVERSATION_ENDPOINT_SILENCE_MS", 700)),
@@ -112,9 +114,30 @@ class ConversationManager:
             self.driver.set_sink(src)      # source IS the sink (duplex pattern)
             return src
 
-        ok = self.system.enter_conversation_mode_browser(acquire)
+        ok = self.system.enter_conversation_mode_external(acquire, source_label="browser")
         logger.info(f"[CONV] start_browser -> {'ON' if ok else 'failed'}")
         return src if ok else None
+
+    def start_external(self, source_ctor, chat_name=None, source_label="external"):
+        """Enter conversation mode fed by an arbitrary external transport (e.g. a phone
+        call). `source_ctor(driver, gate)` builds a source that is ALSO the TTS sink
+        (duplex pattern) and must be `.start()`-ed by the ctor. Returns the source or
+        None. Wakeword-optional + no server-mic contention (same as browser)."""
+        if self.active:
+            return None
+        self.driver = self._build_driver(chat_name=chat_name)
+        gate = self._build_gate()
+        built = {}
+
+        def acquire():
+            src = source_ctor(self.driver, gate)
+            self.driver.set_sink(src)      # source IS the sink (duplex pattern)
+            built["src"] = src
+            return src
+
+        ok = self.system.enter_conversation_mode_external(acquire, source_label=source_label)
+        logger.info(f"[CONV] start_external({source_label}) -> {'ON' if ok else 'failed'}")
+        return built.get("src") if ok else None
 
     def stop(self):
         """Exit true speech mode and restore wakeword (idempotent)."""

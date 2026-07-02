@@ -448,15 +448,16 @@ class VoiceChatSystem:
         logger.info("[CONV] conversation mode ON — wakeword suppressed")
         return True
 
-    def enter_conversation_mode_browser(self, acquire_audio):
-        """Fail-safe handoff into BROWSER conversation mode (v3 browser endpoint).
+    def enter_conversation_mode_external(self, acquire_audio, source_label="browser"):
+        """Fail-safe handoff into an EXTERNAL conversation mode (browser mic, phone
+        call, etc. — anything that brings its own audio, not the server mic).
 
-        The browser brings its own mic, so there is no server-device conflict:
-        wakeword is paused if it's running (she shouldn't wake-trigger mid-
-        conversation) but a missing/disabled wakeword does NOT block — a headless
-        box must still do browser conversation. No settle/retry either: nothing
-        contends for a device. On any acquire failure the wakeword is restored
-        (no-op if it was Null) — same never-left-deaf guarantee as local.
+        No server-device conflict: wakeword is paused if it's running (she shouldn't
+        wake-trigger mid-conversation) but a missing/disabled wakeword does NOT block —
+        a headless box must still take browser/phone calls. No settle/retry: nothing
+        contends for a device. On any acquire failure the wakeword is restored (no-op
+        if it was Null) — same never-left-deaf guarantee as local. `source_label` tags
+        the mode ('browser' | 'phone' | ...) for the UI + mutual exclusion.
         """
         from core.wakeword.wakeword_null import NullWakeWordDetector
         from core.event_bus import publish, Events
@@ -487,9 +488,9 @@ class VoiceChatSystem:
 
         self.conversation_session = session
         self.conversation_mode_enabled = True
-        self.conversation_source = "browser"
-        publish(Events.CONVERSATION_MODE_CHANGED, {"enabled": True, "source": "browser"})
-        logger.info("[CONV] browser conversation mode ON")
+        self.conversation_source = source_label
+        publish(Events.CONVERSATION_MODE_CHANGED, {"enabled": True, "source": source_label})
+        logger.info(f"[CONV] {source_label} conversation mode ON")
         return True
 
     def exit_conversation_mode(self):
