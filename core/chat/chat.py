@@ -347,6 +347,17 @@ class LLMChat:
         turn_count = self.session_manager.get_turn_count()
         from core import prompts
 
+        # Transient prompt pieces ride the same per-turn rail as spice: drop
+        # expired ones and re-snapshot so a tried-on mood falls off by itself.
+        try:
+            if prompts.expire_transients() and prompts.is_assembled_mode():
+                prompt_data = prompts.get_current_prompt()
+                content = prompt_data['content'] if isinstance(prompt_data, dict) else str(prompt_data)
+                self.set_system_prompt(content)
+                logger.info("[PIECES] Transient piece(s) expired — reassembled prompt")
+        except Exception as e:
+            logger.error(f"[PIECES] Transient expiry check failed: {e}")
+
         # Check per-chat spice setting
         chat_settings = self.session_manager.get_chat_settings()
         if not chat_settings.get('spice_enabled', True):

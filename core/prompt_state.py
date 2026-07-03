@@ -1,6 +1,7 @@
 import logging
 import random
 import threading
+import time
 from .prompt_manager import prompt_manager
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,90 @@ _assembled_state = {
 
 # User prompts cache (used by prompt_crud)
 _user_prompts = {}
+
+# Transient piece overlay — try-on pieces with a TTL. Shadows _assembled_state
+# during assembly but never mutates it or the preset files: expiry just deletes
+# the overlay entry and the persistent value shows through again. Expiry is
+# lazy — expire_transients() runs on the same per-turn rail as spice refresh.
+# Guarded by _state_lock. Shape: {component: (key, expires_at)} for
+# single-value components, {component: [(key, expires_at), ...]} for
+# extras/emotions.
+_transient_overlay = {}
+
+
+def set_transient_piece(component, key, minutes):
+    """Activate a piece for N minutes without touching persistent state."""
+    expires = time.time() + minutes * 60
+    with _state_lock:
+        if component in ("extras", "emotions"):
+            entries = [e for e in _transient_overlay.get(component, []) if e[0] != key]
+            entries.append((key, expires))
+            _transient_overlay[component] = entries
+        else:
+            _transient_overlay[component] = (key, expires)
+
+
+def remove_transient_piece(component, key):
+    """Drop a transient entry. Returns True if something was removed."""
+    with _state_lock:
+        entry = _transient_overlay.get(component)
+        if entry is None:
+            return False
+        if component in ("extras", "emotions"):
+            kept = [e for e in entry if e[0] != key]
+            if len(kept) == len(entry):
+                return False
+            if kept:
+                _transient_overlay[component] = kept
+            else:
+                del _transient_overlay[component]
+            return True
+        if entry[0] == key:
+            del _transient_overlay[component]
+            return True
+        return False
+
+
+def clear_transients():
+    """Drop all transient pieces (prompt switch, chat reset)."""
+    with _state_lock:
+        had = bool(_transient_overlay)
+        _transient_overlay.clear()
+    return had
+
+
+def expire_transients():
+    """Drop expired transient pieces. Returns True if anything was dropped."""
+    now = time.time()
+    dropped = False
+    with _state_lock:
+        for comp in list(_transient_overlay.keys()):
+            entry = _transient_overlay[comp]
+            if isinstance(entry, list):
+                kept = [e for e in entry if e[1] > now]
+                if len(kept) != len(entry):
+                    dropped = True
+                    if kept:
+                        _transient_overlay[comp] = kept
+                    else:
+                        del _transient_overlay[comp]
+            elif entry[1] <= now:
+                del _transient_overlay[comp]
+                dropped = True
+    return dropped
+
+
+def get_transients():
+    """Snapshot of live transients: {component: [(key, minutes_left), ...]}."""
+    now = time.time()
+    out = {}
+    with _state_lock:
+        for comp, entry in _transient_overlay.items():
+            entries = entry if isinstance(entry, list) else [entry]
+            live = [(k, max(1, int(round((exp - now) / 60)))) for k, exp in entries if exp > now]
+            if live:
+                out[comp] = live
+    return out
 
 
 def get_current_state():
@@ -251,6 +336,17 @@ def assemble_prompt():
     # Snapshot mutable state under lock to prevent iteration crash
     with _state_lock:
         state = {k: (list(v) if isinstance(v, list) else v) for k, v in _assembled_state.items()}
+        # Transient overlay shadows persistent state (unexpired entries only).
+        # Expired entries are skipped here and physically removed by
+        # expire_transients() on the per-turn rail.
+        now = time.time()
+        for comp, entry in _transient_overlay.items():
+            if isinstance(entry, list):
+                for key, exp in entry:
+                    if exp > now and key not in state.get(comp, []):
+                        state.setdefault(comp, []).append(key)
+            elif entry[1] > now:
+                state[comp] = entry[0]
 
     parts = [
         components.get("character", {}).get(state["character"], ""),

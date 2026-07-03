@@ -39,6 +39,12 @@ from .prompt_state import (
     invalidate_spice_picks,
     assemble_prompt,
     is_assembled_mode,
+    get_prompt_mode,
+    set_transient_piece,
+    remove_transient_piece,
+    clear_transients,
+    expire_transients,
+    get_transients,
     set_component,
     remove_extra,
     remove_emotion,
@@ -56,7 +62,8 @@ from .prompt_crud import (
     save_prompt,
     delete_prompt,
     load_user_prompts,
-    reload
+    reload,
+    activate_prompt
 )
 
 # Initialize user prompts on module load
@@ -95,6 +102,12 @@ __all__ = [
     'invalidate_spice_picks',
     'assemble_prompt',
     'is_assembled_mode',
+    'get_prompt_mode',
+    'set_transient_piece',
+    'remove_transient_piece',
+    'clear_transients',
+    'expire_transients',
+    'get_transients',
     'set_component',
     'remove_extra',
     'remove_emotion',
@@ -110,5 +123,6 @@ __all__ = [
     'save_prompt',
     'delete_prompt',
     'load_user_prompts',
-    'reload'
+    'reload',
+    'activate_prompt'
 ]

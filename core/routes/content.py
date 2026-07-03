@@ -140,17 +140,10 @@ async def delete_prompt_component(comp_type: str, key: str, request: Request, _=
 
 @router.post("/api/prompts/{name}/load")
 async def load_prompt(name: str, request: Request, _=Depends(require_login), system=Depends(get_system)):
-    """Load/activate a prompt."""
-    pdata = prompts.get_prompt(name)
-    if not pdata:
-        raise HTTPException(status_code=404, detail=f"Prompt '{name}' not found")
-    content = pdata.get('content') if isinstance(pdata, dict) else str(pdata)
-    system.llm_chat.set_system_prompt(content)
-    prompts.set_active_preset_name(name)
-    if hasattr(prompts.prompt_manager, 'scenario_presets') and name in prompts.prompt_manager.scenario_presets:
-        prompts.apply_scenario(name)
-    # Persist to chat settings so it survives restart
-    system.llm_chat.session_manager.update_chat_settings({"prompt": name})
+    """Load/activate a prompt. Shared logic lives in prompts.activate_prompt."""
+    ok, msg = prompts.activate_prompt(name, system)
+    if not ok:
+        raise HTTPException(status_code=404, detail=msg)
     return {"status": "success", "name": name}
 
 

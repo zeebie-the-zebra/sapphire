@@ -282,3 +282,24 @@ def reload():
     load_user_prompts()
     prompt_manager.reload()
     logger.info("Prompts reloaded")
+
+
+def activate_prompt(name: str, system) -> tuple[bool, str]:
+    """Activate a prompt: snapshot into the live chat, track the active
+    preset, apply scenario pieces, persist to chat settings.
+
+    Single implementation shared by the /api/prompts/{name}/load route and
+    the meta tools (which previously duplicated this via loopback HTTP).
+    Preserves the route's original operation order. set_active_preset_name
+    publishes PROMPT_CHANGED for UI consumers.
+    """
+    data = get_prompt(name)
+    if not data:
+        return False, f"Prompt '{name}' not found"
+    content = data.get('content') if isinstance(data, dict) else str(data)
+    system.llm_chat.set_system_prompt(content)
+    prompt_state.set_active_preset_name(name)
+    if name in getattr(prompt_manager, 'scenario_presets', {}):
+        prompt_state.apply_scenario(name)
+    system.llm_chat.session_manager.update_chat_settings({"prompt": name})
+    return True, f"Activated '{name}'"
