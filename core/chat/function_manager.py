@@ -243,6 +243,7 @@ class FunctionManager:
         self.all_possible_tools = []
         self._enabled_tools = []  # Internal storage (ability-filtered)
         self._mode_filters = {}   # module_name -> MODE_FILTER dict
+        self._settings_gates = {}  # module_name -> {func_name: settings_key} (SETTINGS_GATED)
         self._network_functions = set()  # Function names that require network access
         self._is_local_map = {}  # function_name -> is_local value (True, False, or "endpoint")
         self._function_module_map = {}  # function_name -> module_name (for endpoint lookups)
@@ -310,6 +311,7 @@ class FunctionManager:
                         tools = getattr(module, 'TOOLS', [])
                     executor = getattr(module, 'execute', None)
                     mode_filter = getattr(module, 'MODE_FILTER', None)
+                    settings_gate = getattr(module, 'SETTINGS_GATED', None)
                     emoji = getattr(module, 'EMOJI', '')
 
                     if not tools or not executor:
@@ -351,6 +353,10 @@ class FunctionManager:
                     if mode_filter:
                         self._mode_filters[module_name] = mode_filter
                         logger.info(f"Module '{module_name}' has mode filtering: {list(mode_filter.keys())}")
+
+                    if settings_gate:
+                        self._settings_gates[module_name] = settings_gate
+                        logger.info(f"Module '{module_name}' has settings-gated tools: {list(settings_gate.keys())}")
                     
                     # Dedup: warn and skip tools with names already registered
                     existing_names = {t['function']['name'] for t in self.all_possible_tools}
@@ -471,6 +477,7 @@ class FunctionManager:
 
                     emoji = namespace.get('EMOJI', '')
                     mode_filter = namespace.get('MODE_FILTER')
+                    settings_gate = namespace.get('SETTINGS_GATED')
 
                     # Check for function name conflicts BEFORE mutating state
                     existing_names = {t['function']['name'] for t in self.all_possible_tools}
@@ -505,6 +512,9 @@ class FunctionManager:
 
                     if mode_filter:
                         self._mode_filters[module_name] = mode_filter
+
+                    if settings_gate:
+                        self._settings_gates[module_name] = settings_gate
 
                     for tool in tools:
                         self.all_possible_tools.append(tool)
@@ -591,6 +601,7 @@ class FunctionManager:
                 self._enabled_tools = [t for t in self._enabled_tools
                                        if t['function']['name'] not in func_names]
                 self._mode_filters.pop(module_name, None)
+                self._settings_gates.pop(module_name, None)
 
             # Purge sys.modules entries for this plugin's canonical module names
             # so the next register_plugin_tools() call freshly re-execs the source.
@@ -901,10 +912,26 @@ class FunctionManager:
         
         return filtered
 
+    def _apply_settings_gate(self, tools: list) -> list:
+        """Hide tools whose gating setting is off (module SETTINGS_GATED attr:
+        {func_name: settings_key}). Gated tools are INVISIBLE when disabled,
+        not just refused — a fresh install's AI never sees them, so it can't
+        surprise a new user. Settings are hot keys, read per-request."""
+        if not self._settings_gates:
+            return tools
+        blocked = set()
+        for gates in self._settings_gates.values():
+            for func_name, setting_key in gates.items():
+                if not getattr(config, setting_key, False):
+                    blocked.add(func_name)
+        if not blocked:
+            return tools
+        return [t for t in tools if t['function']['name'] not in blocked]
+
     @property
     def enabled_tools(self) -> list:
         """Get enabled tools filtered by current prompt mode."""
-        tools = self._apply_mode_filter(self._enabled_tools)
+        tools = self._apply_settings_gate(self._apply_mode_filter(self._enabled_tools))
 
         # Final dedup — Claude API requires unique tool names
         seen = set()

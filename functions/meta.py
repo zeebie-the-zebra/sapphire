@@ -26,12 +26,22 @@ AVAILABLE_FUNCTIONS = [
     'reset_chat',
     'change_username',
     'list_tools',
+    'switch_model',
+    'switch_toolset',
 ]
 
 # Mode-based filtering - function_manager uses this to show/hide tools
 MODE_FILTER = {
-    "monolith": ['prompt_view', 'prompt_switch', 'prompt_edit', 'prompt_create', 'set_voice', 'reset_chat', 'change_username', 'list_tools'],
-    "assembled": ['prompt_view', 'prompt_switch', 'prompt_create', 'prompt_pieces', 'set_voice', 'reset_chat', 'change_username', 'list_tools'],
+    "monolith": ['prompt_view', 'prompt_switch', 'prompt_edit', 'prompt_create', 'set_voice', 'reset_chat', 'change_username', 'list_tools', 'switch_model', 'switch_toolset'],
+    "assembled": ['prompt_view', 'prompt_switch', 'prompt_create', 'prompt_pieces', 'set_voice', 'reset_chat', 'change_username', 'list_tools', 'switch_model', 'switch_toolset'],
+}
+
+# Settings-gated tools — function_manager hides these entirely (not just
+# refuses) when the gating setting is off. Default off: a fresh install's
+# AI can't switch its own model/toolset until the human opts in.
+SETTINGS_GATED = {
+    'switch_model': 'AI_MODEL_SWITCH_ENABLED',
+    'switch_toolset': 'AI_TOOLSET_SWITCH_ENABLED',
 }
 
 VALID_COMPONENTS = ['character', 'location', 'relationship', 'goals', 'format', 'scenario', 'emotions', 'extras']
@@ -194,6 +204,36 @@ TOOLS = [
                         "enum": ["enabled", "all"],
                         "description": "Default enabled"
                     }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "switch_model",
+            "description": "Switch your LLM to another model on the configured roster. No name = list switchable models and which is current. Takes effect on your next message.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Model name or friendly name from the roster"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "switch_toolset",
+            "description": "Switch your active toolset (e.g. coding tools, then back to conversation tools). No name = list available toolsets.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Toolset name"}
                 },
                 "required": []
             }
@@ -716,6 +756,102 @@ def _list_tools(args):
     return '\n'.join(lines), True
 
 
+def _switch_model(args):
+    import config as app_config
+
+    # Belt+suspenders — function_manager already hides this tool when the
+    # gate is off, but never trust visibility alone (silent-default class).
+    if not getattr(app_config, 'AI_MODEL_SWITCH_ENABLED', False):
+        return "Model switching is disabled. Enable it in Settings > Tools.", False
+
+    from core.chat.llm_providers import provider_registry, set_active_model
+    roster = [k for k in (getattr(app_config, 'AI_MODEL_SWITCH_ROSTER', None) or [])]
+    if not roster:
+        return "No models are configured for switching — add them in Settings > Tools.", False
+
+    providers = {p['key']: p for p in provider_registry.get_all_providers()}
+    system = _system()
+    current = (system.llm_chat.session_manager.get_chat_settings() or {}).get('llm_primary', 'auto')
+    ratchet = bool(getattr(app_config, 'AI_MODEL_SWITCH_RATCHET', False))
+
+    def label(key):
+        p = providers.get(key, {})
+        kind = 'local' if p.get('is_local') else 'cloud'
+        return f"{p.get('display_name', key)} ({key}, {kind})"
+
+    name = (args.get('name') or '').strip()
+    if not name:
+        lines = [f"Current model: {label(current) if current in providers else current}"]
+        if ratchet:
+            lines.append("Privacy ratchet is ON — switches only move DOWN this list, never back up.")
+        lines.append("Switchable models (top = least private):")
+        for i, key in enumerate(roster, 1):
+            if key not in providers:
+                continue
+            marker = "  <- current" if key == current else ""
+            lines.append(f"  {i}. {label(key)}{marker}")
+        lines.append("switch_model(name) to switch — takes effect on your next message.")
+        return '\n'.join(lines), True
+
+    name_lower = name.lower()
+    target = next((k for k in roster
+                   if k.lower() == name_lower
+                   or providers.get(k, {}).get('display_name', '').lower() == name_lower), None)
+    if not target:
+        return f"'{name}' is not on the switch roster. Call switch_model without params to see options.", False
+    if target == current:
+        return f"Already on {label(target)}.", True
+    if ratchet and current in roster and roster.index(target) < roster.index(current):
+        return (f"Privacy ratchet: can't switch back up to "
+                f"{providers.get(target, {}).get('display_name', target)} — this chat moved to "
+                f"{providers.get(current, {}).get('display_name', current)} and privacy only rolls "
+                f"downhill. The user can change it in the sidebar."), False
+
+    ok, msg = set_active_model(system, target)
+    if not ok:
+        return msg, False
+    logger.info(f"AI switched model: {current} -> {target}")
+    return f"Switching to {msg} — takes effect on my next message.", True
+
+
+def _switch_toolset(args):
+    import config as app_config
+
+    if not getattr(app_config, 'AI_TOOLSET_SWITCH_ENABLED', False):
+        return "Toolset switching is disabled. Enable it in Settings > Tools.", False
+
+    from core.event_bus import publish, Events
+    from core.toolsets import toolset_manager
+
+    system = _system()
+    fm = system.llm_chat.function_manager
+    available = sorted(set(list(fm.get_available_toolsets())
+                           + list(toolset_manager.get_toolset_names())
+                           + ['all', 'none']))
+
+    name = (args.get('name') or '').strip()
+    if not name:
+        current = fm.current_toolset_name
+        lines = [f"Current toolset: {current}", "Available:"]
+        lines += [f"  {n}{'  <- current' if n == current else ''}" for n in available]
+        return '\n'.join(lines), True
+
+    match = next((n for n in available if n.lower() == name.lower()), None)
+    if not match:
+        return f"Toolset '{name}' not found. Available: {', '.join(available)}", False
+
+    fm.update_enabled_functions([match])
+    system.llm_chat.session_manager.update_chat_settings({"toolset": match})
+    publish(Events.TOOLSET_CHANGED, {"name": match})
+    logger.info(f"AI switched toolset to: {match}")
+
+    note = ""
+    if 'switch_toolset' not in fm.get_enabled_function_names():
+        note = (" Note: this toolset doesn't include switch_toolset — one-way door. "
+                "The user switches back in the sidebar, or add switch_toolset to that set.")
+    return f"Switched to toolset '{match}' ({len(fm.get_enabled_function_names())} tools).{note}", True
+
+
 _HANDLERS = {
     'prompt_view': _prompt_view,
     'prompt_switch': _prompt_switch,
@@ -726,6 +862,8 @@ _HANDLERS = {
     'reset_chat': _reset_chat,
     'change_username': _change_username,
     'list_tools': _list_tools,
+    'switch_model': _switch_model,
+    'switch_toolset': _switch_toolset,
 }
 
 

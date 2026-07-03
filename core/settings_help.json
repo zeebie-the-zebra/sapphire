@@ -378,6 +378,22 @@
     "short": "Enable verbose tool calling debug logs",
     "long": "When enabled, logs detailed information about every tool call: parameters, responses, timing, errors. Very helpful for debugging tool issues but creates large log files. Disable in production for better performance."
   },
+  "AI_TOOLSET_SWITCH_ENABLED": {
+    "short": "Let the AI switch its own toolset",
+    "long": "Adds a switch_toolset tool so the AI can change its active toolset itself (e.g. coding tools, then self-edit tools). When disabled the tool is completely hidden from the AI. Off by default so a fresh install never surprises anyone."
+  },
+  "AI_MODEL_SWITCH_ENABLED": {
+    "short": "Let the AI switch its own LLM",
+    "long": "Adds a switch_model tool so the AI can switch between the models you list below. When disabled the tool is completely hidden from the AI. The model list doubles as scope control: only listed models are switchable."
+  },
+  "AI_MODEL_SWITCH_ROSTER": {
+    "short": "Models the AI may switch between (top = least private)",
+    "long": "Ordered list of providers the AI can switch between with switch_model. Order matters when the privacy ratchet is on: top is least private, bottom is most private."
+  },
+  "AI_MODEL_SWITCH_RATCHET": {
+    "short": "Privacy ratchet: only allow switches DOWN the list",
+    "long": "When enabled, the AI can only switch to models at the same position or lower in the list — privacy rolls downhill and never back up. The current chat's model is the floor."
+  },
   "TOOL_MAKER_VALIDATION": {
     "short": "How strictly AI-created tools are validated",
     "long": "Controls what the AI is allowed to import/use when creating custom tools via tool_save.\n\n• strict — Only allowlisted imports (json, re, datetime, math, requests, pathlib, etc.). Safest.\n• moderate — Blocks dangerous operations (subprocess, shutil, eval, os.system) but allows most imports.\n• trust — Syntax check only. Full Python access. Use if you trust the AI completely."

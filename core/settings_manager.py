@@ -690,6 +690,10 @@ class SettingsManager:
             # Tool settings - read per-request
             'MAX_TOOL_ITERATIONS', 'MAX_PARALLEL_TOOLS', 'DEBUG_TOOL_CALLING',
             'TOOL_HISTORY_MAX_ENTRIES', 'RAG_SIMILARITY_THRESHOLD',
+            # AI self-switch gates + roster - read per-request by the
+            # function_manager settings-gate and the meta tools
+            'AI_TOOLSET_SWITCH_ENABLED', 'AI_MODEL_SWITCH_ENABLED',
+            'AI_MODEL_SWITCH_ROSTER', 'AI_MODEL_SWITCH_RATCHET',
             # Backup settings - read per-request by backup scheduler
             'BACKUPS_ENABLED', 'BACKUPS_KEEP_DAILY', 'BACKUPS_KEEP_WEEKLY',
             'BACKUPS_KEEP_MONTHLY', 'BACKUPS_KEEP_MANUAL',

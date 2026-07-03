@@ -516,6 +516,35 @@ class ProviderRegistry(_BaseRegistry):
 provider_registry = ProviderRegistry()
 
 
+def set_active_model(system, provider_key: str) -> tuple:
+    """Blessed in-process model switch: validate the provider, write the
+    active chat's llm_primary, publish the settings event.
+
+    Takes effect next turn — chat.py reads llm_primary per-message. Single
+    entry point for any tool/plugin that switches models (meta switch_model,
+    future cost-savers/rotators) so none of them hand-roll chat-settings
+    writes.
+
+    Returns (ok, message) — message is the display name on success.
+    """
+    providers = {p['key']: p for p in provider_registry.get_all_providers()}
+    target = providers.get(provider_key)
+    if not target:
+        return False, f"Unknown provider '{provider_key}'"
+    if not target.get('enabled'):
+        return False, f"Provider '{provider_key}' is not enabled"
+    sm = system.llm_chat.session_manager
+    if not sm.update_chat_settings({"llm_primary": provider_key}):
+        return False, "Failed to save chat settings"
+    from core.event_bus import publish, Events
+    publish(Events.CHAT_SETTINGS_CHANGED, {
+        "chat": sm.get_active_chat_name(),
+        "settings": {"llm_primary": provider_key},
+        "origin": None,
+    })
+    return True, target.get('display_name', provider_key)
+
+
 # =============================================================================
 # BACKWARD COMPATIBILITY EXPORTS
 # =============================================================================

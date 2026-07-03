@@ -262,7 +262,11 @@
     "TOOL_HISTORY_MAX_ENTRIES": 0,
     "MAX_TOOL_ITERATIONS": 7,
     "MAX_PARALLEL_TOOLS": 5,
-    "DEBUG_TOOL_CALLING": false
+    "DEBUG_TOOL_CALLING": false,
+    "AI_TOOLSET_SWITCH_ENABLED": false,
+    "AI_MODEL_SWITCH_ENABLED": false,
+    "AI_MODEL_SWITCH_ROSTER": [],
+    "AI_MODEL_SWITCH_RATCHET": false
   },
   
   "rag": {
