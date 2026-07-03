@@ -269,14 +269,24 @@ class SipEndpoint:
                 # Log, back off briefly, keep serving.
                 logger.error(f"[TWILIO] serve loop error (continuing): {e}", exc_info=True)
                 time.sleep(0.2)
-
-    def stop(self):
-        self._stop.set()
+        # Deregister HERE, on the serve thread — it must stay the socket's ONLY
+        # reader. A second reader (the old stop()-side deregister) races it for
+        # the reply datagram; the loser blocks forever in recvfrom and wedges
+        # shutdown until systemd SIGKILLs (three wedges Jul 2-3, 2026).
         try:
-            if self.sip:
-                self._deregister_all()
+            self._deregister_all()
         except Exception:
             pass
+        for s in (self.sip, self.rtp):
+            try:
+                s.close()
+            except Exception:
+                pass
+
+    def stop(self):
+        """Signal the serve thread to exit; it deregisters on its way out.
+        Never read the socket from here — single-reader rule (see serve_forever)."""
+        self._stop.set()
 
     # ── one call ─────────────────────────────────────────────────────────────
     def _handle_call(self, start, h, sdp, addr):
