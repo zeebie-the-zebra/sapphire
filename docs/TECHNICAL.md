@@ -174,7 +174,7 @@ Cache TTL can be 5m (default) or 1h for longer sessions with idle gaps.
 
 ### Per-Turn Injection (Ghost Messages)
 
-Per-turn ephemera (spice, current datetime, plugin-contributed context) lives in `core/ghost_messages.py` and is delivered as a labeled user-role message inserted right before the new user message. The envelope opens with `[Operator metadata for assistant — ...]` so the assistant sees these contributions as operator metadata, not user voice. Each line is attributed to the contributing plugin name. Ghost messages are NEVER persisted to chat history.
+Per-turn ephemera (spice, current datetime, plugin-contributed context) lives in `core/ghost_messages.py` and is delivered as a labeled user-role message inserted right before the new user message. The envelope opens with `[Sapphire turn-context — operator-injected, not user voice]` so the assistant sees these contributions as operator metadata, not user voice. Each line is attributed to the contributing plugin name. Ghost messages are NEVER persisted to chat history. **Full guide: [GHOST_MESSAGES.md](GHOST_MESSAGES.md)** — the three contribution paths (built-in, the per-chat "Ghost Message" sidebar box, the `ghost_inject` plugin hook), the anti-manipulation gate, and the cache mechanics.
 
 This is the rail that keeps spice/datetime/plugin context cache-friendly. Plugins use the `ghost_inject` hook to contribute (see `docs/plugin-author/hooks.md`).
 

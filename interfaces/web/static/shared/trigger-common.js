@@ -18,6 +18,7 @@ export const TRIGGER_TABS = [
     { id: 'heartbeat', label: 'Heartbeat', icon: '💓' },
     { id: 'scheduled', label: 'Scheduled', icon: '📅' },
     { id: 'daemons', label: 'Daemons', icon: '📡' },
+    { id: 'realtime', label: 'Realtime', icon: '⚡' },
     { id: 'webhooks', label: 'Webhooks', icon: '🔗' },
 ];
 

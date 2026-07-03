@@ -60,6 +60,9 @@
       {"method": "GET", "path": "accounts", "handler": "routes/accounts.py:list_accounts"},
       {"method": "POST", "path": "accounts", "handler": "routes/accounts.py:save_account"},
       {"method": "DELETE", "path": "accounts/{scope}", "handler": "routes/accounts.py:delete_account"}
-    ]
+    ],
+    "hooks": {
+      "ghost_inject": "hooks/phone_context.py"
+    }
   }
 }

@@ -99,6 +99,13 @@ export async function fetchEventSources() {
   catch { return []; }
 }
 
+// Names of event sources flagged realtime:true — used to split daemon tasks
+// between the Daemons tab (event→task) and the Realtime tab (live sessions).
+export async function fetchRealtimeSourceNames() {
+  const sources = await fetchEventSources();
+  return new Set(sources.filter(s => s && s.realtime).map(s => s.name));
+}
+
 // Fetch personas (list with summary)
 export async function fetchPersonas() {
   try { const data = await fetchWithTimeout('/api/personas'); return data.personas || []; }

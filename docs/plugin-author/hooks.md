@@ -79,7 +79,7 @@ Handlers get the `VoiceChatSystem` instance via `event.metadata.get("system")`. 
 | `post_stt` | **Yes** | Yes | `input` (transcribed text) |
 | `pre_chat` | **Yes** | Yes | `input`, `skip_llm`, `response`, `ephemeral` |
 | `prompt_inject` | No | Yes | `context_parts` (list — append to it) |
-| `ghost_inject` | **Yes** | Yes | `ghost_text` (set to a string to contribute one ghost line) |
+| `ghost_inject` | **Yes** | **No** (`event.config` is `None` — `import config` if needed) | `ghost_text` (set to a string to contribute one ghost line) |
 | `post_llm` | **Yes** | Yes | `response` (AI's answer text) |
 | `post_chat` | **Yes** | Yes | None (observational) |
 | `pre_execute` | **Yes** | Yes | `arguments`, `skip_llm`, `result` |
@@ -448,7 +448,7 @@ handle = ghost_inject  # fallback for `handle` dispatch
 When ghost contributions exist for a turn, the runner builds a single envelope and inserts it as a user-role message just before the new user input:
 
 ```
-[Operator metadata for assistant — these are turn-only notes, not the user's voice. Acknowledge or weave only if natural.]
+[Sapphire turn-context — operator-injected, not user voice]
 - Time: Tuesday, May 8, 8:55 PM (America/Indiana/Indianapolis)
 - Spice: Speak more urgently in this reply.
 - weather: Light rain in user's area.

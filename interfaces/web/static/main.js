@@ -32,6 +32,7 @@ const VIEW_MODULES = {
     heartbeat: `./views/heartbeat.js${_v}`,
     scheduled: `./views/scheduled.js${_v}`,
     daemons:  `./views/daemons.js${_v}`,
+    realtime: `./views/realtime.js${_v}`,
     webhooks: `./views/webhooks.js${_v}`,
     memories: `./views/memories.js${_v}`,
     people:   `./views/people.js${_v}`,

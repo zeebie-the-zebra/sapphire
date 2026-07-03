@@ -248,6 +248,13 @@ class AnthropicCompatProvider(BaseProvider):
                     if content and content.strip():
                         api_messages.append({"role": "user", "content": content})
 
+        # Anthropic requires the first message to be role=user. An assistant-
+        # initiated chat (e.g. a phone greeting recorded before the caller
+        # speaks) starts with assistant → 400. Prepend a minimal user turn so
+        # the conversation stays valid without dropping the opening line.
+        if api_messages and api_messages[0].get("role") == "assistant":
+            api_messages.insert(0, {"role": "user", "content": "[conversation started]"})
+
         return system_prompt, api_messages
 
     def _convert_tools(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

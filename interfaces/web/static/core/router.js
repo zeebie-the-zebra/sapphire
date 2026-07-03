@@ -7,7 +7,7 @@ let currentView = null;
 // View groups: views that share a nav parent
 const VIEW_GROUPS = {
     personas: ['personas', 'prompts', 'toolsets', 'spices'],
-    triggers: ['heartbeat', 'scheduled', 'daemons', 'webhooks'],
+    triggers: ['heartbeat', 'scheduled', 'daemons', 'realtime', 'webhooks'],
     mind: ['memories', 'people', 'knowledge', 'ai-knowledge', 'goals'],
     settings: ['settings', 'help', 'video-guide']
 };

@@ -116,6 +116,13 @@ def _reap_ephemeral():
 def _reconcile_once():
     desired = _desired_accounts()
     with _lock:
+        # Self-heal: an endpoint whose serve thread has died is not really running.
+        # Drop it so the desired-set logic below re-registers it — recovers within
+        # one reconcile cycle (12s) instead of silently dropping calls forever.
+        for scope, info in list(_endpoints.items()):
+            if not info["thread"].is_alive():
+                logger.warning(f"[TWILIO] endpoint '{scope}' thread is dead — restarting")
+                _endpoints.pop(scope, None)
         running = set(_endpoints.keys())
         for scope in running - desired:                     # tasks disabled / account removed
             logger.info(f"[TWILIO] deregistering '{scope}' (no enabled task)")
@@ -186,7 +193,14 @@ def _on_call(scope, caller, session):
         _call_ended(scope, caller, chat, ephemeral, "busy", 0.0, 0)
         return
 
-    greeting = acct.get("greeting") or ""
+    # Expose the active call so the ghost_inject hook (hooks/phone_context.py) can
+    # add per-turn phone-medium context, gated on this exact chat. `note` is the
+    # rule's optional custom Phone-context text (blank -> hook uses its default).
+    _note = ((task or {}).get("trigger_config", {}).get("phone_note") or "").strip()
+    system._twilio_active_call = {"caller": caller, "chat": chat, "note": _note}
+
+    # Prefer the Realtime rule's greeting; fall back to the account's.
+    greeting = ((task or {}).get("trigger_config", {}).get("greeting") or acct.get("greeting") or "").strip()
     if greeting:
         try:
             audio = system.tts.generate_audio_data(greeting)
@@ -194,6 +208,14 @@ def _on_call(scope, caller, session):
                 src.feed_chunk({"audio_b64": base64.b64encode(audio).decode()})
         except Exception as e:
             logger.warning(f"[TWILIO] greeting failed: {e}")
+        # Record the greeting as her opening line in the call's chat, so she knows
+        # what she said on pickup — it's in-context for the caller's first reply and
+        # shows in the chat. Written to the target chat directly (not active).
+        try:
+            system.llm_chat.session_manager.append_messages_to_chat(
+                chat, [{"role": "assistant", "content": greeting}])
+        except Exception as e:
+            logger.warning(f"[TWILIO] greeting history write failed: {e}")
 
     started = time.time()
     session.wait_ended()
@@ -201,6 +223,7 @@ def _on_call(scope, caller, session):
         mgr.stop()
     except Exception as e:
         logger.warning(f"[TWILIO] conversation stop error: {e}")
+    system._twilio_active_call = None
     _call_ended(scope, caller, chat, ephemeral, "hangup",
                 round(time.time() - started, 1), 0)
     logger.info(f"[TWILIO] call with {caller} on '{scope}' ended (chat={chat})")
@@ -230,19 +253,24 @@ def _resolve_chat(system, scope, caller, task):
         # Mark for the reaper + stamp last-call now + carry the task's behavior.
         patch = {"ephemeral_source": "twilio", "ephemeral_last_call": time.time(),
                  "ephemeral_ttl_min": ttl_min, "emoji": "\U0001F4DE"}   # 📞
-        persona = (task or {}).get("persona")
-        if persona:
-            patch["persona"] = persona
-            try:
-                from core.personas import persona_manager
-                p = persona_manager.get(persona)
-                if p and p.get("settings"):
-                    patch.update(p["settings"]); patch["persona"] = persona
-            except Exception:
-                pass
-        toolset = (task or {}).get("toolset")
-        if toolset:
-            patch["toolset"] = toolset
+        # Carry the rule's behavior onto the throwaway chat. PROMPT not persona —
+        # a persona drags a toolset with it, and on an outside line capability must
+        # stay explicit. Provider/model map to the chat's own keys so the caller's
+        # chat actually has a working model (not the system default).
+        if (task or {}).get("prompt"):
+            patch["prompt"] = task["prompt"]
+        if (task or {}).get("toolset"):
+            patch["toolset"] = task["toolset"]
+        prov = (task or {}).get("provider")
+        if prov and prov != "auto":
+            patch["llm_primary"] = prov
+        if (task or {}).get("model"):
+            patch["llm_model"] = task["model"]
+        # Memory/knowledge scopes — a caller with tools reaches an ISOLATED scope,
+        # never the owner's default.
+        for _k, _v in (task or {}).items():
+            if _k.startswith("scope_") and _v:
+                patch[_k] = _v
         system.llm_chat.session_manager.set_named_chat_settings(safe, patch)
     except Exception as e:
         logger.warning(f"[TWILIO] ephemeral chat setup failed ({e}); using 'default'")

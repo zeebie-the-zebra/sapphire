@@ -28,6 +28,13 @@ from .codec import SILENCE_FRAME, FRAME_SAMPLES
 
 logger = logging.getLogger(__name__)
 
+# Call-teardown guards. Inbound RTP flows continuously during a live call (Twilio
+# sends silence frames too), so a gap means the caller is gone even if the BYE was
+# lost. Without these the serve thread wedges in _call_io_loop forever, blocking
+# re-registration until a restart. Krem idles a while mid-call, so 60s not 30s.
+_CALL_INACTIVITY_SEC = 60      # no inbound RTP this long -> assume hangup
+_CALL_MAX_SEC = 7200           # hard 2h backstop against a runaway/wedged call
+
 STUN_MAGIC = 0x2112A442
 _PTIME = 0.02          # 20ms RTP frames
 
@@ -241,21 +248,27 @@ class SipEndpoint:
 
         next_reg = time.time() + self.expires / 2
         while not self._stop.is_set():
-            if time.time() >= next_reg:
-                self._register()
-                next_reg = time.time() + self.expires / 2
-            r, _, _ = select.select([self.sip], [], [], 0.5)
-            if not r:
-                continue
-            data, addr = self.sip.recvfrom(65535)
-            start, h, body = _parse(data)
-            if start.startswith("INVITE"):
-                try:
+            try:
+                if time.time() >= next_reg:
+                    ok = self._register()
+                    logger.info(f"[TWILIO] keepalive re-register {'ok' if ok else 'FAILED'} — {self.user}@{self.domain}")
+                    next_reg = time.time() + self.expires / 2
+                r, _, _ = select.select([self.sip], [], [], 0.5)
+                if not r:
+                    continue
+                data, addr = self.sip.recvfrom(65535)
+                start, h, body = _parse(data)
+                if start.startswith("INVITE"):
                     self._handle_call(start, h, body, addr)
-                except Exception as e:
-                    logger.error(f"[TWILIO] call handling error: {e}", exc_info=True)
-            elif start.startswith("OPTIONS"):
-                self._reply(200, "OK", h, addr)
+                elif start.startswith("OPTIONS"):
+                    self._reply(200, "OK", h, addr)
+            except Exception as e:
+                # A stray/malformed packet or transient socket error must NEVER kill
+                # this thread — a dead endpoint silently drops ALL future calls until
+                # a restart (the bug that made her stop answering ~10min after boot).
+                # Log, back off briefly, keep serving.
+                logger.error(f"[TWILIO] serve loop error (continuing): {e}", exc_info=True)
+                time.sleep(0.2)
 
     def stop(self):
         self._stop.set()
@@ -307,13 +320,30 @@ class SipEndpoint:
             session.stop()
 
     def _call_io_loop(self, session, dialog):
-        """Route inbound RTP -> session; watch SIP for BYE. Ends when session dies."""
+        """Route inbound RTP -> session; watch SIP for BYE. Ends when the session
+        dies, the caller hangs up (BYE), the inbound audio stops (lost-BYE guard),
+        or the call runs past the hard cap — so the serve thread ALWAYS returns to
+        re-register instead of wedging here forever."""
+        started = time.time()
+        last_rtp = started
         while session._alive.is_set() and not self._stop.is_set():
+            now = time.time()
+            if now - last_rtp > _CALL_INACTIVITY_SEC:
+                logger.info(f"[TWILIO] no inbound audio for {_CALL_INACTIVITY_SEC}s — ending call (assumed hangup, BYE not seen)")
+                session.stop()
+                self._send_bye(dialog)
+                return
+            if now - started > _CALL_MAX_SEC:
+                logger.warning(f"[TWILIO] call exceeded {_CALL_MAX_SEC}s cap — force-ending")
+                session.stop()
+                self._send_bye(dialog)
+                return
             r, _, _ = select.select([self.rtp, self.sip], [], [], 0.2)
             for s in r:
                 data, addr = s.recvfrom(65535)
                 if s is self.rtp:
                     if len(data) > 12 and (data[0] & 0xC0) == 0x80:
+                        last_rtp = time.time()
                         session.feed_inbound(data[12:])
                 else:
                     start, h, _ = _parse(data)

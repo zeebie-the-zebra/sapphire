@@ -28,8 +28,7 @@ Design:
         - Runner attributes each contribution to the plugin name in the envelope
 
     Envelope (visible to the assistant, INVISIBLE to the user):
-        [Operator metadata for assistant — these are turn-only notes, not the
-        user's voice. Acknowledge or weave only if natural.]
+        [Sapphire turn-context — operator-injected, not user voice]
         - Time: Tuesday, May 8, 8:55 PM
         - Spice: Speak more urgently in this reply.
         - weather: Light rain in user's area.

@@ -3,11 +3,12 @@
   "version": "0.2.0",
   "files": {
     "codec.py": "sha256:8bea0022c1fac3aa023ca275446a96ca647901217e28a4b0919c614a93f29abb",
-    "daemon.py": "sha256:98d3e304739a4a7a1ab78d400d0ea76babc62ca79424c481b258d71fcdbba4b1",
-    "plugin.json": "sha256:4d2df3c43bdd6ff0e2d96a775d7dee57d93af78a740827e1a364b22a447b5ce8",
+    "daemon.py": "sha256:e83fdebc0809181e72abd7b1fac01209c4a702e5ff09cfb817bf78c5f104caae",
+    "hooks/phone_context.py": "sha256:a78c1e54f8a22a4d50975841992bc4a4c6ade15e19146165721ce97e15afe37c",
+    "plugin.json": "sha256:fa855d08f6ad5ddf5d6e693492f8fc251b1cf11754f3596e84889818bb5844d6",
     "routes/accounts.py": "sha256:b09ef0a470a9f025f8a020b8f3fc75b573f4527fa52450226e7864ca169611e3",
-    "sip_endpoint.py": "sha256:3a65adc0fb7642ee5073a720e0abeab2246aaf735b1e1299c6a1ea05287b263c",
+    "sip_endpoint.py": "sha256:7f98c4c20fb9a8487835bf5b7448c02e9ecc9ec861abf6b8f750c26a64914010",
     "twilio_source.py": "sha256:fa8a893bb243cf254c297f98a0d1271d1d39dcee56b7e3456df05367771c43c8"
   },
-  "signature": "l3SbXl8AMgRko8BzWrQ3PdS2cHA9SJJr0LPzJYH77yb8yDpQsfoqKOkGf8hxh4dQJvP8VbnwzswJGr3dt3+ADw=="
+  "signature": "fk7CfDdRZEbtb7nh6lDhXS0ZS/84My9Eud68/qnEIL5KrH6NXShBQOVyqh9mSWYD9l84VRLR8uMxX0/+EBspBA=="
 }

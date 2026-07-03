@@ -1,3 +1,10 @@
+# 2.8.1 - Twilio
+- Added Twilio Realtime plugin for phone
+# 2.8.0 - Conversation
+## July 3, 2026
+- local and browser conversation mode (duplex)
+- Barge-in to interrupt the AI
+- Realtime trigger section, like a continuous daemon
 # 2.7.14 - Webhook per-chat
 - Webhooks can specify which chat they return to
 # 2.7.13 - Backup Restore + Encryption
