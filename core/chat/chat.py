@@ -249,6 +249,7 @@ class LLMChat:
         """
         import secrets as _secrets
         stream = StreamingChat(self)
+        stream.target_chat = chat_name   # A1: explicit target (None = web/active)
         sid = _secrets.token_hex(8)
         if chat_name is None:
             try:

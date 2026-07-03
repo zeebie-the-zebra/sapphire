@@ -303,7 +303,11 @@ export default {
                 if (r.ok) {
                     const d = await r.json();
                     const on = d.enabled === true;
-                    setToggle(container, '#sb-conversation-toggle', on && d.source !== 'browser', null);
+                    // Only light a button for its OWN source. A phone call is
+                    // source='phone' — it lights NEITHER local nor browser (it's not a
+                    // mic session on this machine). Was `!== 'browser'`, which wrongly
+                    // lit Local for phone calls. 2026-07-02.
+                    setToggle(container, '#sb-conversation-toggle', on && d.source === 'local', null);
                     setToggle(container, '#sb-conversation-browser-toggle', on && d.source === 'browser', null);
                 }
             } catch (e) { /* ignore */ }

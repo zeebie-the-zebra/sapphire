@@ -34,6 +34,23 @@ class StreamingChat:
         # interfered). Full per-request streaming state is H4 architecture
         # work; this is the narrow scoping fix. H5 2026-04-22.
         self.active_chat_name = None
+        # A1: the explicit chat this stream targets (None = web/active chat). When
+        # set to a non-active chat (a phone call), the turn runs a per-stream brain
+        # override so it reads/writes ITS chat, not the UI's active one.
+        self.target_chat = None
+
+    def _effective_enabled_tools(self):
+        """A1: the tool list for THIS turn — a per-stream override's tools when the
+        turn targets a non-active chat, else the global active toolset. An override
+        with tools=None means that chat's toolset is 'none' → no tools this turn."""
+        try:
+            from core.chat.stream_brain import get_override
+            o = get_override()
+            if o is not None:
+                return o.get("tools") or []
+        except Exception:
+            pass
+        return self.main_chat.function_manager.enabled_tools
 
     def _cleanup_stream(self):
         """Safely close current stream if it exists."""
@@ -115,6 +132,8 @@ class StreamingChat:
         except ImportError:
             pass
 
+        _brain_token = None   # A1: declared before the try so the finally is always safe
+
         try:
             self.main_chat.refresh_spice_if_needed()
             self.cancel_flag = False
@@ -125,6 +144,31 @@ class StreamingChat:
                 self.active_chat_name = self.main_chat.session_manager.get_active_chat_name()
             except Exception:
                 self.active_chat_name = None
+
+            # A1: if this stream targets a NON-active chat (a phone call), install a
+            # per-context brain override so the whole turn — messages, provider,
+            # persona, tools, scopes — runs in THAT chat, concurrently with and
+            # without disturbing the UI's active chat. Reset in the outer finally.
+            _brain_token = None
+            _tgt = getattr(self, "target_chat", None)
+            if _tgt and _tgt != self.active_chat_name:
+                try:
+                    from core.chat import stream_brain
+                    from core import prompts as _prompts
+                    sess = self.main_chat.session_manager.make_stream_session(_tgt)
+                    if sess:
+                        _pn = sess["settings"].get("prompt", "default")
+                        _pd = _prompts.get_prompt(_pn)
+                        sess["system_prompt"] = (_pd.get("content", "") if isinstance(_pd, dict) else "") or ""
+                        sess["tools"] = self.main_chat._resolve_toolset_tools(
+                            sess["settings"].get("toolset", "all"))
+                        _brain_token = stream_brain.set_override(sess)
+                        logger.info(f"[A1] stream brain override → chat '{_tgt}' "
+                                    f"(provider={sess['settings'].get('llm_primary')}, "
+                                    f"tools={len(sess['tools']) if sess['tools'] else 0})")
+                except Exception as _e:
+                    logger.warning(f"[A1] stream brain override failed for '{_tgt}': {_e}")
+                    _brain_token = None
             # H4 follow-up 2026-04-22: was `_is_streaming = True` (single bool).
             # Two concurrent streams on same chat had the first finisher set
             # False while the second was still running → append_messages_to_chat
@@ -212,7 +256,7 @@ class StreamingChat:
             # Send only enabled tools - model should only know about active tools
             # Snapshot names too — used to validate tool calls against what LLM actually received
             # Snapshot executors to protect against reload yanking executors mid-chat
-            enabled_tools = self.main_chat.function_manager.enabled_tools
+            enabled_tools = self._effective_enabled_tools()
             _allowed_tool_names = {t["function"]["name"] for t in enabled_tools if "function" in t}
             _executor_snapshot = self.main_chat.function_manager.snapshot_executors()
 
@@ -648,7 +692,7 @@ class StreamingChat:
                     # on the next iteration. Without this, the LLM would see
                     # new tools in tools= but execute_function would reject
                     # them as "not in active toolset". Mirrors chat.py:680.
-                    enabled_tools = self.main_chat.function_manager.enabled_tools
+                    enabled_tools = self._effective_enabled_tools()
                     _allowed_tool_names = {t["function"]["name"] for t in enabled_tools if "function" in t}
                     _executor_snapshot = self.main_chat.function_manager.snapshot_executors()
 
@@ -981,7 +1025,7 @@ class StreamingChat:
                 # Inject dummy tool_results for any pending tool_calls so LLM history
                 # stays valid (providers require tool_result after tool_calls)
                 try:
-                    msgs = self.main_chat.session_manager.current_chat.messages
+                    msgs = self.main_chat.session_manager._effective_chat().messages
                     for msg in reversed(msgs):
                         if msg.get("role") == "assistant" and msg.get("tool_calls"):
                             existing_results = {m.get("tool_call_id") for m in msgs if m.get("role") == "tool"}
@@ -1003,4 +1047,13 @@ class StreamingChat:
             self.is_streaming = False
             self.active_chat_name = None
             self.main_chat.session_manager.end_streaming()
+            # A1: drop the per-stream brain override LAST — after all cleanup that
+            # persists via the effective chat (tool-cycle close above). Restores the
+            # active-chat singletons for this context.
+            if _brain_token is not None:
+                try:
+                    from core.chat import stream_brain
+                    stream_brain.reset_override(_brain_token)
+                except Exception:
+                    pass
             publish(Events.AI_TYPING_END)

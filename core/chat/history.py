@@ -1043,7 +1043,15 @@ class ChatSessionManager:
             pass
 
         self._ensure_db()
-        
+
+        # A1: save to the EFFECTIVE chat (a per-stream override's chat, else the
+        # active one). For an override we persist messages ONLY — the target chat's
+        # settings/markers are owned elsewhere (the daemon/reaper) and must not be
+        # clobbered on every turn. For the active chat, behavior is unchanged.
+        eff_chat = self._effective_chat()
+        eff_name = self._effective_chat_name()
+        is_override = eff_chat is not self.current_chat
+
         with self._lock:
             try:
                 with self._get_connection() as conn:
@@ -1051,26 +1059,32 @@ class ChatSessionManager:
                     # writer — agent completion, post_chat hook, etc. — can't
                     # resurrect a chat that was just deleted. create_chat is
                     # the sole path that creates rows.
-                    cur = conn.execute(
-                        """UPDATE chats SET settings = ?, messages = ?, updated_at = ?
-                           WHERE name = ?""",
-                        (
-                            json.dumps(self.current_settings),
-                            json.dumps(self.current_chat.messages),
-                            datetime.now().isoformat(),
-                            self.active_chat_name,
+                    if is_override:
+                        cur = conn.execute(
+                            """UPDATE chats SET messages = ?, updated_at = ? WHERE name = ?""",
+                            (json.dumps(eff_chat.messages), datetime.now().isoformat(), eff_name)
                         )
-                    )
+                    else:
+                        cur = conn.execute(
+                            """UPDATE chats SET settings = ?, messages = ?, updated_at = ?
+                               WHERE name = ?""",
+                            (
+                                json.dumps(self.current_settings),
+                                json.dumps(eff_chat.messages),
+                                datetime.now().isoformat(),
+                                eff_name,
+                            )
+                        )
                     conn.commit()
                     if cur.rowcount == 0:
                         logger.warning(
-                            f"Save to chat '{self.active_chat_name}' affected 0 rows — "
+                            f"Save to chat '{eff_name}' affected 0 rows — "
                             f"chat was deleted. Dropping save to avoid resurrecting it."
                         )
                         return
-                logger.debug(f"Saved chat '{self.active_chat_name}' ({len(self.current_chat.messages)} messages)")
+                logger.debug(f"Saved chat '{eff_name}' ({len(eff_chat.messages)} messages)")
             except Exception as e:
-                logger.error(f"Failed to save chat '{self.active_chat_name}': {e}")
+                logger.error(f"Failed to save chat '{eff_name}': {e}")
                 try:
                     publish(Events.CONTINUITY_TASK_ERROR, {
                         "task": "Chat Save",
@@ -1285,9 +1299,9 @@ class ChatSessionManager:
 
     def add_user_message(self, content: Union[str, List[Dict[str, Any]]], persona: Optional[str] = None):
         if persona is None:
-            persona = self.current_settings.get("persona")
+            persona = self.get_chat_settings().get("persona")
         with self._lock:
-            self.current_chat.add_user_message(content, persona=persona)
+            self._effective_chat().add_user_message(content, persona=persona)
             self._save_current_chat()
         publish(Events.MESSAGE_ADDED, {"role": "user"})
 
@@ -1301,16 +1315,16 @@ class ChatSessionManager:
     ):
         """Add assistant message with tool calls. Marks start of tool cycle."""
         self._in_tool_cycle = True
-        persona = self.current_settings.get("persona")
+        persona = self.get_chat_settings().get("persona")
         with self._lock:
-            self.current_chat.add_assistant_with_tool_calls(
+            self._effective_chat().add_assistant_with_tool_calls(
                 content, tool_calls, thinking, thinking_raw, metadata, persona=persona
             )
             self._save_current_chat()
 
     def add_tool_result(self, tool_call_id: str, name: str, content: str, inputs: Optional[Dict] = None):
         with self._lock:
-            self.current_chat.add_tool_result(tool_call_id, name, content, inputs)
+            self._effective_chat().add_tool_result(tool_call_id, name, content, inputs)
             self._save_current_chat()
 
     def add_assistant_final(
@@ -1320,13 +1334,14 @@ class ChatSessionManager:
         metadata: Optional[Dict] = None
     ):
         """Add final assistant message. Ends tool cycle and clears thinking_raw."""
-        persona = self.current_settings.get("persona")
+        persona = self.get_chat_settings().get("persona")
         with self._lock:
-            self.current_chat.add_assistant_final(content, thinking, metadata, persona=persona)
+            eff = self._effective_chat()
+            eff.add_assistant_final(content, thinking, metadata, persona=persona)
 
             # Tool cycle complete - clear thinking_raw from previous messages
             if self._in_tool_cycle:
-                self.current_chat.clear_thinking_raw()
+                eff.clear_thinking_raw()
                 self._in_tool_cycle = False
 
             self._save_current_chat()
@@ -1334,7 +1349,7 @@ class ChatSessionManager:
 
     def add_message_pair(self, user_content: str, assistant_content: str):
         with self._lock:
-            self.current_chat.add_message_pair(user_content, assistant_content)
+            self._effective_chat().add_message_pair(user_content, assistant_content)
             self._save_current_chat()
         publish(Events.MESSAGE_ADDED, {"role": "pair"})
 
@@ -1346,16 +1361,53 @@ class ChatSessionManager:
         """Get messages formatted for UI with <think> tags reconstructed."""
         return self.current_chat.get_messages_for_display()
 
+    # ── Per-stream session (A1) — a conversation stream on a non-active chat ──
+    #  routes reads/writes to ITS chat, leaving the active-chat singletons alone,
+    #  so a phone call runs in its own chat concurrently with the web UI.
+    def _effective_chat(self):
+        """The ConversationHistory this turn operates on: a per-context stream
+        override's history if set, else the active-chat singleton."""
+        try:
+            from core.chat.stream_brain import get_override
+            o = get_override()
+            if o and o.get("history") is not None:
+                return o["history"]
+        except Exception:
+            pass
+        return self.current_chat
+
+    def _effective_chat_name(self) -> str:
+        try:
+            from core.chat.stream_brain import get_override
+            o = get_override()
+            if o and o.get("chat"):
+                return o["chat"]
+        except Exception:
+            pass
+        return self.active_chat_name
+
+    def make_stream_session(self, chat_name: str) -> Optional[Dict[str, Any]]:
+        """Build a per-context stream session for `chat_name`: its settings + a
+        ConversationHistory seeded from its stored messages. system_prompt/tools
+        are filled by the caller (LLMChat.resolve_stream_brain). None if missing."""
+        settings = self.read_chat_settings(chat_name)
+        if settings is None:
+            return None
+        hist = ConversationHistory(max_history=self.max_history)
+        hist.messages = self.read_chat_messages(chat_name) or []
+        return {"chat": chat_name, "settings": settings,
+                "system_prompt": None, "tools": None, "history": hist}
+
     def get_messages_for_llm(self, reserved_tokens: int = 0, provider: str = None) -> List[Dict[str, str]]:
         """Get messages for LLM with trimming applied."""
-        return self.current_chat.get_messages_for_llm(
-            reserved_tokens, 
+        return self._effective_chat().get_messages_for_llm(
+            reserved_tokens,
             provider=provider,
             in_tool_cycle=self._in_tool_cycle
         )
 
     def get_turn_count(self) -> int:
-        return self.current_chat.get_turn_count()
+        return self._effective_chat().get_turn_count()
 
     def read_chat_settings(self, chat_name: str) -> Optional[Dict[str, Any]]:
         """Read a chat's settings from SQLite WITHOUT switching active chat.
