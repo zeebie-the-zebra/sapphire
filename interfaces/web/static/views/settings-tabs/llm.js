@@ -618,7 +618,9 @@ function _showEditWizard(el, key, config, ctx) {
                 status.innerHTML = `${_esc(data.verdict)}<br><small class="text-muted">${counts}</small>`;
                 status.style.color = data.ok === true ? 'var(--success)' : (data.ok === false ? 'var(--error)' : 'var(--text-muted)');
             } else {
-                status.textContent = '\u2717 ' + (data.error || 'Failed');
+                let msg = '\u2717 ' + (data.error || 'Failed');
+                if (data.baseline) msg += ` \u2014 baseline reasoned ${data.baseline.reasoning_chars} chars`;
+                status.textContent = msg;
                 status.style.color = 'var(--error)';
             }
         } catch (e) { status.textContent = '\u2717 ' + e.message; status.style.color = 'var(--error)'; }

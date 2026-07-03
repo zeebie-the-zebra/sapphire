@@ -874,6 +874,17 @@ _THINKING_PROBE = ("Reason through this step by step using your thinking, then g
 _THINK_TAG_RE = re.compile(r'<think>(.*?)</think>', re.DOTALL | re.IGNORECASE)
 
 
+def _clean_llm_error(e) -> str:
+    """Pull the useful message out of an LLM/HTTP error (esp. OpenAI-client 400s)."""
+    body = getattr(e, 'body', None)
+    if isinstance(body, dict):
+        inner = body.get('error') if isinstance(body.get('error'), dict) else body
+        msg = (inner or {}).get('message')
+        if msg:
+            return str(msg)[:250]
+    return str(e)[:250]
+
+
 def _analyze_thinking(resp) -> dict:
     """Split an LLMResponse into reasoning vs prose and measure both.
     Reasoning shows up either as a separate `thinking` field (reasoning_content)
@@ -933,16 +944,28 @@ async def test_llm_thinking(provider_key: str, request: Request, _=Depends(requi
             pc[provider_key] = cfg
             provider = get_provider_by_key(provider_key, pc, timeout)
             if not provider:
-                return None
-            resp = provider.chat_completion(probe, generation_params={"max_tokens": 512, "temperature": 0.6})
-            return _analyze_thinking(resp)
+                return {"error": "Could not create provider — check credentials and settings"}
+            try:
+                resp = provider.chat_completion(probe, generation_params={"max_tokens": 512, "temperature": 0.6})
+            except Exception as e:
+                return {"error": _clean_llm_error(e)}
+            return {"result": _analyze_thinking(resp)}
 
         def _work():
-            baseline = _run({**base, 'disable_thinking': False,
-                             'disable_thinking_qwen': False, 'extra_body': ''})
-            if baseline is None:
-                return {"status": "error", "error": "Could not reach the model — check the connection first"}
-            disabled = _run(dict(base)) if suppress_active else baseline
+            b = _run({**base, 'disable_thinking': False,
+                      'disable_thinking_qwen': False, 'extra_body': ''})
+            if 'error' in b:
+                return {"status": "error", "error": f"Baseline call failed: {b['error']}"}
+            baseline = b['result']
+            if suppress_active:
+                d = _run(dict(base))
+                if 'error' in d:
+                    # The suppression config itself was rejected — this is the useful signal.
+                    return {"status": "error", "baseline": baseline,
+                            "error": f"Your suppression config was rejected: {d['error']}"}
+                disabled = d['result']
+            else:
+                disabled = baseline
 
             if not suppress_active:
                 verdict = (f"Disable thinking is OFF — the model reasoned ({baseline['reasoning_chars']} chars). "

@@ -547,7 +547,14 @@ class OpenAICompatProvider(BaseProvider):
         if disable:
             model = (self.model or '').lower()
             base = (self.base_url or '').lower()
-            if model.startswith('glm') or any(h in base for h in ('z.ai', 'bigmodel', 'zhipu')):
+            if self._is_fireworks_reasoning_model():
+                # Fireworks disables reasoning via the top-level `reasoning_effort`
+                # param (none/false), NOT extra_body — its schema is strict and 400s
+                # on unknown fields like `thinking` / `chat_template_kwargs`. This
+                # overrides the "medium" default set in build_request_kwargs.
+                kwargs['reasoning_effort'] = 'none'
+                fam = 'fireworks'
+            elif model.startswith('glm') or any(h in base for h in ('z.ai', 'bigmodel', 'zhipu')):
                 extra['thinking'] = {'type': 'disabled'}          # GLM / Z.AI convention
                 fam = 'glm'
             elif 'qwen' in model:
