@@ -561,6 +561,7 @@ function _showEditWizard(el, key, config, ctx) {
             <div style="display:flex;gap:8px">
                 <button class="btn btn-primary btn-sm" id="edit-save">Save</button>
                 <button class="btn btn-sm" id="edit-test">Test</button>
+                <button class="btn btn-sm" id="edit-test-think" title="Provoke reasoning, then check whether 'Disable thinking' actually suppresses it (2 quick calls)">🧠 Thinking</button>
                 <button class="btn btn-sm" id="edit-cancel">Cancel</button>
             </div>
             <span id="edit-status" class="text-muted" style="margin-left:8px;font-size:0.85em"></span>
@@ -587,6 +588,35 @@ function _showEditWizard(el, key, config, ctx) {
             if (data.status === 'success') {
                 status.textContent = '\u2713 ' + (data.response?.substring(0, 50) || 'Connected!');
                 status.style.color = 'var(--success)';
+            } else {
+                status.textContent = '\u2717 ' + (data.error || 'Failed');
+                status.style.color = 'var(--error)';
+            }
+        } catch (e) { status.textContent = '\u2717 ' + e.message; status.style.color = 'var(--error)'; }
+    });
+
+    wizard.querySelector('#edit-test-think')?.addEventListener('click', async () => {
+        const status = wizard.querySelector('#edit-status');
+        status.textContent = 'Probing reasoning\u2026 (2 quick calls)';
+        status.style.color = 'var(--text-muted)';
+        try {
+            const adv = _readAdvancedFields(wizard, 'edit');
+            const payload = {
+                base_url: wizard.querySelector('#edit-url')?.value,
+                model: wizard.querySelector('#edit-model')?.value,
+                disable_thinking: adv.ok ? adv.disable_thinking : false,
+                extra_body: adv.ok ? adv.extra_body : '',
+            };
+            const apiKey = wizard.querySelector('#edit-key')?.value?.trim();
+            if (apiKey) payload.api_key = apiKey;
+            const res = await fetch(`/api/llm/test-thinking/${key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const data = await res.json();
+            if (data.status === 'success') {
+                const b = data.baseline, d = data.disabled;
+                const counts = `baseline: ${b.reasoning_chars} think / ${b.prose_chars} prose`
+                    + (data.suppress_active ? ` \u00b7 disabled: ${d.reasoning_chars} think / ${d.prose_chars} prose` : '');
+                status.innerHTML = `${_esc(data.verdict)}<br><small class="text-muted">${counts}</small>`;
+                status.style.color = data.ok === true ? 'var(--success)' : (data.ok === false ? 'var(--error)' : 'var(--text-muted)');
             } else {
                 status.textContent = '\u2717 ' + (data.error || 'Failed');
                 status.style.color = 'var(--error)';

@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import logging
 from pathlib import Path
 
@@ -864,6 +865,109 @@ async def test_llm_provider(provider_key: str, request: Request, _=Depends(requi
     except Exception as e:
         logger.error(f"LLM provider test failed for '{provider_key}': {e}")
         return {"status": "error", "error": "Provider test failed — check API key and endpoint configuration"}
+
+
+# A prompt that reliably provokes reasoning on models that support it — the point
+# is to give the model every excuse to think, so a lack of thinking is meaningful.
+_THINKING_PROBE = ("Reason through this step by step using your thinking, then give a "
+                   "one-line final answer: is 91 a prime number?")
+_THINK_TAG_RE = re.compile(r'<think>(.*?)</think>', re.DOTALL | re.IGNORECASE)
+
+
+def _analyze_thinking(resp) -> dict:
+    """Split an LLMResponse into reasoning vs prose and measure both.
+    Reasoning shows up either as a separate `thinking` field (reasoning_content)
+    or as inline <think>...</think> tags in the content."""
+    content = resp.content or ''
+    reasoning = (getattr(resp, 'thinking', None) or '').strip()
+    prose = content
+    m = _THINK_TAG_RE.search(content)
+    if m:
+        if not reasoning:
+            reasoning = m.group(1).strip()
+        prose = _THINK_TAG_RE.sub('', content).strip()
+    usage = getattr(resp, 'usage', None) or {}
+    return {
+        'had_reasoning': bool(reasoning),
+        'reasoning_chars': len(reasoning),
+        'prose_chars': len(prose.strip()),
+        'completion_tokens': usage.get('completion_tokens'),
+    }
+
+
+@router.post("/api/llm/test-thinking/{provider_key}")
+async def test_llm_thinking(provider_key: str, request: Request, _=Depends(require_login)):
+    """Provoke reasoning, then check whether 'disable thinking' actually suppresses it.
+
+    Runs a baseline (no suppression) and — if suppression is configured — the
+    configured suppression, and compares. The baseline is what makes the verdict
+    honest: it distinguishes 'the switch worked' from 'the model just didn't think'.
+    """
+    from core.chat.llm_providers import get_provider_by_key
+    try:
+        providers_config = {**dict(getattr(config, 'LLM_PROVIDERS', {})),
+                            **dict(getattr(config, 'LLM_CUSTOM_PROVIDERS', {}))}
+        if provider_key not in providers_config:
+            return {"status": "error", "error": f"Unknown provider: {provider_key}"}
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        base = dict(providers_config[provider_key])
+        base['enabled'] = True
+        for field in ('api_key', 'base_url', 'model', 'extra_body'):
+            if body.get(field) is not None:
+                base[field] = body[field]
+        if 'disable_thinking' in body:
+            base['disable_thinking'] = bool(body['disable_thinking'])
+
+        suppress_active = bool(base.get('disable_thinking') or base.get('disable_thinking_qwen')
+                               or base.get('extra_body'))
+        timeout = getattr(config, 'LLM_REQUEST_TIMEOUT', 30)
+        probe = [{"role": "user", "content": _THINKING_PROBE}]
+
+        def _run(cfg):
+            pc = dict(providers_config)
+            pc[provider_key] = cfg
+            provider = get_provider_by_key(provider_key, pc, timeout)
+            if not provider:
+                return None
+            resp = provider.chat_completion(probe, generation_params={"max_tokens": 512, "temperature": 0.6})
+            return _analyze_thinking(resp)
+
+        def _work():
+            baseline = _run({**base, 'disable_thinking': False,
+                             'disable_thinking_qwen': False, 'extra_body': ''})
+            if baseline is None:
+                return {"status": "error", "error": "Could not reach the model — check the connection first"}
+            disabled = _run(dict(base)) if suppress_active else baseline
+
+            if not suppress_active:
+                verdict = (f"Disable thinking is OFF — the model reasoned ({baseline['reasoning_chars']} chars). "
+                           f"Turn it on and re-test." if baseline['had_reasoning']
+                           else "Disable thinking is OFF, and the model didn't reason on this prompt.")
+                ok = None
+            elif not baseline['had_reasoning']:
+                verdict = ("Inconclusive — the model didn't reason even unsuppressed "
+                           "(it may not support thinking, or chose not to).")
+                ok = None
+            elif not disabled['had_reasoning']:
+                verdict = f"✓ Works — reasoning {baseline['reasoning_chars']} → 0 chars when disabled."
+                ok = True
+            else:
+                verdict = (f"⚠ Not suppressed — still {disabled['reasoning_chars']} chars of reasoning. "
+                           f"Try the Extra body escape hatch.")
+                ok = False
+
+            return {"status": "success", "ok": ok, "suppress_active": suppress_active,
+                    "baseline": baseline, "disabled": disabled, "verdict": verdict}
+
+        return await asyncio.to_thread(_work)
+    except Exception as e:
+        logger.error(f"LLM thinking test failed for '{provider_key}': {e}")
+        return {"status": "error", "error": "Thinking test failed — check the model and connection"}
 
 
 @router.post("/api/llm/custom-providers")
