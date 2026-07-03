@@ -917,7 +917,7 @@ async def add_custom_provider(request: Request, _=Depends(require_login)):
     for field in ('api_key_env', 'generation_params', 'auto_discover_models',
                   'session_affinity', 'strip_penalties', 'suggested_models',
                   'thinking_enabled', 'thinking_budget', 'reasoning_effort',
-                  'supports_images'):
+                  'supports_images', 'disable_thinking', 'extra_body'):
         if field in data:
             provider_config[field] = data[field]
 

@@ -290,6 +290,73 @@ export default {
 
 function _esc(s) { return s ? s.replace(/</g, '&lt;').replace(/>/g, '&gt;') : ''; }
 
+// ── Shared "Advanced" fields (single source of truth for Add + Edit wizards) ──
+// Renders temp/max-tokens/top-p + the universal disable-thinking toggle + raw
+// extra_body escape hatch. `prefix` namespaces the element ids ('wizard' | 'edit').
+function _advancedFieldsHtml(prefix, v = {}) {
+    const temp = v.temperature ?? 0.7;
+    const maxTok = v.max_tokens ?? 4096;
+    const topP = v.top_p ?? 0.9;
+    const noThink = v.disable_thinking ? 'checked' : '';
+    const extraBody = v.extra_body ? (typeof v.extra_body === 'string' ? v.extra_body : JSON.stringify(v.extra_body)) : '';
+    return `
+        <details style="margin-bottom:8px">
+            <summary style="cursor:pointer;font-size:var(--font-sm);color:var(--text-muted)">Advanced</summary>
+            <div style="padding:8px 0">
+                <div class="field-row" style="margin-bottom:6px">
+                    <label>Temperature</label>
+                    <input type="number" id="${prefix}-temp" value="${temp}" step="0.05" min="0" max="2" style="width:80px">
+                </div>
+                <div class="field-row" style="margin-bottom:6px">
+                    <label>Max Tokens</label>
+                    <input type="number" id="${prefix}-maxtok" value="${maxTok}" step="1" min="1" style="width:80px">
+                </div>
+                <div class="field-row" style="margin-bottom:6px">
+                    <label>Top P</label>
+                    <input type="number" id="${prefix}-topp" value="${topP}" step="0.05" min="0" max="1" style="width:80px">
+                </div>
+                <div class="field-row" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+                    <label class="checkbox-inline">
+                        <input type="checkbox" id="${prefix}-no-think" ${noThink}>
+                        <span>Disable thinking (best effort)</span>
+                    </label>
+                </div>
+                <div class="text-muted" style="font-size:0.8em;margin-left:24px;margin-top:2px">
+                    Tries the right switch per model — GLM/Z.AI, Qwen, Claude, Gemini. Some reasoning models (o1, DeepSeek-R1) can't fully disable. Cuts latency by skipping the reasoning phase.
+                </div>
+                <div class="field-row" style="margin-top:8px;align-items:flex-start">
+                    <label style="padding-top:4px">Extra body (JSON)</label>
+                    <textarea id="${prefix}-extra-body" rows="2" style="flex:1;font-family:monospace;font-size:0.85em"
+                        placeholder='{"thinking": {"type": "disabled"}}'>${extraBody}</textarea>
+                </div>
+                <div class="text-muted" style="font-size:0.8em;margin-left:24px;margin-top:2px">
+                    Advanced escape hatch — merged verbatim into the request. Use if the checkbox doesn't cover your model (it wins over the checkbox).
+                </div>
+            </div>
+        </details>`;
+}
+
+// Read the shared Advanced fields back out. Returns {ok, generation_params,
+// disable_thinking, extra_body} or {ok:false, error} on invalid extra_body JSON.
+function _readAdvancedFields(root, prefix) {
+    const g = id => root.querySelector(`#${prefix}-${id}`);
+    const temp = parseFloat(g('temp')?.value);
+    const maxTok = parseInt(g('maxtok')?.value);
+    const topP = parseFloat(g('topp')?.value);
+    const generation_params = {};
+    if (!isNaN(temp)) generation_params.temperature = temp;
+    if (!isNaN(maxTok)) generation_params.max_tokens = maxTok;
+    if (!isNaN(topP)) generation_params.top_p = topP;
+    const disable_thinking = g('no-think')?.checked || false;
+    const rawExtra = (g('extra-body')?.value || '').trim();
+    let extra_body = '';
+    if (rawExtra) {
+        try { JSON.parse(rawExtra); extra_body = rawExtra; }
+        catch (e) { return { ok: false, error: 'Extra body is not valid JSON' }; }
+    }
+    return { ok: true, generation_params, disable_thinking, extra_body };
+}
+
 async function _showAddWizard(el, ctx) {
     const wizard = el.querySelector('#add-provider-wizard');
     if (!wizard) return;
@@ -339,23 +406,7 @@ async function _showAddWizard(el, ctx) {
                     <input type="text" id="wizard-model" placeholder="model-name" style="width:100%">
                     <div id="wizard-suggested" style="margin-top:4px"></div>
                 </div>
-                <details style="margin-bottom:8px">
-                    <summary style="cursor:pointer;font-size:var(--font-sm);color:var(--text-muted)">Advanced</summary>
-                    <div style="padding:8px 0">
-                        <div class="field-row" style="margin-bottom:6px">
-                            <label>Temperature</label>
-                            <input type="number" id="wizard-temp" value="0.7" step="0.05" min="0" max="2" style="width:80px">
-                        </div>
-                        <div class="field-row" style="margin-bottom:6px">
-                            <label>Max Tokens</label>
-                            <input type="number" id="wizard-maxtok" value="4096" step="1" min="1" style="width:80px">
-                        </div>
-                        <div class="field-row">
-                            <label>Top P</label>
-                            <input type="number" id="wizard-topp" value="0.9" step="0.05" min="0" max="1" style="width:80px">
-                        </div>
-                    </div>
-                </details>
+                ${_advancedFieldsHtml('wizard')}
                 <div style="display:flex;gap:8px">
                     <button class="btn btn-primary btn-sm" id="wizard-save">Add</button>
                     <button class="btn btn-sm" id="wizard-cancel">Cancel</button>
@@ -387,7 +438,9 @@ async function _showAddWizard(el, ctx) {
             if (!preset) return;
             selectedTemplate = preset.template || 'openai';
             selectedPreset = val;
-            wizard.querySelector('#wizard-name').value = val;
+            // Pre-fill Name with the friendly display_name (editable) — this IS the
+            // friendly name; the backend derives the key by sanitizing it.
+            wizard.querySelector('#wizard-name').value = preset.display_name || val;
             wizard.querySelector('#wizard-url').value = preset.base_url || '';
             wizard.querySelector('#wizard-model').value = '';
             // Suggested models
@@ -428,21 +481,17 @@ async function _showAddWizard(el, ctx) {
 
         const body = {
             name, template: selectedTemplate, base_url: url, model: model || '',
-            display_name: selectedPreset ? (presets[selectedPreset]?.display_name || name) : name,
+            display_name: name,   // the name you type IS the friendly name (key is derived from it)
             is_local: url?.includes('127.0.0.1') || url?.includes('localhost') || false,
         };
         if (key) body.api_key = key;
 
-        // Gen params
-        const temp = parseFloat(wizard.querySelector('#wizard-temp')?.value);
-        const maxTok = parseInt(wizard.querySelector('#wizard-maxtok')?.value);
-        const topP = parseFloat(wizard.querySelector('#wizard-topp')?.value);
-        if (!isNaN(temp) || !isNaN(maxTok) || !isNaN(topP)) {
-            body.generation_params = {};
-            if (!isNaN(temp)) body.generation_params.temperature = temp;
-            if (!isNaN(maxTok)) body.generation_params.max_tokens = maxTok;
-            if (!isNaN(topP)) body.generation_params.top_p = topP;
-        }
+        // Gen params + thinking-control (shared Advanced fields)
+        const adv = _readAdvancedFields(wizard, 'wizard');
+        if (!adv.ok) { status.textContent = adv.error; status.style.color = 'var(--error)'; return; }
+        if (Object.keys(adv.generation_params).length) body.generation_params = adv.generation_params;
+        body.disable_thinking = adv.disable_thinking;
+        if (adv.extra_body) body.extra_body = adv.extra_body;
 
         // Config hints from preset
         if (selectedPreset && presets[selectedPreset]?.config_hints) {
@@ -502,40 +551,13 @@ function _showEditWizard(el, key, config, ctx) {
                 <label>Model</label>
                 <input type="text" id="edit-model" value="${_esc(config.model || '')}" style="width:100%">
             </div>
-            <details style="margin-bottom:8px">
-                <summary style="cursor:pointer;font-size:var(--font-sm);color:var(--text-muted)">Advanced</summary>
-                <div style="padding:8px 0">
-                    <div class="field-row" style="margin-bottom:6px">
-                        <label>Temperature</label>
-                        <input type="number" id="edit-temp" value="${config.generation_params?.temperature ?? 0.7}" step="0.05" min="0" max="2" style="width:80px">
-                    </div>
-                    <div class="field-row" style="margin-bottom:6px">
-                        <label>Max Tokens</label>
-                        <input type="number" id="edit-maxtok" value="${config.generation_params?.max_tokens ?? 4096}" step="1" min="1" style="width:80px">
-                    </div>
-                    <div class="field-row" style="margin-bottom:6px">
-                        <label>Top P</label>
-                        <input type="number" id="edit-topp" value="${config.generation_params?.top_p ?? 0.9}" step="0.05" min="0" max="1" style="width:80px">
-                    </div>
-                    <div class="field-row" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
-                        <label class="checkbox-inline">
-                            <input type="checkbox" id="edit-no-think" ${(config.disable_thinking ?? config.disable_thinking_qwen) ? 'checked' : ''}>
-                            <span>Disable thinking (best effort)</span>
-                        </label>
-                    </div>
-                    <div class="text-muted" style="font-size:0.8em;margin-left:24px;margin-top:2px">
-                        Tries the right switch per model — GLM/Z.AI, Qwen, Claude, Gemini. Some reasoning models (o1, DeepSeek-R1) can't fully disable. Cuts latency by skipping the reasoning phase.
-                    </div>
-                    <div class="field-row" style="margin-top:8px;align-items:flex-start">
-                        <label style="padding-top:4px">Extra body (JSON)</label>
-                        <textarea id="edit-extra-body" rows="2" style="flex:1;font-family:monospace;font-size:0.85em"
-                            placeholder='{"thinking": {"type": "disabled"}}'>${config.extra_body ? (typeof config.extra_body === 'string' ? config.extra_body : JSON.stringify(config.extra_body)) : ''}</textarea>
-                    </div>
-                    <div class="text-muted" style="font-size:0.8em;margin-left:24px;margin-top:2px">
-                        Advanced escape hatch — merged verbatim into the request. Use if the checkbox doesn't cover your model (it wins over the checkbox).
-                    </div>
-                </div>
-            </details>
+            ${_advancedFieldsHtml('edit', {
+                temperature: config.generation_params?.temperature,
+                max_tokens: config.generation_params?.max_tokens,
+                top_p: config.generation_params?.top_p,
+                disable_thinking: (config.disable_thinking ?? config.disable_thinking_qwen),
+                extra_body: config.extra_body,
+            })}
             <div style="display:flex;gap:8px">
                 <button class="btn btn-primary btn-sm" id="edit-save">Save</button>
                 <button class="btn btn-sm" id="edit-test">Test</button>
@@ -580,24 +602,12 @@ function _showEditWizard(el, key, config, ctx) {
         const apiKey = wizard.querySelector('#edit-key')?.value?.trim();
         if (apiKey) updates.api_key = apiKey;
 
-        const temp = parseFloat(wizard.querySelector('#edit-temp')?.value);
-        const maxTok = parseInt(wizard.querySelector('#edit-maxtok')?.value);
-        const topP = parseFloat(wizard.querySelector('#edit-topp')?.value);
-        updates.generation_params = {};
-        if (!isNaN(temp)) updates.generation_params.temperature = temp;
-        if (!isNaN(maxTok)) updates.generation_params.max_tokens = maxTok;
-        if (!isNaN(topP)) updates.generation_params.top_p = topP;
-
-        // Universal disable-thinking toggle + raw extra_body passthrough — both
-        // read by openai_compat's _inject_thinking_control (family-gated).
-        updates.disable_thinking = wizard.querySelector('#edit-no-think')?.checked || false;
-        const extraBodyRaw = (wizard.querySelector('#edit-extra-body')?.value || '').trim();
-        if (extraBodyRaw) {
-            try { JSON.parse(extraBodyRaw); updates.extra_body = extraBodyRaw; }
-            catch (e) { showToast('Extra body is not valid JSON — not saved', 'error'); return; }
-        } else {
-            updates.extra_body = '';
-        }
+        // Gen params + thinking-control (shared Advanced fields)
+        const adv = _readAdvancedFields(wizard, 'edit');
+        if (!adv.ok) { showToast(adv.error + ' — not saved', 'error'); return; }
+        updates.generation_params = adv.generation_params;
+        updates.disable_thinking = adv.disable_thinking;
+        updates.extra_body = adv.extra_body;
 
         try {
             await updateProvider(key, updates);
