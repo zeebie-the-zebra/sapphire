@@ -72,6 +72,9 @@ export function renderEventTrigger(t, opts = {}) {
                 <option value="_loading" disabled>Loading plugin events...</option>
             </select>
         </div>
+        <div id="ed-realtime-note" class="text-muted" style="display:none;font-size:var(--font-xs);margin-top:6px;padding:8px;border-left:2px solid var(--accent, #6cf);background:rgba(120,180,255,0.06)">
+            ⚡ Live source — this task is an <strong>on/off switch</strong>: enabling it lets Sapphire answer the call live (not a one-shot reply). Check <strong>"Ephemeral per-caller chat"</strong> above for a fresh throwaway chat per caller (auto-clears after the minutes you set); otherwise the call runs in the saved <strong>Chat</strong> you pick in AI settings, persistent across calls. <em>(The free-text prompt field isn't used here — behavior comes from the chat's persona.)</em>
+        </div>
         <div id="ed-task-fields"></div>
         <details class="sched-accordion" style="margin-top:8px">
             <summary class="sched-acc-header">Filter <span class="sched-preview" id="ed-filter-preview">${eventFilter ? 'active' : ''}</span></summary>
@@ -145,7 +148,9 @@ export function wireEventTrigger(modal, opts = {}) {
         modal.querySelector('#ed-event-source')?.addEventListener('change', () => {
             _updateFilterHints(modal);
             _renderTaskFields(modal);
+            _updateRealtimeNote(modal);
         });
+        _updateRealtimeNote(modal);   // reflect on open (edit case)
 
         // Update filter preview chip
         modal.querySelector('#ed-event-filter')?.addEventListener('input', () => {
@@ -288,6 +293,14 @@ function _updateFilterHints(modal) {
     hintsEl.innerHTML = `<strong>Filter keys:</strong> ${fields.map(f =>
         `<code>${f.key}</code> ${f.label || ''}`
     ).join(' &middot; ')}`;
+}
+
+function _updateRealtimeNote(modal) {
+    const note = modal.querySelector('#ed-realtime-note');
+    if (!note) return;
+    const sourceName = modal.querySelector('#ed-event-source')?.value;
+    const source = _sourcesCache.find(s => s.name === sourceName);
+    note.style.display = source?.realtime ? '' : 'none';
 }
 
 function _renderTaskFields(modal) {

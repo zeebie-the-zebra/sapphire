@@ -568,6 +568,7 @@ class PluginLoader:
                         "filter_fields": src.get("filter_fields", []),
                         "task_fields": src.get("task_fields", []),
                         "description": src.get("description", ""),
+                        "realtime": bool(src.get("realtime", False)),
                     } for src in event_sources]
                 logger.debug(f"[PLUGINS] Registered {len(event_sources)} event source(s) for {name}")
 
@@ -1358,6 +1359,28 @@ class PluginLoader:
                 sources.extend(plugin_sources)
         return sources
 
+    def get_enabled_daemon_task(self, source_name: str, account: str = None) -> Optional[dict]:
+        """Return the first enabled daemon task for a source (optionally matching an
+        account), or None. Lets a realtime daemon read its gate task's AI config
+        (chat_target, persona, toolset) to configure a live session."""
+        if not self._scheduler:
+            return None
+        for task in self._scheduler.find_tasks_by_event(source_name):
+            tc = task.get("trigger_config", {})
+            if account is None or tc.get("account") == account:
+                return task
+        return None
+
+    def _is_realtime_source(self, source_name: str) -> bool:
+        """True if the named event source declared `realtime: true` (a live-handled
+        gate — its tasks must never be fired as one-shot event tasks)."""
+        with self._lock:
+            for plugin_sources in self._event_sources.values():
+                for src in plugin_sources:
+                    if src.get("name") == source_name:
+                        return bool(src.get("realtime"))
+        return False
+
     def register_reply_handler(self, plugin_name: str, handler: Callable):
         """Register a reply handler for a daemon plugin.
 
@@ -1386,6 +1409,13 @@ class PluginLoader:
         """
         if not self._scheduler:
             logger.warning(f"[PLUGINS] Cannot emit event '{source_name}': no scheduler")
+            return
+
+        # Realtime sources (e.g. live voice) are GATES, not fire-a-task events —
+        # their tasks are read via active_daemon_accounts to gate a live handler.
+        # Never run a one-shot task for them (would double-handle atop the live session).
+        if self._is_realtime_source(source_name):
+            logger.debug(f"[PLUGINS] '{source_name}' is realtime — gate only, not firing tasks")
             return
 
         tasks = self._scheduler.find_tasks_by_event(source_name)

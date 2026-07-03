@@ -69,6 +69,7 @@ DEFAULT_CREDENTIALS = {
     "bitcoin_wallets": {},
     "gcal_accounts": {},
     "github_accounts": {},
+    "twilio_accounts": {},
     "ssh": {
         "servers": []
     },
@@ -881,6 +882,76 @@ class CredentialsManager:
                 'smtp_server': acct.get('smtp_server', ''),
                 'imap_port': acct.get('imap_port', 993),
                 'smtp_port': acct.get('smtp_port', 465),
+            })
+        return result
+
+    # ── Twilio voice accounts (multi-number SIP) ──────────────────────────────
+    def get_twilio_account(self, scope: str = 'default') -> dict:
+        """Get a Twilio SIP account by scope. sip_pass is unscrambled on read."""
+        acct = self._credentials.get('twilio_accounts', {}).get(scope, {})
+        return {
+            'sip_domain': acct.get('sip_domain', ''),
+            'sip_user': acct.get('sip_user', ''),
+            'sip_pass': self._unscramble(acct.get('sip_pass', '')),
+            'number': acct.get('number', ''),
+            'chat': acct.get('chat', 'default'),
+            'greeting': acct.get('greeting', ''),
+        }
+
+    def set_twilio_account(self, scope: str, sip_domain: str, sip_user: str,
+                           sip_pass: str, number: str = '', chat: str = 'default',
+                           greeting: str = '') -> bool:
+        """Create/update a Twilio account. sip_pass is scrambled before save."""
+        with self._lock:
+            try:
+                if 'twilio_accounts' not in self._credentials:
+                    self._credentials['twilio_accounts'] = {}
+                self._credentials['twilio_accounts'][scope] = {
+                    'sip_domain': sip_domain,
+                    'sip_user': sip_user,
+                    'sip_pass': self._scramble(sip_pass) if sip_pass else '',
+                    'number': number,
+                    'chat': chat,
+                    'greeting': greeting,
+                }
+                if not self._save():
+                    logger.error(f"Failed to persist twilio account '{scope}'")
+                    return False
+                logger.info(f"Set twilio account for scope '{scope}'")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to set twilio account '{scope}': {e}")
+                return False
+
+    def delete_twilio_account(self, scope: str) -> bool:
+        """Remove a Twilio account by scope."""
+        with self._lock:
+            accounts = self._credentials.get('twilio_accounts', {})
+            if scope not in accounts:
+                return False
+            del accounts[scope]
+            if not self._save():
+                logger.error(f"Failed to persist deletion of twilio account '{scope}'")
+                return False
+            logger.info(f"Deleted twilio account '{scope}'")
+            return True
+
+    def list_twilio_accounts(self) -> list:
+        """List Twilio accounts (no secrets) — for the account dropdown + UI."""
+        accounts = self._credentials.get('twilio_accounts', {})
+        result = []
+        for scope, acct in accounts.items():
+            result.append({
+                'scope': scope,
+                'name': scope,
+                'value': scope,
+                'label': acct.get('number') or acct.get('sip_user') or scope,
+                'number': acct.get('number', ''),
+                'sip_domain': acct.get('sip_domain', ''),
+                'sip_user': acct.get('sip_user', ''),
+                'chat': acct.get('chat', 'default'),
+                'greeting': acct.get('greeting', ''),
+                'configured': bool(acct.get('sip_domain') and acct.get('sip_user') and acct.get('sip_pass')),
             })
         return result
 

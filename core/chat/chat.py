@@ -386,7 +386,16 @@ class LLMChat:
         ai_name = 'Sapphire'
         # Sanitize curly brackets to prevent template injection
         username = username.replace('{', '').replace('}', '')
+        # Per-stream brain override: a stream on a non-active chat uses THAT chat's
+        # persona prompt, not the globally-primed active-chat one. Unset → active.
         prompt_template = self.current_system_prompt or "System prompt not loaded."
+        try:
+            from core.chat.stream_brain import get_override
+            _o = get_override()
+            if _o and _o.get("system_prompt") is not None:
+                prompt_template = _o["system_prompt"] or "System prompt not loaded."
+        except Exception:
+            pass
         prompt = prompt_template.replace("{user_name}", username).replace("{ai_name}", ai_name)
 
         # Build context parts from chat settings
@@ -415,6 +424,55 @@ class LLMChat:
             prompt = f"{prompt}\n\n{chr(10).join(context_parts)}"
 
         return prompt, username, None
+
+    def resolve_stream_brain(self, chat_name):
+        """Resolve a non-active chat's brain — settings, base system prompt, tool
+        list — WITHOUT activating it or mutating any global state. For a conversation
+        stream that must run in its own chat concurrently with the UI. Returns the
+        override dict, or None when chat_name is the active chat (None = OFF-path, no
+        override needed, behavior identical to before)."""
+        try:
+            active = self.session_manager.get_active_chat_name()
+            if not chat_name or chat_name == active:
+                return None
+            settings = self.session_manager.get_settings_for(chat_name)
+            if settings is None:
+                return None
+            from core import prompts
+            pdata = prompts.get_prompt(settings.get("prompt", "default"))
+            system_prompt = (pdata.get("content", "") if isinstance(pdata, dict) else "") or ""
+            tools = self._resolve_toolset_tools(settings.get("toolset", "all"))
+            return {"chat": chat_name, "settings": settings,
+                    "system_prompt": system_prompt, "tools": tools}
+        except Exception as e:
+            logger.warning(f"resolve_stream_brain('{chat_name}') failed: {e}")
+            return None
+
+    def _resolve_toolset_tools(self, toolset_name):
+        """Toolset name -> tool-schema list, READ-ONLY (mirrors
+        ExecutionContext._resolve_tools; no function_manager mutation)."""
+        fm = self.function_manager
+        if not toolset_name or toolset_name == "none":
+            return None
+        try:
+            if toolset_name == "all":
+                tools = list(fm.all_possible_tools)
+            else:
+                from core.toolsets import toolset_manager
+                if toolset_name in getattr(fm, "function_modules", {}):
+                    fn_names = fm.function_modules[toolset_name]["available_functions"]
+                elif toolset_manager.toolset_exists(toolset_name):
+                    fn_names = toolset_manager.get_toolset_functions(toolset_name)
+                else:
+                    fn_names = [toolset_name]
+                fn_set = set(fn_names)
+                tools = [t for t in fm.all_possible_tools if t["function"]["name"] in fn_set]
+            if hasattr(fm, "_apply_mode_filter"):
+                tools = fm._apply_mode_filter(tools)
+            return tools or None
+        except Exception as e:
+            logger.warning(f"_resolve_toolset_tools('{toolset_name}') failed: {e}")
+            return None
 
     def _build_base_messages(self, user_input: str, images: list = None, files: list = None):
         system_prompt, user_name, dynamic_context = self._get_system_prompt()

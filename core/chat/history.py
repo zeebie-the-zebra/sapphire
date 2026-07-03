@@ -1602,8 +1602,34 @@ class ChatSessionManager:
         return result
 
     def get_chat_settings(self) -> Dict[str, Any]:
-        """Get current chat's settings."""
+        """Get the settings that govern THIS turn's brain. Normally the active
+        chat's settings; if a per-stream brain override is set for this execution
+        context (a conversation stream on a non-active chat), that chat's settings.
+        Unset (the web-UI common case) → active settings, byte-identical to before."""
+        try:
+            from core.chat.stream_brain import get_override
+            o = get_override()
+            if o and o.get("settings") is not None:
+                return dict(o["settings"])
+        except Exception:
+            pass
         return self.current_settings.copy()
+
+    def get_settings_for(self, chat_name: str) -> Optional[Dict[str, Any]]:
+        """Read a specific chat's settings from disk (does NOT activate it).
+        Returns None if the chat doesn't exist."""
+        if chat_name and chat_name == self.active_chat_name:
+            return self.current_settings.copy()
+        self._ensure_db()
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute("SELECT settings FROM chats WHERE name = ?", (chat_name,)).fetchone()
+            if not row:
+                return None
+            return json.loads(row['settings'])
+        except Exception as e:
+            logger.error(f"get_settings_for('{chat_name}') failed: {e}")
+            return None
 
     def update_chat_settings(self, settings: Dict[str, Any]) -> bool:
         """Update current chat's settings and save."""
@@ -1615,6 +1641,70 @@ class ChatSessionManager:
         except Exception as e:
             logger.error(f"Failed to update settings: {e}")
             return False
+
+    def set_named_chat_settings(self, chat_name: str, patch: Dict[str, Any]) -> bool:
+        """Merge `patch` into a SPECIFIC (possibly non-active) chat's settings via a
+        direct DB write. Lets a realtime daemon (Twilio) configure a call chat it
+        never activates. Mirrors in-memory settings if it IS the active chat."""
+        self._ensure_db()
+        try:
+            with self._lock, self._get_connection() as conn:
+                row = conn.execute("SELECT settings FROM chats WHERE name = ?", (chat_name,)).fetchone()
+                if not row:
+                    return False
+                try:
+                    s = json.loads(row['settings'])
+                except Exception:
+                    s = {}
+                s.update(patch)
+                conn.execute("UPDATE chats SET settings = ?, updated_at = ? WHERE name = ?",
+                             (json.dumps(s), datetime.now().isoformat(), chat_name))
+                conn.commit()
+            if chat_name == self.active_chat_name:
+                self.current_settings.update(patch)
+            return True
+        except Exception as e:
+            logger.error(f"set_named_chat_settings failed for '{chat_name}': {e}")
+            return False
+
+    def reap_ephemeral_chats(self, now_epoch: float, source: str = "twilio") -> list:
+        """Delete expired ephemeral chats. TRIPLE-GUARDED — a chat is deleted ONLY if
+        ALL hold: (a) settings['ephemeral_source'] == source, (b) it has a recorded
+        ephemeral_last_call, (c) idle longer than settings['ephemeral_ttl_min'], and
+        it is NOT the active chat. A chat missing the marker is NEVER touched.
+        Returns deleted names."""
+        self._ensure_db()
+        to_delete = []
+        try:
+            with self._lock, self._get_connection() as conn:
+                for row in conn.execute("SELECT name, settings FROM chats").fetchall():
+                    if row['name'] == self.active_chat_name:
+                        continue
+                    try:
+                        s = json.loads(row['settings'])
+                    except Exception:
+                        continue
+                    if s.get('ephemeral_source') != source:
+                        continue                      # HARD guard — only twilio-marked chats
+                    last = float(s.get('ephemeral_last_call', 0) or 0)
+                    if not last:
+                        continue                      # never called yet — don't reap
+                    ttl_min = float(s.get('ephemeral_ttl_min', 10) or 10)
+                    if (now_epoch - last) > ttl_min * 60:
+                        to_delete.append(row['name'])
+                for name in to_delete:
+                    conn.execute("DELETE FROM chats WHERE name = ?", (name,))
+                    try:
+                        conn.execute("DELETE FROM tool_images WHERE chat_name = ?", (name,))
+                    except Exception:
+                        pass
+                conn.commit()
+        except Exception as e:
+            logger.error(f"reap_ephemeral_chats failed: {e}")
+            return []
+        if to_delete:
+            logger.info(f"[TWILIO-REAP] deleted {len(to_delete)} expired ephemeral chat(s): {to_delete}")
+        return to_delete
 
     def reset_chat_scope_ref(self, setting_key: str, deleted_scope: str,
                              reset_to: str = 'default') -> list:
