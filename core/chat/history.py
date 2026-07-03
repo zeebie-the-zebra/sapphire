@@ -1719,6 +1719,30 @@ class ChatSessionManager:
             logger.error(f"set_named_chat_settings failed for '{chat_name}': {e}")
             return False
 
+    def clear_named_chat_messages(self, chat_name: str) -> bool:
+        """Empty a specific chat's message history via a direct DB write WITHOUT
+        deleting the chat or touching its settings. Used by the ephemeral
+        reap-on-call-start path: a caller who calls back after the TTL gets a fresh
+        conversation. Mirrors the in-memory copy if it IS the active chat so a later
+        save can't resurrect the old messages. Never wipes mid-stream."""
+        self._ensure_db()
+        if chat_name == self.active_chat_name and self._is_streaming:
+            logger.warning(f"clear_named_chat_messages skipped for '{chat_name}' — streaming in progress")
+            return False
+        try:
+            with self._lock, self._get_connection() as conn:
+                cur = conn.execute("UPDATE chats SET messages = '[]', updated_at = ? WHERE name = ?",
+                                   (datetime.now().isoformat(), chat_name))
+                conn.commit()
+                if cur.rowcount == 0:
+                    return False
+            if chat_name == self.active_chat_name:
+                self.current_chat.messages = []
+            return True
+        except Exception as e:
+            logger.error(f"clear_named_chat_messages failed for '{chat_name}': {e}")
+            return False
+
     def reap_ephemeral_chats(self, now_epoch: float, source: str = "twilio") -> list:
         """Delete expired ephemeral chats. TRIPLE-GUARDED — a chat is deleted ONLY if
         ALL hold: (a) settings['ephemeral_source'] == source, (b) it has a recorded

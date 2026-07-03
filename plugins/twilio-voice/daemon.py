@@ -250,6 +250,15 @@ def _resolve_chat(system, scope, caller, task):
         if safe not in existing:
             system.llm_chat.create_chat(name)
             logger.info(f"[TWILIO] created ephemeral chat '{safe}' for caller {caller}")
+        else:
+            # Reap-on-call-start: if the prior call was longer ago than the TTL, wipe
+            # the history so this call starts fresh (she won't remember the old one).
+            # No background timer, no active-chat deletion — just clear the messages.
+            prior = system.llm_chat.session_manager.read_chat_settings(safe) or {}
+            prior_last = float(prior.get("ephemeral_last_call", 0) or 0)
+            if prior_last and (time.time() - prior_last) > ttl_min * 60:
+                system.llm_chat.session_manager.clear_named_chat_messages(safe)
+                logger.info(f"[TWILIO] ephemeral chat '{safe}' idle > {ttl_min:.0f}min — cleared for a fresh call")
         # Mark for the reaper + stamp last-call now + carry the task's behavior.
         patch = {"ephemeral_source": "twilio", "ephemeral_last_call": time.time(),
                  "ephemeral_ttl_min": ttl_min, "emoji": "\U0001F4DE"}   # 📞

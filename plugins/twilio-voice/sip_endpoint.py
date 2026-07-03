@@ -343,6 +343,9 @@ class SipEndpoint:
                 data, addr = s.recvfrom(65535)
                 if s is self.rtp:
                     if len(data) > 12 and (data[0] & 0xC0) == 0x80:
+                        _gap = time.time() - last_rtp          # TEMP probe: is Twilio RTP
+                        if _gap > 3:                            # continuous during silence?
+                            logger.info(f"[TWILIO-RTPGAP] inbound RTP resumed after {_gap:.1f}s gap")
                         last_rtp = time.time()
                         session.feed_inbound(data[12:])
                 else:
@@ -352,7 +355,13 @@ class SipEndpoint:
                         self._reply(200, "OK", h, addr)
                         session.stop()
                         return
-                    if start.startswith("OPTIONS"):
+                    if start.startswith("INVITE"):
+                        # Already on a call — reject the newcomer cleanly so the carrier
+                        # plays a busy tone instead of a routing failure. (One call at a
+                        # time until the serve-loop refactor lands.)
+                        logger.info("[TWILIO] second call while busy — replying 486 Busy Here")
+                        self._reply(486, "Busy Here", h, addr)
+                    elif start.startswith("OPTIONS"):
                         self._reply(200, "OK", h, addr)
         # We (Sapphire) ended it -> send BYE to the caller leg.
         self._send_bye(dialog)
