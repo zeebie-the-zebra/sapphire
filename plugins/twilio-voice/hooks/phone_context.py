@@ -30,18 +30,29 @@ def ghost_inject(event):
         pass
 
     caller = call.get("caller") or "an unknown number"
-    # The rule's custom Phone-context text (from the Realtime modal) wins; {caller}
-    # is substituted. Blank -> the sensible default below.
-    note = (call.get("note") or "").strip()
-    if note:
-        base = note.replace("{caller}", caller)
-    else:
+    if call.get("direction") == "outbound":
+        # A call SHE placed (phone_call tool) — goal-centric context, no rule note.
         base = (
-            f"You're on a live phone call with {caller}. The user's messages are voice "
-            "transcriptions and may contain small errors — infer intent, don't nitpick "
-            "wording. Your reply is spoken aloud, so keep it brief and conversational: "
-            "no markdown, lists, code blocks, or emoji."
+            f"You're on a live phone call YOU placed to {caller}. The messages are "
+            "their voice, transcribed — infer intent, don't nitpick wording. Your "
+            "reply is spoken aloud: brief, conversational, no markdown or emoji."
         )
+        goal = (call.get("goal") or "").strip()
+        if goal:
+            base += f" Your goal for this call: {goal}"
+    else:
+        # The rule's custom Phone-context text (from the Realtime modal) wins;
+        # {caller} is substituted. Blank -> the sensible default below.
+        note = (call.get("note") or "").strip()
+        if note:
+            base = note.replace("{caller}", caller)
+        else:
+            base = (
+                f"You're on a live phone call with {caller}. The user's messages are voice "
+                "transcriptions and may contain small errors — infer intent, don't nitpick "
+                "wording. Your reply is spoken aloud, so keep it brief and conversational: "
+                "no markdown, lists, code blocks, or emoji."
+            )
     # Always appended — even under a custom note. An outside line must never
     # leave her unable to hang up (see hooks/hangup_sentinel.py).
     event.ghost_text = base + (

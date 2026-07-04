@@ -368,6 +368,9 @@ class SipEndpoint:
         self._reply(200, "OK", h, addr, sdp=my_sdp)
 
         session = RtpSession(self.rtp, remote_rtp)
+        # Outbound-call correlation: <Dial><Sip> URI params arrive as X- headers
+        # (if Twilio passes them through — the daemon logs which).
+        session.x_header = h.get("x-sapphire-call")
         session.start()
         ua = _ua_public_addr(h)
         if ua:

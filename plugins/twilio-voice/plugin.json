@@ -8,6 +8,18 @@
   "priority": 50,
   "default_enabled": true,
   "capabilities": {
+    "tools": ["tools/phone_tool.py"],
+    "scopes": [
+      {
+        "key": "twilio",
+        "label": "twilio number",
+        "endpoint": "/api/plugin/twilio-voice/accounts",
+        "data_key": "accounts",
+        "value_field": "scope",
+        "name_field": "scope",
+        "label_template": "{label}"
+      }
+    ],
     "daemon": {
       "entry": "daemon.py",
       "event_sources": [

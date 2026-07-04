@@ -234,6 +234,13 @@ def _ensure_db():
             cursor.execute("ALTER TABLE people ADD COLUMN email_whitelisted INTEGER DEFAULT 0")
             logger.info("Migrated people table: added email_whitelisted column")
 
+        # Migration: add call_whitelisted column if missing (phone_call tool gate)
+        try:
+            cursor.execute('SELECT call_whitelisted FROM people LIMIT 1')
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE people ADD COLUMN call_whitelisted INTEGER DEFAULT 0")
+            logger.info("Migrated people table: added call_whitelisted column")
+
         # Migration: add embedding provenance columns. Scout finding 2026-04-19
         # — without (provider, dim) stamped per row, a provider swap silently
         # invalidates all stored vectors. Read-path filters by these.
@@ -524,18 +531,18 @@ def get_people(scope='default'):
     with _get_connection() as conn:
         cursor = conn.cursor()
         scope_sql, scope_params = _scope_condition(scope)
-        cursor.execute(f'SELECT id, name, relationship, phone, email, address, notes, created_at, updated_at, email_whitelisted FROM people WHERE {scope_sql} ORDER BY name', scope_params)
+        cursor.execute(f'SELECT id, name, relationship, phone, email, address, notes, created_at, updated_at, email_whitelisted, call_whitelisted FROM people WHERE {scope_sql} ORDER BY name', scope_params)
         rows = cursor.fetchall()
         return [{"id": r[0], "name": r[1], "relationship": r[2], "phone": r[3],
                  "email": r[4], "address": r[5], "notes": r[6],
                  "created_at": r[7], "updated_at": r[8],
-                 "email_whitelisted": bool(r[9])} for r in rows]
+                 "email_whitelisted": bool(r[9]), "call_whitelisted": bool(r[10])} for r in rows]
 
 
 MAX_PEOPLE_PER_SCOPE = 50_000
 
 
-def create_or_update_person(name, relationship=None, phone=None, email=None, address=None, notes=None, scope='default', person_id=None, email_whitelisted=None):
+def create_or_update_person(name, relationship=None, phone=None, email=None, address=None, notes=None, scope='default', person_id=None, email_whitelisted=None, call_whitelisted=None):
     with _get_connection() as conn:
         cursor = conn.cursor()
         # Cap check — only for new person insertions; updates to existing
@@ -594,6 +601,8 @@ def create_or_update_person(name, relationship=None, phone=None, email=None, add
                     updates.append(f'{col} = ?'); params.append(val if val else None)
             if email_whitelisted is not None:
                 updates.append('email_whitelisted = ?'); params.append(int(email_whitelisted))
+            if call_whitelisted is not None:
+                updates.append('call_whitelisted = ?'); params.append(int(call_whitelisted))
             if name.strip():
                 updates.append('name = ?'); params.append(name.strip())
             # Only overwrite embedding + provenance if we produced a fresh one;
@@ -621,11 +630,12 @@ def create_or_update_person(name, relationship=None, phone=None, email=None, add
         else:
             cursor.execute(
                 'INSERT INTO people (name, relationship, phone, email, address, notes, scope, embedding, '
-                'embedding_provider, embedding_dim, updated_at, email_whitelisted) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'embedding_provider, embedding_dim, updated_at, email_whitelisted, call_whitelisted) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (name.strip(), relationship, phone, email, address, notes, scope,
                  embedding_blob, embedding_provider, embedding_dim, now,
-                 int(email_whitelisted) if email_whitelisted else 0)
+                 int(email_whitelisted) if email_whitelisted else 0,
+                 int(call_whitelisted) if call_whitelisted else 0)
             )
             pid = cursor.lastrowid
             conn.commit()

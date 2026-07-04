@@ -359,6 +359,7 @@ async def save_person(request: Request, _=Depends(require_login)):
         scope=scope,
         person_id=data.get('id'),
         email_whitelisted=data.get('email_whitelisted'),
+        call_whitelisted=data.get('call_whitelisted'),
     )
     return {"id": pid, "created": is_new}
 

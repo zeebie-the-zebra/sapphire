@@ -70,7 +70,7 @@ async function renderPeople() {
         ${people.length ? `<div class="mind-people-grid">
             ${people.map(p => `
                 <div class="mind-person-card" data-id="${p.id}">
-                    <div class="mind-person-name">${escHtml(p.name)}${p.email_whitelisted ? ' <span title="Email allowed" style="font-size:12px">&#x1F4E7;</span>' : ''}</div>
+                    <div class="mind-person-name">${escHtml(p.name)}${p.email_whitelisted ? ' <span title="Email allowed" style="font-size:12px">&#x1F4E7;</span>' : ''}${p.call_whitelisted ? ' <span title="Calls allowed" style="font-size:12px">&#x1F4DE;</span>' : ''}</div>
                     ${p.relationship ? `<div class="mind-person-rel">${escHtml(p.relationship)}</div>` : ''}
                     <div class="mind-person-details">
                         ${p.phone ? `<div>&#x1F4DE; ${escHtml(p.phone)}</div>` : ''}
@@ -189,6 +189,9 @@ function showPersonModal(person = null) {
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);cursor:pointer">
                         <input type="checkbox" id="mp-email-whitelist" ${person?.email_whitelisted ? 'checked' : ''}> Allow AI to send email
                     </label>
+                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-muted);cursor:pointer">
+                        <input type="checkbox" id="mp-call-whitelist" ${person?.call_whitelisted ? 'checked' : ''}> Allow AI to call
+                    </label>
                     <button class="mind-btn" id="mp-save">${person ? 'Update' : 'Save'}</button>
                 </div>
             </div>
@@ -210,6 +213,7 @@ function showPersonModal(person = null) {
             address: overlay.querySelector('#mp-address').value.trim(),
             notes: overlay.querySelector('#mp-notes').value.trim(),
             email_whitelisted: overlay.querySelector('#mp-email-whitelist').checked,
+            call_whitelisted: overlay.querySelector('#mp-call-whitelist').checked,
             scope,
         };
         if (person?.id) body.id = person.id;
