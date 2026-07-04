@@ -102,21 +102,43 @@ def _parse(data):
     text = data.decode(errors="replace")
     head, _, body = text.partition("\r\n\r\n")
     lines = head.split("\r\n")
-    headers, vias = {}, []
+    headers, vias, rrs = {}, [], []
     for line in lines[1:]:
         if ":" in line:
             k, v = line.split(":", 1)
             k, v = k.strip().lower(), v.strip()
             if k == "via":
                 vias.append(v)
+            if k == "record-route":
+                rrs.append(v)
             if k not in headers:
                 headers[k] = v
     headers["_vias"] = vias
+    headers["_rrs"] = rrs
     return lines[0], headers, body
 
 
 def _via_lines(h):
     return [f"Via: {v}" for v in (h.get("_vias") or [h.get("via", "")])]
+
+
+def _ua_public_addr(h):
+    """Far UA's public signaling addr, from the bottom Via's received=/rport=
+    (stamped by Twilio's proxy). With no Record-Route in the INVITE, the ACK and
+    the hangup BYE come DIRECT from this host — the NAT only passes them if we've
+    sent to it first (the hole-punch)."""
+    vias = h.get("_vias") or []
+    if not vias:
+        return None
+    v = vias[-1]
+    m_ip = re.search(r"received=([\d.]+)", v)
+    m_pt = re.search(r"rport=(\d+)", v)
+    if m_ip:
+        return (m_ip.group(1), int(m_pt.group(1)) if m_pt else 5060)
+    m = re.search(r"SIP/2\.0/UDP\s+([\d.]+)(?::(\d+))?", v)
+    if m and not m.group(1).startswith(("10.", "192.168.", "172.")):
+        return (m.group(1), int(m.group(2) or 5060))
+    return None
 
 
 def _challenge(value):
@@ -143,6 +165,7 @@ class RtpSession:
         self._alive.set()
         self._ended = threading.Event()
         self._sender = None
+        self._hangup_after_drain = False   # armed by the <<HANG UP>> sentinel hook
 
     def start(self):
         self._sender = threading.Thread(target=self._send_loop, daemon=True, name="twilio-rtp-tx")
@@ -262,6 +285,10 @@ class SipEndpoint:
                     self._handle_call(start, h, body, addr)
                 elif start.startswith("OPTIONS"):
                     self._reply(200, "OK", h, addr)
+                else:
+                    # TEMP probe (BYE-loss investigation): SIP arriving OUTSIDE a
+                    # call — e.g. a late BYE retransmit after inactivity teardown.
+                    logger.info(f"[TWILIO-SIPIDLE] {start} from {addr[0]}:{addr[1]}")
             except Exception as e:
                 # A stray/malformed packet or transient socket error must NEVER kill
                 # this thread — a dead endpoint silently drops ALL future calls until
@@ -298,6 +325,10 @@ class SipEndpoint:
         remote_rtp = (m.group(1), int(p.group(1)))
         caller = self._caller_number(h.get("from", ""))
         logger.info(f"[TWILIO] incoming call from {caller}")
+        # TEMP probe (BYE-loss investigation): does the INVITE carry Record-Route,
+        # and where does the far UA live? Settles proxy-path vs direct-path routing.
+        logger.info(f"[TWILIO-SIPCALL] INVITE Record-Route x{len(h.get('_rrs') or [])}: "
+                    f"{h.get('_rrs')} | bottom Via: {(h.get('_vias') or [''])[-1]}")
 
         rpub = stun_public_addr(self.rtp)
         rip, rport = rpub if rpub else (self.ip, self.rtp_port)
@@ -310,7 +341,17 @@ class SipEndpoint:
 
         session = RtpSession(self.rtp, remote_rtp)
         session.start()
-        dialog = {"h": h, "addr": addr, "remote": remote_rtp}
+        ua = _ua_public_addr(h)
+        if ua:
+            # NAT hole-punch: open our router's path from the far UA's host so its
+            # direct end-to-end ACK/BYE can reach this socket. Re-punched in the
+            # io loop to hold the mapping for the whole call.
+            try:
+                self.sip.sendto(b"\r\n\r\n", ua)
+                logger.info(f"[TWILIO] hole-punched SIP path to UA at {ua[0]}:{ua[1]}")
+            except OSError as e:
+                logger.warning(f"[TWILIO] hole-punch failed: {e}")
+        dialog = {"h": h, "addr": addr, "remote": remote_rtp, "ua": ua}
 
         # Run the conversation on its own thread; this thread pumps RTP in + watches
         # the SIP socket for BYE until the session ends.
@@ -336,8 +377,15 @@ class SipEndpoint:
         re-register instead of wedging here forever."""
         started = time.time()
         last_rtp = started
+        last_punch = started
         while session._alive.is_set() and not self._stop.is_set():
             now = time.time()
+            if dialog.get("ua") and now - last_punch > 15:
+                try:
+                    self.sip.sendto(b"\r\n\r\n", dialog["ua"])
+                except OSError:
+                    pass
+                last_punch = now
             if now - last_rtp > _CALL_INACTIVITY_SEC:
                 logger.info(f"[TWILIO] no inbound audio for {_CALL_INACTIVITY_SEC}s — ending call (assumed hangup, BYE not seen)")
                 session.stop()
@@ -360,6 +408,9 @@ class SipEndpoint:
                         session.feed_inbound(data[12:])
                 else:
                     start, h, _ = _parse(data)
+                    # TEMP probe (BYE-loss investigation): every SIP message that
+                    # reaches the socket during a call, with its source addr.
+                    logger.info(f"[TWILIO-SIPCALL] {start} from {addr[0]}:{addr[1]}")
                     if start.startswith("BYE"):
                         logger.info("[TWILIO] caller hung up (BYE)")
                         self._reply(200, "OK", h, addr)
@@ -386,7 +437,11 @@ class SipEndpoint:
             to = f"{to};tag={self.from_tag}"
         elif code == 180 and "tag=" not in to:
             to = f"{to};tag={self.from_tag}"
+        # RFC 3261 12.1.1: dialog-forming responses MUST echo Record-Route in
+        # order — without it Twilio sends the 200's ACK and the hangup BYE
+        # direct-to-Contact from a host the NAT blocks (the lost-BYE root cause).
         lines = [f"SIP/2.0 {code} {reason}", *_via_lines(req_h),
+                 *[f"Record-Route: {r}" for r in (req_h.get("_rrs") or [])],
                  f"From: {req_h.get('from', '')}", f"To: {to}",
                  f"Call-ID: {req_h.get('call-id', '')}", f"CSeq: {req_h.get('cseq', '')}",
                  f"Contact: {self.contact}", "Allow: INVITE, ACK, BYE, CANCEL, OPTIONS"]
@@ -403,6 +458,9 @@ class SipEndpoint:
         lines = [
             f"BYE {target} SIP/2.0",
             f"Via: SIP/2.0/UDP {self.ip}:{self.sip_port};branch=z9hG4bK{_rand_hex(12)};rport",
+            # In-dialog requests ride the Record-Route set from the INVITE — without
+            # it the proxy has no dialog context and 481s the BYE (spike run 2-3).
+            *[f"Route: {r}" for r in (h.get("_rrs") or [])],
             "Max-Forwards: 70",
             f"From: {h.get('to', '')};tag={self.from_tag}",
             f"To: {h.get('from', '')}",

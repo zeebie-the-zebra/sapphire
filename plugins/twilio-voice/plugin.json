@@ -62,7 +62,8 @@
       {"method": "DELETE", "path": "accounts/{scope}", "handler": "routes/accounts.py:delete_account"}
     ],
     "hooks": {
-      "ghost_inject": "hooks/phone_context.py"
+      "ghost_inject": "hooks/phone_context.py",
+      "post_chat": "hooks/hangup_sentinel.py"
     }
   }
 }

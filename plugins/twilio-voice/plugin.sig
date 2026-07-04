@@ -3,12 +3,13 @@
   "version": "0.2.0",
   "files": {
     "codec.py": "sha256:8bea0022c1fac3aa023ca275446a96ca647901217e28a4b0919c614a93f29abb",
-    "daemon.py": "sha256:70694fb4f90c7672bc73f5d5a30c8130a3edfe17d42f9bb2c9ccec54b44420a6",
-    "hooks/phone_context.py": "sha256:a78c1e54f8a22a4d50975841992bc4a4c6ade15e19146165721ce97e15afe37c",
-    "plugin.json": "sha256:fa855d08f6ad5ddf5d6e693492f8fc251b1cf11754f3596e84889818bb5844d6",
+    "daemon.py": "sha256:1f351b7d293aba1b1be4fe54f5e3a00abbe784bf0094931dc3f17267862a6864",
+    "hooks/hangup_sentinel.py": "sha256:89a280b9f4916927a4675585dc8618cabefd34b874bf49376a2e6224129631da",
+    "hooks/phone_context.py": "sha256:351b834b5525aed10ba0d7af67edcdd0ac54142e59580557571756a0a1a6a4e6",
+    "plugin.json": "sha256:510d89d9da92475c892f5052338ea37b5823481d2ef1cc45433d3bd555085b4c",
     "routes/accounts.py": "sha256:b09ef0a470a9f025f8a020b8f3fc75b573f4527fa52450226e7864ca169611e3",
-    "sip_endpoint.py": "sha256:55f30a1f7fdcf96ed436f66d168569cd9eb098dad4da50e197295eab9c7e643a",
-    "twilio_source.py": "sha256:fa8a893bb243cf254c297f98a0d1271d1d39dcee56b7e3456df05367771c43c8"
+    "sip_endpoint.py": "sha256:d76c25c88bc13207f1dca433f6c24c9a5b55b869baacbae242e2f6bd9e7b421b",
+    "twilio_source.py": "sha256:133bdf9ac2f9d43ef1063b2cf19897a7313b96e849c418e24bbca114eb90ecfb"
   },
-  "signature": "Q4a8e6Av9U10h0YiwdxskjyHRbC1U28RAFK27coNxrM97DwmUO7Ja3z8SqCkVpAxXmweiGeUDiiYxkJ7kjbdAA=="
+  "signature": "AsPV3cn+nZABFUErAIvkQdI91gEVLy9GQ4K/75fZ+WOZ8mZCFJflnyIQwRy8QY1i/R56R7/poYaxW/qr3+aMAw=="
 }

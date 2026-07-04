@@ -127,3 +127,8 @@ class TwilioConversationSource:
         if self._playing:
             self._playing = False
             publish(Events.TTS_STOPPED)
+        # <<HANG UP>> sentinel: her goodbye has fully drained — end the call now.
+        # The io loop sees the session die and sends the (Route-correct) BYE.
+        if getattr(self.session, "_hangup_after_drain", False):
+            logger.info("[TWILIO] goodbye drained — hanging up (sentinel)")
+            self.session.stop()

@@ -34,11 +34,19 @@ def ghost_inject(event):
     # is substituted. Blank -> the sensible default below.
     note = (call.get("note") or "").strip()
     if note:
-        event.ghost_text = note.replace("{caller}", caller)
+        base = note.replace("{caller}", caller)
     else:
-        event.ghost_text = (
+        base = (
             f"You're on a live phone call with {caller}. The user's messages are voice "
             "transcriptions and may contain small errors — infer intent, don't nitpick "
             "wording. Your reply is spoken aloud, so keep it brief and conversational: "
             "no markdown, lists, code blocks, or emoji."
         )
+    # Always appended — even under a custom note. An outside line must never
+    # leave her unable to hang up (see hooks/hangup_sentinel.py).
+    event.ghost_text = base + (
+        " To hang up: say your goodbye and put <<HANG UP>> at the end of that same "
+        "reply. Writing the tag IS the action — the call ends right after your final "
+        "words play (the tag itself is never heard). Don't write it unless you mean "
+        "to hang up now; even quoting it triggers it."
+    )

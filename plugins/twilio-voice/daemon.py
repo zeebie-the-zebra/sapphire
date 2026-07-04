@@ -197,7 +197,9 @@ def _on_call(scope, caller, session):
     # add per-turn phone-medium context, gated on this exact chat. `note` is the
     # rule's optional custom Phone-context text (blank -> hook uses its default).
     _note = ((task or {}).get("trigger_config", {}).get("phone_note") or "").strip()
-    system._twilio_active_call = {"caller": caller, "chat": chat, "note": _note}
+    # `session` is here so the <<HANG UP>> sentinel hook can arm hangup-after-drain.
+    system._twilio_active_call = {"caller": caller, "chat": chat, "note": _note,
+                                  "session": session}
 
     # Prefer the Realtime rule's greeting; fall back to the account's.
     greeting = ((task or {}).get("trigger_config", {}).get("greeting") or acct.get("greeting") or "").strip()
