@@ -206,6 +206,4 @@ registerPluginSettings({
     helpText: 'Offsite encrypted backups to your Remembrance vault. The app encrypts with your backup password before upload; the server stores ciphertext only.',
     render,
     load: async () => ({}),
-    save: async () => ({ success: true }),
-    getSettings: () => ({}),
 });

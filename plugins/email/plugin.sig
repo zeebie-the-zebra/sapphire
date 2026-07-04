@@ -12,7 +12,7 @@
     "tests/test_search_emails.py": "sha256:f5cc9a4c9a354b03b564cc8fea8c25fecfdd0258ba523c4c14ff0e6155e606e4",
     "tests/test_send_email_mutex.py": "sha256:279220d7b548b86428b3e843027327ef490f89236ded03b7fbb510b58bcc6c1f",
     "tools/email_tool.py": "sha256:a2357b6aa9d60b00fbcb2d7043a4f0b4a255c1937464f9db47c44affd217a0db",
-    "web/index.js": "sha256:7a06bb92b017588fe24610152faaa45365e2a44b4c277a596223cc3cf01e317f"
+    "web/index.js": "sha256:376002392e2790776e7f286b2129e3d30a812b6a91b2b5f72fa014b16a49448a"
   },
-  "signature": "S6N+SOptEJVV/iiwVMWfayvV7qK9gxvVkhaXm5oHVFvEkMAEnPVMnLGzfDDjwKgNFIRxAqJivm8E7X9KGpj4DA=="
+  "signature": "P/VYC8vkD/PvPTwDcIEc0k/+G2mvp7VFBaAhaDA/dSfPtQv76sxRR04xOxbrV5Kudzs592TI/qcWBqS5FO4BCA=="
 }

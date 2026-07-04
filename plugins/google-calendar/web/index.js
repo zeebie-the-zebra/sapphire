@@ -122,8 +122,6 @@ export default {
             helpText: 'Manage Google Calendar accounts. Each account can use a different calendar. Select which to use per-chat in the sidebar.',
             render: (c) => manager.renderList(c),
             load: async () => { await manager.loadItems(); return {}; },
-            save: async () => ({ success: true }),
-            getSettings: () => ({})
         });
     },
 

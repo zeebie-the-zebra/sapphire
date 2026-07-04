@@ -11,7 +11,7 @@
     "sip_endpoint.py": "sha256:3f675e7059c9bc4cd35d0a8f7068f1fd8ad6d3cbd32d74090d806246749852f6",
     "tools/phone_tool.py": "sha256:fefd84c91d2e976a021c9e32a8c731f168ae180825ac05fc231e983267f53a89",
     "twilio_source.py": "sha256:133bdf9ac2f9d43ef1063b2cf19897a7313b96e849c418e24bbca114eb90ecfb",
-    "web/index.js": "sha256:cc1031e7f49f34735460fd338bac65c3d9150fbee94a6d3dbdb2f78ae4fcb671"
+    "web/index.js": "sha256:592ad3a9be2a0a628667423ebd4cd7429f24bb417d486840edcfb1272df76912"
   },
-  "signature": "5LL4X8y/Gy+4LRw7wTcfNdwMlzPdR3u52XWD9VrhWXtkD0ngAb/lvYmk7U8BxwGQHXb7ypvQR3eV1zQ0ITn+CQ=="
+  "signature": "tm9brdftHDrQnqXQRpyEPS1Ip+Hnctn1nnNLvoyX2qrbG7g3Vq4eNkMUVy9CAvqjozbH1/dNyaXlCCnxNwAvDg=="
 }

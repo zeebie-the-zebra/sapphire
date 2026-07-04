@@ -118,6 +118,22 @@ export default {
 };
 ```
 
+### Global Save vs self-saving panels
+
+`getSettings` + `save` are how your panel participates in the Settings view's
+global **Save Changes** button: it calls `getSettings(container)` and passes the
+result to `save(settings)`.
+
+**If your panel persists through its own buttons** (account managers, per-item
+CRUD editors — anything using `createAccountManager`), **omit `getSettings` and
+`save` entirely.** The global Save button then hides on your tab and shows
+"This page saves with its own buttons" instead.
+
+Never register stub callbacks like `getSettings: () => ({})` with a no-op
+`save` — the global button will report "settings saved" while writing nothing,
+and users lose edits believing they saved (the 2026-07-04 two-save-buttons
+bug, which shipped in eight plugins by copy-paste before being caught).
+
 ---
 
 ## Settings API

@@ -139,8 +139,6 @@ export default {
                 + 'rule for it in Triggers > Realtime.',
             render: (c) => manager.renderList(c),
             load: async () => { await manager.loadItems(); return {}; },
-            save: async () => ({ success: true }),
-            getSettings: () => ({}),
         });
     },
 

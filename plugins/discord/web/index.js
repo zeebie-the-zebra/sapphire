@@ -28,8 +28,6 @@ registerPluginSettings({
     },
 
     load: async () => ({}),
-    save: async () => ({ success: true }),
-    getSettings: () => ({}),
 });
 
 

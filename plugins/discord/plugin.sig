@@ -8,7 +8,7 @@
     "routes/accounts.py": "sha256:710de5a64a1d849bfb64152d2993e4a5f80e0a2a5e093a132e534506c3295040",
     "tests/test_auto_reply_gate.py": "sha256:80106c2b400d398fbed0099130b7b2e0b7598294f6f0c76b7707bc953a248281",
     "tools/discord_tools.py": "sha256:64d9fddda23d5d698b21639f0eb177128408e9b6498f18ba6a7e3d630fd792fc",
-    "web/index.js": "sha256:8ab6128087649414cfb300ff605eaf713143d093f933f7843603eea0447e1478"
+    "web/index.js": "sha256:bacd1a5ef958ac9fe560f02d0dd08f7362210c00da8af17d826c1283472b810b"
   },
-  "signature": "a9DAw4s1LfwmiqD9y21V3zBS7m4SPknUHoZ3sKchKA9U5qwM2Gtk1Lj527LuzquDVR5DQokMCZTE6s/fSs7/Dg=="
+  "signature": "jpLAjbSn00GVKKTnXsoQBI4TVNJVVwfEQkOrogQSENWclYuK52nSozEt/pxeLyhSk2R9rE7cbtUXpbXn8/NIAg=="
 }

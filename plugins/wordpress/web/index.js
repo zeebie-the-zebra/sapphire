@@ -165,8 +165,6 @@ export default {
                 manager.renderList(listWrap);
             },
             load: async () => { await manager.loadItems(); return {}; },
-            save: async () => ({ success: true }),
-            getSettings: () => ({}),
         });
     },
     destroy() {},

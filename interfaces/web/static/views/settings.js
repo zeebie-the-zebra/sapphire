@@ -311,6 +311,30 @@ function renderTabContent() {
 
     // Tab-specific listeners
     if (tab.attachListeners) tab.attachListeners(ctx, el);
+
+    updateSaveButtonForTab(tab);
+}
+
+function updateSaveButtonForTab(tab) {
+    // Self-saving plugin tabs — no getSettings in their registration — persist
+    // through their OWN buttons. Showing the global Save there made it a lie:
+    // it "saved" stub values and toasted success while the visible form's edits
+    // were never written (the months-old two-save-buttons bug, found 2026-07-04).
+    // Contract: provide getSettings+save to participate in global Save; omit
+    // them and the button hides on your tab. See docs/PLUGINS.md.
+    const saveBtn = container?.querySelector('#settings-save');
+    if (!saveBtn) return;
+    const selfSaving = !!(tab.isPlugin && tab._reg && !tab._reg.getSettings);
+    saveBtn.style.display = selfSaving ? 'none' : '';
+    let hint = container.querySelector('#settings-selfsave-hint');
+    if (selfSaving && !hint) {
+        hint = document.createElement('span');
+        hint.id = 'settings-selfsave-hint';
+        hint.style.cssText = 'font-size:12px;color:var(--text-muted);align-self:center';
+        hint.textContent = 'This page saves with its own buttons';
+        saveBtn.parentElement.insertBefore(hint, saveBtn);
+    }
+    if (hint) hint.style.display = selfSaving ? '' : 'none';
 }
 
 // ── Context Object (passed to tab handlers) ──
@@ -705,6 +729,11 @@ async function saveChanges() {
     const tab = getTabMeta();
     if (tab.isPlugin && tab._reg) {
         const reg = tab._reg;
+        // Self-saving tab (button normally hidden) — never fake-save; be honest.
+        if (!reg.getSettings) {
+            ui.showToast('This page saves with its own buttons', 'info');
+            return;
+        }
         const box = container?.querySelector(`#ptab-${reg.id}`);
         if (box && reg.getSettings && reg.save) {
             const saveBtn = container?.querySelector('#settings-save');

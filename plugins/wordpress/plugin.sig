@@ -8,7 +8,7 @@
     "tests/test_pin_gate.py": "sha256:8e447de3275ef87a1d1786f513ed437df284714ce621540dd2c897e68c326909",
     "tests/test_wordpress_tools.py": "sha256:a6e75dd6ad0213243d1a4d823463e4078ccd6cd2a3b9267b36a3d5f44114f053",
     "tools/wordpress.py": "sha256:210bc3f33d45bf271b7d7a3e0913d1cd28752c5aa61bfd2f9fb5e7303d842e79",
-    "web/index.js": "sha256:2538e579831ecf43f66de9c4a7c67f403ec1160c3483b61300077f1483aecc17"
+    "web/index.js": "sha256:d293f10ea82ec898dd28618d9e7e3358c173545778a6fe543736b20b2ccb3589"
   },
-  "signature": "3B1rOR5h3+BQ6nP2ISCADdv6KGG33OYA5ZWqk62Gy3Tgq5ZNH43sAyFLaqcbYtsJ8h3eBY8aeg6TMLsJXlkoCQ=="
+  "signature": "h09cWePTa7dKpnWvCKkvQU4ksmxpsot88IdU8MLomoB4b+o/YoavO40zRuuceWROtgDTztUuCeJxPUvaCs++DA=="
 }

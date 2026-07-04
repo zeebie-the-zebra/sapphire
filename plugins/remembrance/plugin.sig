@@ -10,7 +10,7 @@
     "schedule.py": "sha256:f60f884331b3346a3c48e51020e661f6746a9abbe910fa608a2446f3bbbda0ff",
     "tests/test_ops.py": "sha256:578ea095af8da298a112c577dbe259d289a20336860ffff48aa05563f8b66a2f",
     "tools/remembrance.py": "sha256:f60f6976747be8e750021b7c43512ac571999cc5aa83af7aedfd725ad74e2f69",
-    "web/index.js": "sha256:ec0b0f7f2e8eb8de4f7b542fef38d12385e96781053686e0116b54aaec7b4ac4"
+    "web/index.js": "sha256:8f034f49c73c1fed99a4fc0af9def9025b34d07f7c0d77fd127bb7ae35358895"
   },
-  "signature": "anHp+chRI2DT59N0GrrYuxJ1PvhoCO0pWBDcTQztDBsua4QfdEVllsYRf83rgEFbFrPMHo7SV2muDRD23IaJDw=="
+  "signature": "KbOspvwk0nwcW+Hxc0lQ960pVLbiBONq6r60uDdxrXPvR4ZvuUYSpXv0Gy2KmmpvtMJADe8Nlw6DvZPCWHouAA=="
 }
