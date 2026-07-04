@@ -100,7 +100,10 @@ class ConversationDriver:
     def _on_barge_in(self):
         logger.info("[CONV] barge-in fired -> cancelling LLM + cutting audio")
         try:
-            self.system.cancel_generation()        # sets cancel_flag -> chat_stream halts
+            # Scope the cancel to THIS conversation's chat — an unscoped cancel
+            # kills every live stream in the system (a phone barge-in would
+            # cancel a concurrent web-UI reply). None = active chat (local/browser).
+            self.system.cancel_generation(chat_name=self._chat_name)
         except Exception as e:
             logger.warning(f"[CONV] barge-in cancel_generation failed: {e}")
         sink = self._active_sink
@@ -131,7 +134,16 @@ class ConversationDriver:
             sink = self._ensure_sink()
             sink.start()
             self._active_sink = sink
-            publish(Events.VOICE_TURN_START, {"message_id": message_id, "user_text": text})
+            # `foreign`: this turn runs in an explicit non-active chat (a phone
+            # call's side chat) — the web UI must NOT render it into whatever
+            # chat is being viewed (it streamed in, then vanished on reconcile).
+            try:
+                _active = self.system.llm_chat.session_manager.get_active_chat_name()
+            except Exception:
+                _active = None
+            _foreign = bool(self._chat_name and self._chat_name != _active)
+            publish(Events.VOICE_TURN_START, {"message_id": message_id, "user_text": text,
+                                              "chat": self._chat_name, "foreign": _foreign})
 
             stream, sid, chat = self.system.llm_chat.begin_stream(self._chat_name)
             try:

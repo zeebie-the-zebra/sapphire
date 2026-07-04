@@ -54,6 +54,10 @@ TOOLS = [
                         "type": "boolean",
                         "description": "true (default): run the call in a throwaway side chat and report back. false: run it in the current chat.",
                     },
+                    "opening_line": {
+                        "type": "string",
+                        "description": "Your first words, spoken the moment they answer (e.g. \"Hey! It's Sapphire.\"). Recommended — it sets the cadence. Omit to wait for them to speak first.",
+                    },
                     "prompt": {
                         "type": "string",
                         "description": "Optional prompt/persona name for the call's side chat (ephemeral mode only).",
@@ -118,7 +122,8 @@ def _get_phone_contacts():
     return '\n'.join(lines), True
 
 
-def _phone_call(recipient_id, goal, ephemeral=True, prompt=None, max_minutes=10):
+def _phone_call(recipient_id, goal, ephemeral=True, prompt=None, max_minutes=10,
+                opening_line=None):
     contacts = _callable_contacts()
     if contacts is None:
         return "People contacts are disabled for this chat.", False
@@ -152,7 +157,8 @@ def _phone_call(recipient_id, goal, ephemeral=True, prompt=None, max_minutes=10)
     ok, msg = daemon.place_call(
         to_number=person['phone'], to_name=person['name'], goal=goal,
         origin_chat=origin_chat, ephemeral=bool(ephemeral),
-        prompt=(prompt or "").strip() or None, max_minutes=mins, scope=scope)
+        prompt=(prompt or "").strip() or None, max_minutes=mins, scope=scope,
+        opening_line=(opening_line or "").strip() or None)
     return msg, ok
 
 
@@ -167,6 +173,7 @@ def execute(function_name, arguments, config):
                 ephemeral=arguments.get('ephemeral', True),
                 prompt=arguments.get('prompt'),
                 max_minutes=arguments.get('max_minutes', 10),
+                opening_line=arguments.get('opening_line'),
             )
         else:
             return f"Unknown function: {function_name}", False

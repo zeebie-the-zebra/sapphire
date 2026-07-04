@@ -191,7 +191,7 @@ def _outbound_take(scope, x_header=None):
 
 
 def place_call(to_number, to_name, goal, origin_chat, ephemeral=True,
-               prompt=None, max_minutes=10.0, scope="default"):
+               prompt=None, max_minutes=10.0, scope="default", opening_line=None):
     """Originate an outbound call via Twilio REST; the bridged leg arrives at
     our registered SIP endpoint and runs the live conversation engine.
     Returns (ok, message-for-the-AI)."""
@@ -232,6 +232,7 @@ def place_call(to_number, to_name, goal, origin_chat, ephemeral=True,
         _outbound = {"token": token, "scope": scope, "to": to_number,
                      "to_name": to_name, "goal": goal, "chat": chat,
                      "origin_chat": origin_chat, "ephemeral": bool(ephemeral),
+                     "opening_line": opening_line or "",
                      "deadline": time.time() + _OUTBOUND_TTL}
 
     sip_uri = f"sip:{acct['sip_user']}@{acct['sip_domain']}?X-Sapphire-Call={token}"
@@ -365,14 +366,22 @@ def _on_call(scope, caller, session):
                                   "session": session, "direction": direction,
                                   "goal": (ob or {}).get("goal", "")}
 
-    # Prefer the Realtime rule's greeting; fall back to the account's.
-    # Outbound: no greeting — the CALLEE answers with hello, she responds.
-    greeting = ((task or {}).get("trigger_config", {}).get("greeting") or acct.get("greeting") or "").strip()
+    # Inbound: the Realtime rule's greeting (fallback: the account's).
+    # Outbound: the tool's opening_line — SHE speaks first, like a real caller;
+    # blank means wait for the callee's hello.
     if direction == "outbound":
-        greeting = ""
+        greeting = (ob.get("opening_line") or "").strip()
+    else:
+        greeting = ((task or {}).get("trigger_config", {}).get("greeting") or acct.get("greeting") or "").strip()
     if greeting:
         try:
             _voice = ((task or {}).get("trigger_config", {}).get("tts_voice") or "").strip() or None
+            if not _voice:
+                # Outbound (and rule-less) greetings speak in the call chat's voice.
+                try:
+                    _voice = (system.llm_chat.session_manager.read_chat_settings(chat) or {}).get("tts_voice") or None
+                except Exception:
+                    _voice = None
             audio = system.tts.generate_audio_data(greeting, voice=_voice)
             if not audio and _voice:
                 # Bad/missing voice must degrade to the default voice, not silence.
@@ -400,13 +409,23 @@ def _on_call(scope, caller, session):
     system._twilio_active_call = None
     duration = round(time.time() - started, 1)
     if ob and ob["origin_chat"] != chat:
-        # Report back to the chat that placed the call.
+        # Report back to the chat that placed the call — WITH the transcript, so
+        # the caller-Sapphire actually knows what was said (the side chat is
+        # ephemeral and gets reaped; this copy is the durable record).
         try:
+            lines = []
+            for m in (system.llm_chat.session_manager.read_chat_messages(chat) or []):
+                role, txt = m.get("role"), (m.get("content") or "").strip()
+                if role in ("user", "assistant") and txt:
+                    lines.append(f"{ob['to_name'] if role == 'user' else 'Me'}: {txt}")
+            transcript = "\n".join(lines)
+            if len(transcript) > 6000:
+                transcript = "…(earlier trimmed)…\n" + transcript[-6000:]
+            body = (f"\U0001F4DE My call to {ob['to_name']} just ended ({int(duration)}s). "
+                    + (f"Transcript:\n{transcript}" if transcript
+                       else "No words made it into the record."))
             system.llm_chat.session_manager.append_messages_to_chat(
-                ob["origin_chat"],
-                [{"role": "assistant", "content":
-                  f"\U0001F4DE My call to {ob['to_name']} just ended ({int(duration)}s). "
-                  f"The full conversation is in chat '{chat}'."}])
+                ob["origin_chat"], [{"role": "assistant", "content": body}])
         except Exception as e:
             logger.warning(f"[TWILIO] report-back to '{ob['origin_chat']}' failed: {e}")
     _call_ended(scope, caller, chat, ephemeral, "hangup", duration, 0,

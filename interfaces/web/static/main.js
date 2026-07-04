@@ -465,6 +465,11 @@ function initEventBus() {
     // finishStreaming reconciles with the saved message on END — same as the web-typed path.
     let _voiceTurnActive = false;
     eventBus.on('voice_turn_start', (data) => {
+        // A turn that belongs to another chat (a phone call's side chat) must not
+        // render into the chat being viewed — it used to stream in, then vanish on
+        // the end-of-turn reconcile (2026-07-04 outbound-call bug). Chunks/end are
+        // gated on _voiceTurnActive, so skipping start skips the whole turn.
+        if (data?.foreign) return;
         try {
             if (data?.user_text) ui.addUserMessage(data.user_text);
             ui.startStreaming();
