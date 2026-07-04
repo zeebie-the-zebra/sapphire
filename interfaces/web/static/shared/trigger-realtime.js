@@ -132,6 +132,7 @@ export async function openRealtimeEditor(task, refresh) {
                             <div class="sched-field"><label>Tools</label><select id="rt-toolset">${toolsetOpts(t.toolset || 'none')}</select></div>
                             <div class="sched-field"><label>Provider</label><select id="rt-provider">${providerOpts(t.provider)}</select></div>
                             <div class="sched-field"><label>Model</label><input type="text" id="rt-model" value="${_esc(t.model || '')}" placeholder="Provider default"></div>
+                            <div class="sched-field"><label>Voice <span class="help-tip" data-tip="TTS voice for this rule's calls (greeting + replies). Default = the global voice.">?</span></label><select id="rt-voice"><option value="">Default voice</option></select></div>
                         </div>
                         <details style="margin-top:4px"><summary class="text-muted" style="cursor:pointer;font-size:var(--font-sm)">🧠 Mind — memory &amp; knowledge scopes</summary>
                             <div class="text-muted" style="font-size:var(--font-sm);margin:4px 0">Only matters if you grant tools. Pick an isolated scope so a caller never touches your default memory.</div>
@@ -229,6 +230,27 @@ export async function openRealtimeEditor(task, refresh) {
     const initSub = _subSourceField(sources.find(s => s.name === curSource));
     await syncSubSource(initSub ? tc[initSub.key] : null);
 
+    // ── Voice options (async — the placeholder "Default voice" stands alone until loaded) ──
+    (async () => {
+        try {
+            const res = await fetch('/api/tts/voices');
+            const data = await res.json();
+            const voiceSel = modal.querySelector('#rt-voice');
+            for (const v of (data.voices || [])) {
+                // Kokoro entries are {voice_id, name, category} — SAVE the id,
+                // SHOW the name (storing the name was the silent-Alfred bug).
+                const val = typeof v === 'string' ? v : (v.voice_id || v.id || v.value || v.name);
+                if (!val) continue;
+                const opt = document.createElement('option');
+                opt.value = val;
+                const label = typeof v === 'string' ? v : (v.name || v.label || val);
+                opt.textContent = v.category ? `${label} (${v.category})` : label;
+                voiceSel.appendChild(opt);
+            }
+            if (tc.tts_voice) voiceSel.value = tc.tts_voice;
+        } catch { /* leave "Default voice" alone */ }
+    })();
+
     // ── Callers radio ──
     modal.querySelectorAll('input[name="rt-callers"]').forEach(r => r.addEventListener('change', () => {
         modal.querySelector('#rt-callers-list').style.display =
@@ -320,6 +342,7 @@ export async function openRealtimeEditor(task, refresh) {
 
         const trigger_config = {
             source, filter, greeting: modal.querySelector('#rt-greeting').value.trim(),
+            tts_voice: modal.querySelector('#rt-voice').value || '',
             phone_note: modal.querySelector('#rt-phone-note').value.trim(),
             ephemeral: eph,
             ephemeral_minutes: eph ? (parseInt(modal.querySelector('#rt-ttl').value) || 0) : 10,

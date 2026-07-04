@@ -144,6 +144,7 @@ def _start_endpoint(scope, slot):
         domain=acct["sip_domain"], user=acct["sip_user"], password=acct["sip_pass"],
         on_call=lambda caller, session, s=scope: _on_call(s, caller, session),
         sip_port=_SIP_PORT_BASE + slot, rtp_port=_RTP_PORT_BASE + slot * 2,
+        accept_call=lambda caller, s=scope: _rule_for(s, caller) is not None,
     )
     t = threading.Thread(target=ep.serve_forever, daemon=True, name=f"twilio-sip-{scope}")
     t.start()
@@ -158,6 +159,17 @@ def _stop_endpoint(scope, rec):
             rec["thread"].join(timeout=4)
     except Exception as e:
         logger.warning(f"[TWILIO] error stopping '{scope}': {e}")
+
+
+def _rule_for(scope, caller):
+    """The Realtime rule handling this caller on this number, or None.
+    Most-specific-wins: a rule whose caller filter matches beats the no-filter
+    catch-all; a rule whose filter fails is excluded. None -> decline the call.
+    Enables 'just me' + 'everyone else' rules side by side on one number."""
+    if not _plugin_loader:
+        return None
+    return _plugin_loader.get_enabled_daemon_task(
+        "incoming_call", scope, payload={"caller": caller, "account": scope})
 
 
 def _on_call(scope, caller, session):
@@ -175,7 +187,13 @@ def _on_call(scope, caller, session):
         session.stop()
         return
 
-    task = _plugin_loader.get_enabled_daemon_task("incoming_call", scope) if _plugin_loader else None
+    task = _rule_for(scope, caller)
+    if task is None:
+        # accept_call should have declined pre-answer; belt-and-suspenders.
+        logger.warning(f"[TWILIO] no rule matches {caller} post-answer — hanging up")
+        session.stop()
+        _call_ended(scope, caller, "", False, "no_matching_rule", 0.0, 0)
+        return
     chat, ephemeral = _resolve_chat(system, scope, caller, task)
 
     mgr = system.get_conversation_manager()
@@ -205,7 +223,12 @@ def _on_call(scope, caller, session):
     greeting = ((task or {}).get("trigger_config", {}).get("greeting") or acct.get("greeting") or "").strip()
     if greeting:
         try:
-            audio = system.tts.generate_audio_data(greeting)
+            _voice = ((task or {}).get("trigger_config", {}).get("tts_voice") or "").strip() or None
+            audio = system.tts.generate_audio_data(greeting, voice=_voice)
+            if not audio and _voice:
+                # Bad/missing voice must degrade to the default voice, not silence.
+                logger.warning(f"[TWILIO] greeting voice '{_voice}' produced no audio — falling back to default voice")
+                audio = system.tts.generate_audio_data(greeting)
             if audio:
                 src.feed_chunk({"audio_b64": base64.b64encode(audio).decode()})
         except Exception as e:
@@ -272,6 +295,8 @@ def _resolve_chat(system, scope, caller, task):
             patch["prompt"] = task["prompt"]
         if (task or {}).get("toolset"):
             patch["toolset"] = task["toolset"]
+        if tc.get("tts_voice"):                     # rule's voice -> per-stream TTS
+            patch["tts_voice"] = tc["tts_voice"]
         prov = (task or {}).get("provider")
         if prov and prov != "auto":
             patch["llm_primary"] = prov

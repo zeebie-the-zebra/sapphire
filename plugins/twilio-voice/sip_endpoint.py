@@ -229,11 +229,15 @@ class RtpSession:
 
 class SipEndpoint:
     def __init__(self, domain, user, password, on_call,
-                 sip_port=5062, rtp_port=10080, expires=600):
+                 sip_port=5062, rtp_port=10080, expires=600, accept_call=None):
         self.domain = domain
         self.user = user
         self.password = password
         self.on_call = on_call
+        # Optional pre-answer gate: accept_call(caller) -> bool. False = 603
+        # Decline before any 180/200 — the caller a rule doesn't want never
+        # reaches a session (no RTP, no chat, carrier plays the right tone).
+        self.accept_call = accept_call
         self.sip_port = sip_port
         self.rtp_port = rtp_port
         self.expires = expires
@@ -273,6 +277,20 @@ class SipEndpoint:
         while not self._stop.is_set():
             try:
                 if time.time() >= next_reg:
+                    # NAT-drift guard: routers re-map long-lived UDP bindings (proven
+                    # live 2026-07-03: green keepalives, unroutable INVITEs). Re-STUN
+                    # each keepalive; if the public mapping moved, wipe the stale
+                    # binding and register the new Contact. STUN failure -> keep the
+                    # old contact (never clobber with a LAN addr).
+                    try:
+                        pub = stun_public_addr(self.sip)
+                        if pub and pub != self.pub_sip:
+                            logger.warning(f"[TWILIO] public mapping moved {self.pub_sip} -> {pub} — re-binding")
+                            self.pub_sip = pub
+                            self.contact = f"<sip:{self.user}@{pub[0]}:{pub[1]}>"
+                            self._deregister_all()
+                    except Exception as e:
+                        logger.debug(f"[TWILIO] keepalive STUN check failed: {e}")
                     ok = self._register()
                     logger.info(f"[TWILIO] keepalive re-register {'ok' if ok else 'FAILED'} — {self.user}@{self.domain}")
                     next_reg = time.time() + self.expires / 2
@@ -325,6 +343,16 @@ class SipEndpoint:
         remote_rtp = (m.group(1), int(p.group(1)))
         caller = self._caller_number(h.get("from", ""))
         logger.info(f"[TWILIO] incoming call from {caller}")
+        if self.accept_call is not None:
+            try:
+                accepted = bool(self.accept_call(caller))
+            except Exception as e:
+                logger.error(f"[TWILIO] accept_call check failed (declining): {e}")
+                accepted = False
+            if not accepted:
+                logger.info(f"[TWILIO] no rule accepts {caller} — replying 603 Decline")
+                self._reply(603, "Decline", h, addr)
+                return
         # TEMP probe (BYE-loss investigation): does the INVITE carry Record-Route,
         # and where does the far UA live? Settles proxy-path vs direct-path routing.
         logger.info(f"[TWILIO-SIPCALL] INVITE Record-Route x{len(h.get('_rrs') or [])}: "

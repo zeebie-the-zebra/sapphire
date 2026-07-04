@@ -743,26 +743,8 @@ class ContinuityScheduler:
                 try:
                     event_obj = json.loads(event_data) if isinstance(event_data, str) else event_data
                     if isinstance(event_obj, dict):
-                        for key, val in task_filter.items():
-                            # Support _not suffix for negative matching
-                            if key.endswith("_not"):
-                                field = key[:-4]  # strip _not
-                                ev_val = str(event_obj.get(field, ""))
-                                if ev_val.lower() == str(val).lower():
-                                    logger.debug(f"[Continuity] '{task_name}' filter excluded on '{field}' (not): {ev_val!r} == {val!r}")
-                                    return {"success": False, "error": "Event filtered out"}
-                            # Support _contains suffix for substring matching
-                            elif key.endswith("_contains"):
-                                field = key[:-9]  # strip _contains
-                                ev_val = str(event_obj.get(field, ""))
-                                if str(val).lower() not in ev_val.lower():
-                                    logger.debug(f"[Continuity] '{task_name}' filter mismatch on '{field}' (contains): {val!r} not in {ev_val!r}")
-                                    return {"success": False, "error": "Event filtered out"}
-                            else:
-                                ev_val = event_obj.get(key)
-                                if str(ev_val).lower() != str(val).lower():
-                                    logger.debug(f"[Continuity] '{task_name}' filter mismatch on '{key}': {ev_val!r} != {val!r}")
-                                    return {"success": False, "error": "Event filtered out"}
+                        if not self.filter_matches(task_filter, event_obj, task_name):
+                            return {"success": False, "error": "Event filtered out"}
                 except (json.JSONDecodeError, TypeError):
                     # Can't parse event as JSON — filter can't run, reject for safety
                     logger.debug(f"[Continuity] '{task_name}' filter active but event data not parseable as JSON, rejecting")
@@ -895,6 +877,31 @@ class ContinuityScheduler:
 
         logger.info(f"[Continuity] Event-triggered: {task_name} ({task_type})")
         return {"success": True, "queued": False}
+
+    @staticmethod
+    def filter_matches(task_filter: Dict, event_obj: Dict, task_name: str = "") -> bool:
+        """Evaluate a task's trigger_config.filter against an event payload.
+        Same semantics for fired events and realtime gate selection: exact
+        case-insensitive match, `_not` negation, `_contains` substring."""
+        for key, val in task_filter.items():
+            if key.endswith("_not"):
+                field = key[:-4]
+                ev_val = str(event_obj.get(field, ""))
+                if ev_val.lower() == str(val).lower():
+                    logger.debug(f"[Continuity] '{task_name}' filter excluded on '{field}' (not): {ev_val!r} == {val!r}")
+                    return False
+            elif key.endswith("_contains"):
+                field = key[:-9]
+                ev_val = str(event_obj.get(field, ""))
+                if str(val).lower() not in ev_val.lower():
+                    logger.debug(f"[Continuity] '{task_name}' filter mismatch on '{field}' (contains): {val!r} not in {ev_val!r}")
+                    return False
+            else:
+                ev_val = event_obj.get(key)
+                if str(ev_val).lower() != str(val).lower():
+                    logger.debug(f"[Continuity] '{task_name}' filter mismatch on '{key}': {ev_val!r} != {val!r}")
+                    return False
+        return True
 
     def find_tasks_by_event(self, source: str) -> List[Dict]:
         """Find enabled daemon tasks that listen to a specific event source."""

@@ -145,13 +145,16 @@ class StreamingChat:
             except Exception:
                 self.active_chat_name = None
 
-            # A1: if this stream targets a NON-active chat (a phone call), install a
-            # per-context brain override so the whole turn — messages, provider,
-            # persona, tools, scopes — runs in THAT chat, concurrently with and
-            # without disturbing the UI's active chat. Reset in the outer finally.
+            # A1: if this stream has an EXPLICIT target chat (driver/phone — web
+            # passes None), install a per-context brain override so the whole turn
+            # — messages, provider, persona, tools, scopes — runs in THAT chat from
+            # its STORED settings. Unconditional on the target: comparing against
+            # the active chat let a phone call inherit the UI session's in-memory
+            # brain whenever the user was WATCHING the call's chat (2026-07-03:
+            # Alfred greeting, Sapphire brain). Reset in the outer finally.
             _brain_token = None
             _tgt = getattr(self, "target_chat", None)
-            if _tgt and _tgt != self.active_chat_name:
+            if _tgt:
                 try:
                     from core.chat import stream_brain
                     from core import prompts as _prompts

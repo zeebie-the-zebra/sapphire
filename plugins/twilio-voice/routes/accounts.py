@@ -26,15 +26,20 @@ def save_account(body=None, credentials=None, **_):
     sip_pass = (body.get("sip_pass") or "").strip()
     if not (scope and sip_domain and sip_user):
         return {"ok": False, "error": "scope, sip_domain, sip_user are required"}
+    existing = credentials.get_twilio_account(scope)
     if not sip_pass:                                        # keep existing on blank
-        sip_pass = credentials.get_twilio_account(scope).get("sip_pass", "")
+        sip_pass = existing.get("sip_pass", "")
         if not sip_pass:
             return {"ok": False, "error": "sip_pass required for a new account"}
+    # REST creds (outbound calling) are optional; blank auth_token keeps stored.
+    auth_token = (body.get("auth_token") or "").strip() or existing.get("auth_token", "")
     ok = credentials.set_twilio_account(
         scope, sip_domain=sip_domain, sip_user=sip_user, sip_pass=sip_pass,
         number=(body.get("number") or "").strip(),
         chat=(body.get("chat") or "default").strip(),
-        greeting=(body.get("greeting") or "").strip())
+        greeting=(body.get("greeting") or "").strip(),
+        account_sid=(body.get("account_sid") or "").strip(),
+        auth_token=auth_token)
     return {"ok": bool(ok)}
 
 

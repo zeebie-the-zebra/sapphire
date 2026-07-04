@@ -434,7 +434,19 @@ class StreamingTTSPump:
             "pause_after_ms": chunk["pause_after_ms"],
             "text": text_to_synth,
         }
-        voice = getattr(self.tts, "voice_name", None) or "af_heart"
+        # Per-stream voice: a chat's stored `tts_voice` (e.g. a phone rule's
+        # persona voice, patched by the twilio daemon) beats the global voice.
+        # Resolved here in _submit — still inside the stream's context, so the
+        # brain override ContextVar is visible.
+        voice = None
+        try:
+            from core.chat.stream_brain import get_override
+            _o = get_override()
+            if _o:
+                voice = (_o.get("settings") or {}).get("tts_voice") or None
+        except Exception:
+            pass
+        voice = voice or getattr(self.tts, "voice_name", None) or "af_heart"
         speed = getattr(self.tts, "speed", None) or 1.0
         logger.info(
             f"[TTS-STREAM] submit chunk {chunk['index']} "
@@ -466,19 +478,39 @@ class StreamingTTSPump:
         supports_streaming=True but ships the default impl."""
         n_segments = 0
         total_bytes = 0
-        try:
+
+        def _run(v):
+            nonlocal n_segments, total_bytes
             if self._provider_streams:
-                for segment in self.provider.generate_stream(text, voice, speed):
+                for segment in self.provider.generate_stream(text, v, speed):
                     if segment:
                         seg_queue.put(segment)
                         n_segments += 1
                         total_bytes += len(segment)
             else:
-                audio = self.provider.generate(text, voice, speed)
+                audio = self.provider.generate(text, v, speed)
                 if audio:
                     seg_queue.put(audio)
                     n_segments += 1
                     total_bytes += len(audio)
+
+        try:
+            try:
+                _run(voice)
+            except Exception as e:
+                logger.warning(
+                    f"[TTS-STREAM] chunk {chunk_index} voice '{voice}' synth failed: {e!r}"
+                )
+            # A bad per-stream voice (wrong id, other provider's id, undownloaded
+            # model) must degrade to the DEFAULT voice, not to silence — a muted
+            # call reads as a dead line (2026-07-03: 'Eric' vs 'am_eric').
+            default_voice = getattr(self.tts, "voice_name", None) or "af_heart"
+            if n_segments == 0 and voice != default_voice:
+                logger.warning(
+                    f"[TTS-STREAM] chunk {chunk_index} produced nothing with "
+                    f"'{voice}' — retrying with default '{default_voice}'"
+                )
+                _run(default_voice)
             logger.info(
                 f"[TTS-STREAM] chunk {chunk_index} synth done: voice={voice} "
                 f"streams={self._provider_streams} {n_segments} segments, {total_bytes} bytes"

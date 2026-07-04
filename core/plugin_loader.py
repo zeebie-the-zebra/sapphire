@@ -1359,17 +1359,34 @@ class PluginLoader:
                 sources.extend(plugin_sources)
         return sources
 
-    def get_enabled_daemon_task(self, source_name: str, account: str = None) -> Optional[dict]:
-        """Return the first enabled daemon task for a source (optionally matching an
+    def get_enabled_daemon_task(self, source_name: str, account: str = None,
+                                payload: dict = None) -> Optional[dict]:
+        """Return the enabled daemon task for a source (optionally matching an
         account), or None. Lets a realtime daemon read its gate task's AI config
-        (chat_target, persona, toolset) to configure a live session."""
+        (chat_target, persona, toolset) to configure a live session.
+
+        With `payload` (e.g. {"caller": "+1555..."}), rules are selected
+        most-specific-wins: a rule whose filter MATCHES the payload beats a rule
+        with no filter (the catch-all); a rule whose filter FAILS is excluded
+        entirely. Two rules on one number = "just me" + "everyone else". No
+        match at all -> None (the daemon should decline the session)."""
         if not self._scheduler:
             return None
+        catch_all = None
         for task in self._scheduler.find_tasks_by_event(source_name):
             tc = task.get("trigger_config", {})
-            if account is None or tc.get("account") == account:
-                return task
-        return None
+            if account is not None and tc.get("account") != account:
+                continue
+            if payload is None:
+                return task                                  # legacy: first match
+            raw = tc.get("filter") if isinstance(tc.get("filter"), dict) else {}
+            task_filter = {k: v for k, v in raw.items() if str(v).strip()}
+            if not task_filter:
+                catch_all = catch_all or task
+            elif self._scheduler.filter_matches(task_filter, payload,
+                                                task.get("name", "")):
+                return task                                  # specific match wins
+        return catch_all
 
     def _is_realtime_source(self, source_name: str) -> bool:
         """True if the named event source declared `realtime: true` (a live-handled
