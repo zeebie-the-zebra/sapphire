@@ -286,6 +286,11 @@ def _setup_outbound_chat(system, scope, to_number, prompt, origin_chat):
             patch["prompt"] = origin["prompt"]          # inherit who she is
         if origin.get("tts_voice"):
             patch["tts_voice"] = origin["tts_voice"]    # and how she sounds
+        for _k in ("llm_primary", "llm_model"):
+            if origin.get(_k):
+                patch[_k] = origin[_k]                  # and which brain (2026-07-04:
+                                                        # unset fell to global default
+                                                        # = claude = phone latency)
         system.llm_chat.session_manager.set_named_chat_settings(safe, patch)
         return safe
     except Exception as e:

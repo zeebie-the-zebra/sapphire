@@ -82,6 +82,12 @@ class TwilioConversationSource:
         if not self.session._alive.is_set():
             self._running = False
 
+    def _ev_payload(self):
+        """Identity for TTS events — the web UI ignores surface='phone' (Phase I:
+        a call's playback must not light/drive the browser's TTS controls)."""
+        return {"surface": "phone",
+                "chat": getattr(self.driver, "_chat_name", None)}
+
     # ── SINK role (driver contract) ──────────────────────────────────────────
     def feed_chunk(self, chunk):
         if self._stop_flag.is_set() or not (chunk and chunk.get("audio_b64")):
@@ -98,7 +104,7 @@ class TwilioConversationSource:
             return
         if not self._playing:
             self._playing = True
-            publish(Events.TTS_PLAYING)
+            publish(Events.TTS_PLAYING, self._ev_payload())
         for frame in engine_to_phone_frames(pcm16, sr):
             self.session.write(frame)
 
@@ -111,7 +117,7 @@ class TwilioConversationSource:
         self.session.flush()
         if self._playing:
             self._playing = False
-            publish(Events.TTS_STOPPED)
+            publish(Events.TTS_STOPPED, self._ev_payload())
 
     def wait(self, timeout=180):
         """Block until the outbound RTP queue drains (she finished speaking)."""
@@ -126,7 +132,7 @@ class TwilioConversationSource:
         time.sleep(0.1)                                   # tail so the last frames send
         if self._playing:
             self._playing = False
-            publish(Events.TTS_STOPPED)
+            publish(Events.TTS_STOPPED, self._ev_payload())
         # <<HANG UP>> sentinel: her goodbye has fully drained — end the call now.
         # The io loop sees the session die and sends the (Route-correct) BYE.
         if getattr(self.session, "_hangup_after_drain", False):

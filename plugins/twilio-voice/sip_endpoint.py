@@ -38,6 +38,16 @@ _CALL_MAX_SEC = 7200           # hard 2h backstop against a runaway/wedged call
 STUN_MAGIC = 0x2112A442
 _PTIME = 0.02          # 20ms RTP frames
 
+# Twilio US1 SIP signaling edges (docs: 54.172.60.0/23, gateways .0-.3). A
+# restricted-cone NAT only passes inbound from addresses we've SENT to — the
+# registrar pinhole covers one edge, but INVITEs arrive from ANY of them.
+# CRLF keepalives (RFC 5626 convention) hold a pinhole to each. Found live
+# 2026-07-04: router demoted the mapping to restricted after restart churn —
+# green keepalives, Twilio error 32011 "Request timeout" on every INVITE.
+_TWILIO_EDGES = [("54.172.60.0", 5060), ("54.172.60.1", 5060),
+                 ("54.172.60.2", 5060), ("54.172.60.3", 5060)]
+_EDGE_PUNCH_SEC = 30
+
 
 def _rand_hex(n=16):
     return "".join(random.choice("0123456789abcdef") for _ in range(n))
@@ -272,8 +282,10 @@ class SipEndpoint:
             logger.error("[TWILIO] SIP registration failed — voice endpoint not listening")
             return
         logger.info(f"[TWILIO] registered as {self.user}@{self.domain} (public {ip}:{port})")
+        self._punch_edges()
 
         next_reg = time.time() + self.expires / 2
+        next_punch = time.time() + _EDGE_PUNCH_SEC
         while not self._stop.is_set():
             try:
                 if time.time() >= next_reg:
@@ -294,6 +306,9 @@ class SipEndpoint:
                     ok = self._register()
                     logger.info(f"[TWILIO] keepalive re-register {'ok' if ok else 'FAILED'} — {self.user}@{self.domain}")
                     next_reg = time.time() + self.expires / 2
+                if time.time() >= next_punch:
+                    self._punch_edges()
+                    next_punch = time.time() + _EDGE_PUNCH_SEC
                 r, _, _ = select.select([self.sip], [], [], 0.5)
                 if not r:
                     continue
@@ -332,6 +347,18 @@ class SipEndpoint:
         """Signal the serve thread to exit; it deregisters on its way out.
         Never read the socket from here — single-reader rule (see serve_forever)."""
         self._stop.set()
+
+    def _punch_edges(self):
+        """Hold NAT pinholes open to every Twilio signaling edge (see
+        _TWILIO_EDGES). Write-only — never reads the socket."""
+        targets = list(_TWILIO_EDGES)
+        if getattr(self, "registrar", None):
+            targets.append(self.registrar)
+        for addr in targets:
+            try:
+                self.sip.sendto(b"\r\n\r\n", addr)
+            except OSError:
+                pass
 
     # ── one call ─────────────────────────────────────────────────────────────
     def _handle_call(self, start, h, sdp, addr):
@@ -411,11 +438,13 @@ class SipEndpoint:
         last_punch = started
         while session._alive.is_set() and not self._stop.is_set():
             now = time.time()
-            if dialog.get("ua") and now - last_punch > 15:
-                try:
-                    self.sip.sendto(b"\r\n\r\n", dialog["ua"])
-                except OSError:
-                    pass
+            if now - last_punch > 15:
+                if dialog.get("ua"):
+                    try:
+                        self.sip.sendto(b"\r\n\r\n", dialog["ua"])
+                    except OSError:
+                        pass
+                self._punch_edges()          # keep ALL edges open during calls too
                 last_punch = now
             if now - last_rtp > _CALL_INACTIVITY_SEC:
                 logger.info(f"[TWILIO] no inbound audio for {_CALL_INACTIVITY_SEC}s — ending call (assumed hangup, BYE not seen)")

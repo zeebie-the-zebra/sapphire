@@ -439,7 +439,7 @@ class TTSClient:
             with self.lock:
                 if self.should_stop.is_set() or _stale():
                     return
-                publish(Events.TTS_PLAYING)
+                publish(Events.TTS_PLAYING, {"surface": "local"})
 
             # Convert stereo to mono if needed
             if len(audio_data.shape) > 1:
@@ -509,7 +509,7 @@ class TTSClient:
                 was_playing = self._is_playing
                 self._is_playing = False
             if was_playing:
-                publish(Events.TTS_STOPPED)
+                publish(Events.TTS_STOPPED, {"surface": "local"})
             gc.collect()
 
     def _generate_and_play_audio_stream(self, text, gen=None):
@@ -608,7 +608,7 @@ class TTSClient:
                         if self.should_stop.is_set() or _stale():
                             stopped_early = True
                             break
-                        publish(Events.TTS_PLAYING)
+                        publish(Events.TTS_PLAYING, {"surface": "local"})
                         playing_started = True
                     first_chunk_at = time.time() - t_start
                     logger.debug(f"[TTS-stream] first chunk playing at +{first_chunk_at*1000:.0f}ms")
@@ -662,7 +662,7 @@ class TTSClient:
                 was_playing = self._is_playing
                 self._is_playing = False
             if was_playing and playing_started:
-                publish(Events.TTS_STOPPED)
+                publish(Events.TTS_STOPPED, {"surface": "local"})
             gc.collect()
 
     def stop(self):
@@ -678,7 +678,7 @@ class TTSClient:
                 self._is_playing = False
                 was_playing = True
         if was_playing:
-            publish(Events.TTS_STOPPED)
+            publish(Events.TTS_STOPPED, {"surface": "local"})
 
     def wait(self, timeout=300):
         """Block until TTS playback finishes or timeout (seconds)."""

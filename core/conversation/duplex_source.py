@@ -338,7 +338,7 @@ class DuplexConversationSource:
         if not self._playing:
             self._playing = True
             self._play_start = time.time()       # starts the barge-guard window for this turn
-            publish(Events.TTS_PLAYING)
+            publish(Events.TTS_PLAYING, {"surface": "web"})
 
     def finish(self):
         """No more chunks — release the pre-roll even if the cushion isn't full (short replies)."""
@@ -351,7 +351,7 @@ class DuplexConversationSource:
             self._out_chunks.clear()
         if self._playing:
             self._playing = False
-            publish(Events.TTS_STOPPED)
+            publish(Events.TTS_STOPPED, {"surface": "web"})
 
     def wait(self, timeout=180):
         """Block until the output buffer drains (turn audio finished) or a barge-in stops us."""
@@ -367,7 +367,7 @@ class DuplexConversationSource:
         time.sleep(0.12)  # grace for the device buffer tail
         if self._playing:
             self._playing = False
-            publish(Events.TTS_STOPPED)
+            publish(Events.TTS_STOPPED, {"surface": "web"})
 
     def _decode(self, chunk):
         b = base64.b64decode(chunk["audio_b64"])

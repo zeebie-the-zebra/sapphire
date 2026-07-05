@@ -101,7 +101,7 @@ class PumpkinChunker:
                 try:
                     self._stream = self._stream_factory()
                     self._is_playing = True
-                    publish(Events.TTS_PLAYING)
+                    publish(Events.TTS_PLAYING, {"surface": "local"})
                 except Exception as e:
                     logger.error(f"[PUMPKIN] OutputStream open failed: {e}")
                     self.should_stop.set()
@@ -166,7 +166,7 @@ class PumpkinChunker:
                     logger.debug(f"[PUMPKIN] stream close error: {e}")
                 self._stream = None
         if was:
-            publish(Events.TTS_STOPPED)
+            publish(Events.TTS_STOPPED, {"surface": "local"})
 
     def _drain_queue(self):
         try:

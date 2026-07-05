@@ -151,7 +151,8 @@ class ConversationDriver:
                     et = event.get("type") if isinstance(event, dict) else None
                     if et == "content":
                         publish(Events.VOICE_TURN_CHUNK,
-                                {"message_id": message_id, "text": event.get("text", "")})
+                                {"message_id": message_id, "text": event.get("text", ""),
+                                 "chat": self._chat_name, "foreign": _foreign})
                     elif et == "tts_chunk":
                         sink.feed_chunk(event)
                     if getattr(stream, "cancel_flag", False):
@@ -161,7 +162,8 @@ class ConversationDriver:
 
             sink.finish()
             self._wait_sink(sink)                  # stay RESPONDING until audio finishes
-            publish(Events.VOICE_TURN_END, {"message_id": message_id})
+            publish(Events.VOICE_TURN_END, {"message_id": message_id,
+                                            "chat": self._chat_name, "foreign": _foreign})
         except Exception as e:
             logger.error(f"[CONV] streaming turn failed: {e}")
         finally:

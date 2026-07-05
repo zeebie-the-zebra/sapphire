@@ -113,7 +113,7 @@ class BrowserConversationSource:
         self._playback_done.clear()     # audio in flight again
         if not self._playing:
             self._playing = True
-            publish(Events.TTS_PLAYING)
+            publish(Events.TTS_PLAYING, {"surface": "web"})
         self._send({"type": "tts_chunk",
                     **{k: chunk.get(k) for k in
                        ("audio_b64", "content_type", "index", "boundary",
@@ -131,11 +131,11 @@ class BrowserConversationSource:
         self._send({"type": "barge_stop"})
         if self._playing:
             self._playing = False
-            publish(Events.TTS_STOPPED)
+            publish(Events.TTS_STOPPED, {"surface": "web"})
 
     def wait(self, timeout=180):
         """Block until the CLIENT reports playback done (or barge / close / timeout)."""
         self._playback_done.wait(timeout=timeout)
         if self._playing:
             self._playing = False
-            publish(Events.TTS_STOPPED)
+            publish(Events.TTS_STOPPED, {"surface": "web"})

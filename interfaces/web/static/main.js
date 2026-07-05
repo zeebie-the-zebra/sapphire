@@ -420,13 +420,16 @@ function initEventBus() {
         debouncedRefresh();
     });
 
-    // TTS events
-    eventBus.on(eventBus.Events.TTS_PLAYING, () => {
+    // TTS events. Phone-call playback (surface 'phone') is NOT local audio —
+    // it must never light the Stop button or drive audio.stop() (Phase I).
+    eventBus.on(eventBus.Events.TTS_PLAYING, (data) => {
+        if (data?.surface === 'phone') return;
         audio.setLocalTtsPlaying(true);
         updateMicButtonState();
     });
 
-    eventBus.on(eventBus.Events.TTS_STOPPED, () => {
+    eventBus.on(eventBus.Events.TTS_STOPPED, (data) => {
+        if (data?.surface === 'phone') return;
         audio.stop(true);
         audio.setLocalTtsPlaying(false);
         updateMicButtonState();
@@ -477,11 +480,11 @@ function initEventBus() {
         } catch (e) { console.warn('[VOICE_TURN] start failed', e); }
     });
     eventBus.on('voice_turn_chunk', (data) => {
-        if (!_voiceTurnActive) return;
+        if (data?.foreign || !_voiceTurnActive) return;
         try { ui.appendStream(data?.text || ''); } catch (e) { /* ignore */ }
     });
-    eventBus.on('voice_turn_end', async () => {
-        if (!_voiceTurnActive) return;
+    eventBus.on('voice_turn_end', async (data) => {
+        if (data?.foreign || !_voiceTurnActive) return;
         _voiceTurnActive = false;
         try { await ui.finishStreaming(); } catch (e) { console.warn('[VOICE_TURN] end failed', e); }
     });
