@@ -32,7 +32,7 @@ _endpoints = {}                 # scope -> {"endpoint": SipEndpoint, "thread": T
 _reconcile_thread = None
 _stop = threading.Event()
 _lock = threading.Lock()
-_outbound = None                # single pending outbound call (dict) or None
+_outbound = {}                  # scope -> pending outbound call (dict)
 _outbound_lock = threading.Lock()
 
 
@@ -168,8 +168,8 @@ def _stop_endpoint(scope, rec):
 def _outbound_fresh(scope):
     """True if an outbound call is pending bridge-back on this account."""
     with _outbound_lock:
-        return bool(_outbound and _outbound["scope"] == scope
-                    and time.time() < _outbound["deadline"])
+        ob = _outbound.get(scope)
+        return bool(ob and time.time() < ob["deadline"])
 
 
 def _outbound_take(scope, x_header=None):
@@ -177,17 +177,16 @@ def _outbound_take(scope, x_header=None):
     A matching X-Sapphire-Call token is definitive; a fresh pending slot
     without the header is accepted too (Twilio may strip URI params —
     the probe log on the first real call settles which world we're in)."""
-    global _outbound
     with _outbound_lock:
-        if not _outbound or _outbound["scope"] != scope:
+        ob = _outbound.get(scope)
+        if not ob:
             return None
-        if time.time() >= _outbound["deadline"]:
-            _outbound = None
+        if time.time() >= ob["deadline"]:
+            _outbound.pop(scope, None)
             return None
-        if x_header and x_header != _outbound["token"]:
+        if x_header and x_header != ob["token"]:
             return None
-        ob, _outbound = _outbound, None
-        return ob
+        return _outbound.pop(scope)
 
 
 def place_call(to_number, to_name, goal, origin_chat, ephemeral=True,
@@ -195,7 +194,6 @@ def place_call(to_number, to_name, goal, origin_chat, ephemeral=True,
     """Originate an outbound call via Twilio REST; the bridged leg arrives at
     our registered SIP endpoint and runs the live conversation engine.
     Returns (ok, message-for-the-AI)."""
-    global _outbound
     import httpx
     from core.credentials_manager import credentials
     from core.api_fastapi import get_system
@@ -215,11 +213,15 @@ def place_call(to_number, to_name, goal, origin_chat, ephemeral=True,
                            "Triggers > Realtime rule must keep it online to receive "
                            "the bridged call.")
     system = get_system()
-    if getattr(system, "_twilio_active_call", None):
+    # Busy is per-LINE now: a live call on ANOTHER number doesn't block this one
+    # (one call per SIP endpoint until the serve-loop refactor — Phase III).
+    calls = getattr(system, "_twilio_active_calls", None) or {}
+    if any(c.get("scope") == scope for c in calls.values()):
         return False, "A call is already in progress on this line."
     with _outbound_lock:
-        if _outbound and time.time() < _outbound["deadline"]:
-            return False, "Another outbound call is already being placed."
+        ob = _outbound.get(scope)
+        if ob and time.time() < ob["deadline"]:
+            return False, "Another outbound call is already being placed on this line."
 
     chat = origin_chat
     if ephemeral:
@@ -229,11 +231,11 @@ def place_call(to_number, to_name, goal, origin_chat, ephemeral=True,
 
     token = uuid.uuid4().hex[:16]
     with _outbound_lock:
-        _outbound = {"token": token, "scope": scope, "to": to_number,
-                     "to_name": to_name, "goal": goal, "chat": chat,
-                     "origin_chat": origin_chat, "ephemeral": bool(ephemeral),
-                     "opening_line": opening_line or "",
-                     "deadline": time.time() + _OUTBOUND_TTL}
+        _outbound[scope] = {"token": token, "scope": scope, "to": to_number,
+                            "to_name": to_name, "goal": goal, "chat": chat,
+                            "origin_chat": origin_chat, "ephemeral": bool(ephemeral),
+                            "opening_line": opening_line or "",
+                            "deadline": time.time() + _OUTBOUND_TTL}
 
     sip_uri = f"sip:{acct['sip_user']}@{acct['sip_domain']}?X-Sapphire-Call={token}"
     twiml = (f'<Response><Dial answerOnBridge="true" timeLimit="{int(max_minutes * 60)}">'
@@ -245,12 +247,12 @@ def place_call(to_number, to_name, goal, origin_chat, ephemeral=True,
             auth=(acct["account_sid"], acct["auth_token"]), timeout=15)
         if resp.status_code >= 300:
             with _outbound_lock:
-                _outbound = None
+                _outbound.pop(scope, None)
             logger.error(f"[TWILIO] originate failed {resp.status_code}: {resp.text[:300]}")
             return False, f"Twilio rejected the call ({resp.status_code}). Check the number and REST credentials."
     except Exception as e:
         with _outbound_lock:
-            _outbound = None
+            _outbound.pop(scope, None)
         return False, f"Could not reach Twilio to place the call: {e}"
     logger.info(f"[TWILIO] originated call to {to_number} ({to_name}) — chat '{chat}', goal: {goal[:80]}")
     where = "this chat" if chat == origin_chat else f"chat '{chat}' (a summary will land here after)"
@@ -347,6 +349,34 @@ def _on_call(scope, caller, session):
             return
         chat, ephemeral = _resolve_chat(system, scope, caller, task)
 
+    # One live call per chat: the per-chat hooks (phone context, hangup sentinel)
+    # resolve their call by chat name — two calls sharing one chat would cross wires
+    # (and their turns would interleave in one history). Ephemeral chats make this
+    # rare; persistent chat_target rules on two numbers can collide — reject clean.
+    # The record is REGISTERED BEFORE the session starts (under _lock, so two
+    # endpoint threads can't both claim one chat); popped again on any failure.
+    # `note` is the rule's optional Phone-context text for the ghost_inject hook;
+    # `session` lets the <<HANG UP>> sentinel hook arm hangup-after-drain.
+    sid = uuid.uuid4().hex[:12]
+    _note = ((task or {}).get("trigger_config", {}).get("phone_note") or "").strip()
+    with _lock:
+        calls = getattr(system, "_twilio_active_calls", None)
+        if calls is None:
+            calls = system._twilio_active_calls = {}
+        if chat in calls:
+            busy = True
+        else:
+            busy = False
+            calls[chat] = {"caller": caller, "chat": chat, "note": _note,
+                           "session": session, "direction": direction,
+                           "scope": scope, "session_id": sid,
+                           "goal": (ob or {}).get("goal", "")}
+    if busy:
+        logger.warning(f"[TWILIO] chat '{chat}' already hosting a call — rejecting")
+        session.stop()
+        _call_ended(scope, caller, chat, ephemeral, "busy", 0.0, 0)
+        return
+
     mgr = system.get_conversation_manager()
     from .twilio_source import TwilioConversationSource
 
@@ -355,21 +385,13 @@ def _on_call(scope, caller, session):
         src.start()
         return src
 
-    src = mgr.start_external(ctor, chat_name=chat, source_label="phone")
+    src = mgr.start_external(ctor, chat_name=chat, source_label="phone", session_id=sid)
     if src is None:
-        logger.warning("[TWILIO] conversation slot busy — rejecting call")
+        logger.warning("[TWILIO] no conversation slot free — rejecting call")
+        calls.pop(chat, None)
         session.stop()
         _call_ended(scope, caller, chat, ephemeral, "busy", 0.0, 0)
         return
-
-    # Expose the active call so the ghost_inject hook (hooks/phone_context.py) can
-    # add per-turn phone-medium context, gated on this exact chat. `note` is the
-    # rule's optional custom Phone-context text (blank -> hook uses its default).
-    _note = ((task or {}).get("trigger_config", {}).get("phone_note") or "").strip()
-    # `session` is here so the <<HANG UP>> sentinel hook can arm hangup-after-drain.
-    system._twilio_active_call = {"caller": caller, "chat": chat, "note": _note,
-                                  "session": session, "direction": direction,
-                                  "goal": (ob or {}).get("goal", "")}
 
     # Inbound: the Realtime rule's greeting (fallback: the account's).
     # Outbound: the tool's opening_line — SHE speaks first, like a real caller;
@@ -408,10 +430,10 @@ def _on_call(scope, caller, session):
     started = time.time()
     session.wait_ended()
     try:
-        mgr.stop()
+        mgr.stop_external(sid)
     except Exception as e:
         logger.warning(f"[TWILIO] conversation stop error: {e}")
-    system._twilio_active_call = None
+    calls.pop(chat, None)
     duration = round(time.time() - started, 1)
     if ob and ob["origin_chat"] != chat:
         # Report back to the chat that placed the call — WITH the transcript, so

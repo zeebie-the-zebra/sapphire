@@ -100,3 +100,66 @@ def test_manager_source_failure_keeps_wakeword():
     mgr = ConversationManager(system, gate=MagicMock(), source_factory=boom)
     assert mgr.start_local() is False
     assert mgr.active is False
+
+
+# ── External sessions (Phase II — phone calls, N concurrent) ────────────────
+def _ctor(built=None):
+    def ctor(driver, gate):
+        src = MagicMock()
+        if built is not None:
+            built.append((driver, src))
+        return src
+    return ctor
+
+
+def test_external_sessions_run_concurrently_with_own_drivers():
+    system = _system_with_real_handoff()
+    mgr = ConversationManager(system, gate=MagicMock())
+    built = []
+    a = mgr.start_external(_ctor(built), chat_name="call_a", session_id="a")
+    b = mgr.start_external(_ctor(built), chat_name="call_b", session_id="b")
+    assert a is not None and b is not None
+    assert len(mgr.external) == 2
+    da, db = built[0][0], built[1][0]
+    assert da is not db                      # one driver PER call
+    assert da._chat_name == "call_a" and db._chat_name == "call_b"
+    assert mgr.driver is None                # operator slot untouched
+    assert system.conversation_mode_enabled is False   # operator mode untouched
+    system.enter_conversation_mode_external.assert_not_called()
+
+
+def test_external_slot_cap_refuses_over_capacity():
+    system = _system_with_real_handoff()
+    mgr = ConversationManager(system, gate=MagicMock())
+    assert mgr.start_external(_ctor(), session_id="a") is not None
+    assert mgr.start_external(_ctor(), session_id="b") is not None
+    assert mgr.start_external(_ctor(), session_id="c") is None   # cap default 2
+    assert len(mgr.external) == 2
+
+
+def test_stop_external_ends_one_leaves_other():
+    system = _system_with_real_handoff()
+    mgr = ConversationManager(system, gate=MagicMock())
+    built = []
+    mgr.start_external(_ctor(built), session_id="a")
+    mgr.start_external(_ctor(built), session_id="b")
+    mgr.stop_external("a")
+    assert set(mgr.external) == {"b"}
+    built[0][1].close.assert_called_once()   # a's source closed
+    built[1][1].close.assert_not_called()    # b untouched
+    mgr.stop_external("a")                   # idempotent
+    mgr.stop_external("b")
+    assert mgr.external == {}
+
+
+def test_operator_stop_leaves_external_sessions_alive():
+    system = _system_with_real_handoff()
+    source = MagicMock()
+    mgr = ConversationManager(system, gate=MagicMock(), source_factory=lambda d, g: source)
+    built = []
+    mgr.start_external(_ctor(built), session_id="call")
+    mgr.start_local()
+    mgr.stop()                               # operator exits their conversation
+    assert mgr.active is False
+    assert set(mgr.external) == {"call"}     # the phone call never broke stride
+    built[0][1].close.assert_not_called()

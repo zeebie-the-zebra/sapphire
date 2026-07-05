@@ -25,18 +25,21 @@ def post_chat(event):
     if not text or "<<" not in text:
         return
     system = event.metadata.get("system")
-    if not system or getattr(system, "conversation_source", None) != "phone":
+    if not system:
         return
-    call = getattr(system, "_twilio_active_call", None)
-    if not call or call.get("session") is None:
+    # Per-chat lookup: the reply's chat resolves to ITS OWN call, so with N
+    # concurrent calls the sentinel only ever hangs up the call it was said on.
+    calls = getattr(system, "_twilio_active_calls", None)
+    if not calls:
         return
     try:
         current = system.llm_chat.session_manager._effective_chat_name()
-        if current != call.get("chat"):
-            return
     except Exception:
-        pass
+        return
+    call = calls.get(current)
+    if not call or call.get("session") is None:
+        return
     if not _MARKER.search(text):
         return
     call["session"]._hangup_after_drain = True
-    logger.info("[TWILIO] <<HANG UP>> sentinel seen — ending call after this reply drains")
+    logger.info(f"[TWILIO] <<HANG UP>> sentinel seen in '{current}' — ending that call after the reply drains")

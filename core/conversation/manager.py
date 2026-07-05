@@ -10,6 +10,7 @@ Settings > Conversation takes effect on the next activation — no restart. The 
 and source_factory are injectable so this is unit-testable without silero or a mic.
 """
 import logging
+import threading
 
 from core.conversation.driver import ConversationDriver
 
@@ -20,8 +21,14 @@ class ConversationManager:
     def __init__(self, system, gate=None, source_factory=None):
         self.system = system
         self._injected_gate = gate                 # tests inject; prod builds fresh per start
-        self.driver = None                         # built fresh per start_local with tunables
+        self.driver = None                         # the OPERATOR's driver (local/browser)
         self._source_factory = source_factory or self._default_local_source
+        # External sessions (phone calls) run OUTSIDE the operator's conversation
+        # mode: they never touch conversation_mode_enabled or the wakeword — a call
+        # doesn't contend for any local audio device, so the operator keeps their
+        # ears (and can run local/browser mode concurrently). session_id -> record.
+        self.external = {}
+        self._external_lock = threading.Lock()     # slot-cap check races endpoint threads
 
     def _default_local_source(self, driver, gate):
         import config
@@ -118,29 +125,60 @@ class ConversationManager:
         logger.info(f"[CONV] start_browser -> {'ON' if ok else 'failed'}")
         return src if ok else None
 
-    def start_external(self, source_ctor, chat_name=None, source_label="external"):
-        """Enter conversation mode fed by an arbitrary external transport (e.g. a phone
-        call). `source_ctor(driver, gate)` builds a source that is ALSO the TTS sink
-        (duplex pattern) and must be `.start()`-ed by the ctor. Returns the source or
-        None. Wakeword-optional + no server-mic contention (same as browser)."""
-        if self.active:
-            return None
-        self.driver = self._build_driver(chat_name=chat_name)
-        gate = self._build_gate()
-        built = {}
+    def start_external(self, source_ctor, chat_name=None, source_label="external",
+                       session_id=None):
+        """Start an external conversation session (a phone call). Each session gets
+        its OWN driver + gate + source — N sessions run concurrently up to the slot
+        cap (CONVERSATION_EXTERNAL_SLOTS). `source_ctor(driver, gate)` builds a
+        source that is ALSO the TTS sink (duplex pattern) and must be `.start()`-ed
+        by the ctor. Returns the source or None (slot cap / build failure).
 
-        def acquire():
-            src = source_ctor(self.driver, gate)
-            self.driver.set_sink(src)      # source IS the sink (duplex pattern)
-            built["src"] = src
-            return src
+        Unlike the operator path this never touches conversation_mode_enabled or
+        the wakeword — a call brings its own transport and contends for nothing
+        local. End it with stop_external(session_id)."""
+        import config
+        import time
+        import uuid
+        cap = int(getattr(config, "CONVERSATION_EXTERNAL_SLOTS", 2))
+        sid = session_id or uuid.uuid4().hex[:12]
+        with self._external_lock:
+            if len(self.external) >= cap:
+                logger.warning(f"[CONV] start_external({source_label}) refused — "
+                               f"{len(self.external)}/{cap} slots in use")
+                return None
+            driver = self._build_driver(chat_name=chat_name)
+            gate = self._build_gate()
+            try:
+                src = source_ctor(driver, gate)
+                driver.set_sink(src)       # source IS the sink (duplex pattern)
+            except Exception as e:
+                logger.error(f"[CONV] start_external({source_label}) source build failed: {e}")
+                return None
+            self.external[sid] = {"driver": driver, "src": src, "chat": chat_name,
+                                  "label": source_label, "started": time.time()}
+        logger.info(f"[CONV] start_external({source_label}) -> ON "
+                    f"(session {sid}, {len(self.external)}/{cap} slots)")
+        return src
 
-        ok = self.system.enter_conversation_mode_external(acquire, source_label=source_label)
-        logger.info(f"[CONV] start_external({source_label}) -> {'ON' if ok else 'failed'}")
-        return built.get("src") if ok else None
+    def stop_external(self, session_id):
+        """End one external session: close its source, reset its driver (idempotent)."""
+        rec = self.external.pop(session_id, None)
+        if rec is None:
+            return
+        try:
+            close = getattr(rec["src"], "close", None)
+            if callable(close):
+                close()
+        except Exception as e:
+            logger.warning(f"[CONV] external session {session_id} close error: {e}")
+        rec["driver"].reset()
+        logger.info(f"[CONV] external session {session_id} ended "
+                    f"({len(self.external)} still active)")
 
     def stop(self):
-        """Exit true speech mode and restore wakeword (idempotent)."""
+        """Exit the OPERATOR's true speech mode and restore wakeword (idempotent).
+        External sessions (phone calls) are untouched — they end individually via
+        stop_external()."""
         self.system.exit_conversation_mode()
         if self.driver is not None:
             self.driver.reset()

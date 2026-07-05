@@ -5,9 +5,9 @@ ghost rail (see docs/GHOST_MESSAGES.md). This is ambient-state context ONLY — 
 voice medium and the caller's number — it never reads or fingerprints the caller's
 words, so it stays clear of the Vanta-shape anti-pattern the rail is gated against.
 
-Gated tightly: fires only while a phone call is active (conversation_source ==
-"phone") AND only for that call's own chat, so a concurrent web/cron turn during a
-call never picks it up.
+Gated tightly: fires only for a chat that is CURRENTLY hosting a live call
+(system._twilio_active_calls, keyed by chat), so a concurrent web/cron turn —
+or another simultaneous call — never picks up the wrong call's context.
 """
 
 
@@ -15,19 +15,20 @@ def ghost_inject(event):
     system = event.metadata.get("system")
     if not system:
         return
-    # Only during a live phone call.
-    if getattr(system, "conversation_source", None) != "phone":
+    # The chat IS the gate: each live call registers under its own chat, so a
+    # turn only gets phone context when it runs in a chat hosting a call. With
+    # N concurrent calls each stream picks up its OWN call's context; any other
+    # turn (web/cron/another call) resolves to a different chat and misses.
+    calls = getattr(system, "_twilio_active_calls", None)
+    if not calls:
         return
-    call = getattr(system, "_twilio_active_call", None)
-    if not call:
-        return
-    # Only THIS call's chat — not a concurrent turn in another chat during the call.
     try:
         current = system.llm_chat.session_manager._effective_chat_name()
-        if current != call.get("chat"):
-            return
     except Exception:
-        pass
+        return
+    call = calls.get(current)
+    if not call:
+        return
 
     caller = call.get("caller") or "an unknown number"
     if call.get("direction") == "outbound":

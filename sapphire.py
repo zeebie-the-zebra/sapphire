@@ -449,8 +449,10 @@ class VoiceChatSystem:
         return True
 
     def enter_conversation_mode_external(self, acquire_audio, source_label="browser"):
-        """Fail-safe handoff into an EXTERNAL conversation mode (browser mic, phone
-        call, etc. — anything that brings its own audio, not the server mic).
+        """Fail-safe handoff into the OPERATOR's external conversation mode (browser
+        mic — their own audio transport, not the server mic). Phone calls do NOT come
+        through here anymore: they run as manager external sessions (Phase II), never
+        touching this flag or the wakeword.
 
         No server-device conflict: wakeword is paused if it's running (she shouldn't
         wake-trigger mid-conversation) but a missing/disabled wakeword does NOT block —
