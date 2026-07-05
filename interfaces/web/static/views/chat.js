@@ -59,8 +59,11 @@ export default {
             chatSelect.addEventListener('chat-list-ready', () => loadSidebar());
         }
 
-        // Refresh toolset dropdown count when tools change (e.g. tool_load)
-        eventBus.on(eventBus.Events.TOOLSET_CHANGED, async () => {
+        // Refresh toolset dropdown count when tools change (e.g. tool_load).
+        // When Sapphire switches her own toolset (switch_toolset publishes
+        // {name}), select that toolset — otherwise the pill would snap back to
+        // the pre-switch value and lie about which toolset is live.
+        eventBus.on(eventBus.Events.TOOLSET_CHANGED, async (data) => {
             await refreshInitData();
             const container = document.getElementById('view-chat');
             const toolsetSel = container?.querySelector('#sb-toolset');
@@ -72,7 +75,7 @@ export default {
                     .filter(t => t.type !== 'module')
                     .map(t => `<option value="${t.name}">${t.name} (${t.function_count})</option>`)
                     .join('');
-                toolsetSel.value = currentVal;
+                toolsetSel.value = data?.name || currentVal;
             }
         });
 
@@ -102,8 +105,12 @@ export default {
         eventBus.on(eventBus.Events.SPICE_CHANGED, () => loadSidebar());
 
         // Sapphire's set_scene tool changes the chat background live (publishes {background}).
+        // Her switch_model tool publishes {settings:{llm_primary}} — resync the sidebar
+        // model dropdown + send-button badge from truth, or the UI keeps showing the old
+        // model after she moves herself to a different (e.g. cloud/paid) provider.
         eventBus.on(eventBus.Events.CHAT_SETTINGS_CHANGED, (data) => {
             if (data && typeof data.background === 'string') applyBackground(data.background);
+            if (data?.settings?.llm_primary) loadSidebar();
         });
 
         // Refresh sidebar scope dropdowns when scopes are created/deleted in

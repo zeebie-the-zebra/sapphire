@@ -56,6 +56,37 @@ def _user_now():
         return datetime.now(ZoneInfo('UTC'))
 
 
+def _phone_key(s):
+    """Digit-tail (last 10 digits) for phone-shaped strings, else None.
+    Only engages when the value looks like a phone number, so non-phone filter
+    fields fall through to plain equality untouched."""
+    s = str(s).strip()
+    if not s or not re.fullmatch(r"[+\d\s().\-]+", s):
+        return None
+    digits = re.sub(r"\D", "", s)
+    return digits[-10:] if len(digits) >= 7 else None
+
+
+def _value_matches(ev_val, filter_val):
+    """Filter equality with two tolerances the caller allowlist needs:
+    a comma-separated filter value is an allowlist (match ANY of the entries),
+    and phone numbers compare on their digit tail so +1-240-555-1234,
+    (240) 555-1234 and 2405551234 all match the same incoming E.164 caller."""
+    ev = str(ev_val)
+    ev_lower = ev.lower()
+    ev_phone = _phone_key(ev)
+    for cand in str(filter_val).split(","):
+        cand = cand.strip()
+        if not cand:
+            continue
+        if ev_lower == cand.lower():
+            return True
+        cand_phone = _phone_key(cand)
+        if ev_phone and cand_phone and ev_phone == cand_phone:
+            return True
+    return False
+
+
 class ContinuityScheduler:
     """
     Background scheduler for continuity tasks.
@@ -887,7 +918,7 @@ class ContinuityScheduler:
             if key.endswith("_not"):
                 field = key[:-4]
                 ev_val = str(event_obj.get(field, ""))
-                if ev_val.lower() == str(val).lower():
+                if _value_matches(ev_val, val):
                     logger.debug(f"[Continuity] '{task_name}' filter excluded on '{field}' (not): {ev_val!r} == {val!r}")
                     return False
             elif key.endswith("_contains"):
@@ -898,7 +929,7 @@ class ContinuityScheduler:
                     return False
             else:
                 ev_val = event_obj.get(key)
-                if str(ev_val).lower() != str(val).lower():
+                if not _value_matches(ev_val, val):
                     logger.debug(f"[Continuity] '{task_name}' filter mismatch on '{key}': {ev_val!r} != {val!r}")
                     return False
         return True

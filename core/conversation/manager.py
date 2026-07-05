@@ -162,7 +162,8 @@ class ConversationManager:
 
     def stop_external(self, session_id):
         """End one external session: close its source, reset its driver (idempotent)."""
-        rec = self.external.pop(session_id, None)
+        with self._external_lock:
+            rec = self.external.pop(session_id, None)
         if rec is None:
             return
         try:

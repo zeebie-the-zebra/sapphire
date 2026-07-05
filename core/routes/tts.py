@@ -273,7 +273,9 @@ async def tts_stop(request: Request, _=Depends(require_login), system=Depends(ge
         if _active and _active in _ext:
             logger.info(f"[TTS-STOP] '{_active}' belongs to a live phone call — web stop leaves it alone")
         else:
-            system.llm_chat.stop_tts_streams(chat_name=_active)
+            # Mirror /api/cancel: an unscoped stop (_active None) must still
+            # skip live-call chats, or it mutes callers on the None-active edge.
+            system.llm_chat.stop_tts_streams(chat_name=_active, exclude_chats=(None if _active else _ext))
     except Exception:
         pass
     # Conversation mode plays through a separate sink and the LLM may still be

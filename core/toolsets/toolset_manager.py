@@ -75,6 +75,14 @@ class ToolsetManager:
                         logger.info("Seeded missing 'default' toolset from core defaults (scout #8 migration)")
                 except Exception as e:
                     logger.warning(f"'default' toolset migration failed: {e}")
+            # Targeted migration: rewrite meta tools renamed in a365e37 (2026-07).
+            # Seeded-before-the-rename user toolsets still list the old names,
+            # which silently drop at resolve time (logged INFO) — e.g. the
+            # 'personality' toolset loses ALL its prompt/voice tools. Same shape
+            # as the 'default' migration above: rewrite in place, persist once.
+            if self._migrate_renamed_tools():
+                self._save_to_user()
+                logger.info("Migrated renamed meta-tool references in user toolsets")
             logger.info(f"Loaded {len(self._toolsets)} toolsets")
             return
 
@@ -90,7 +98,42 @@ class ToolsetManager:
         if self._toolsets:
             self._save_to_user()
             logger.info(f"First run — seeded {len(self._toolsets)} toolsets from defaults")
-    
+
+    # Old -> new names for meta tools renamed in a365e37. The four *_piece tools
+    # collapse into the single action-based prompt_pieces (deduped below).
+    _TOOL_RENAMES = {
+        "view_prompt": "prompt_view",
+        "switch_prompt": "prompt_switch",
+        "edit_prompt": "prompt_edit",
+        "set_piece": "prompt_pieces",
+        "remove_piece": "prompt_pieces",
+        "create_piece": "prompt_pieces",
+        "list_pieces": "prompt_pieces",
+        "set_tts_voice": "set_voice",
+    }
+
+    def _migrate_renamed_tools(self):
+        """Rewrite renamed tool references in every user toolset, order-preserving
+        and deduped (the *_piece collapse can produce repeats). Names not in the
+        map are left untouched, so custom user tools are never disturbed. Returns
+        True if anything changed (caller persists)."""
+        changed = False
+        for ts in self._toolsets.values():
+            funcs = ts.get("functions")
+            if not isinstance(funcs, list):
+                continue
+            new_funcs, seen = [], set()
+            for fn in funcs:
+                mapped = self._TOOL_RENAMES.get(fn, fn)
+                if mapped in seen:
+                    continue
+                seen.add(mapped)
+                new_funcs.append(mapped)
+            if new_funcs != funcs:
+                ts["functions"] = new_funcs
+                changed = True
+        return changed
+
     def reload(self):
         """Reload toolsets from disk."""
         with self._lock:

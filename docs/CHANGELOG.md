@@ -1,3 +1,9 @@
+# 2.8.2 - Isolation
+- Might higher isolation between tasks, call + web ui same time
+- Coding harness update
+- Refactor meta tools self-edit prompt
+- Remove backups encryption from core, moved to plugin
+- Disable thinking Settings > LLM works for most providers
 # 2.8.1 - Twilio
 - Added Twilio Realtime plugin for phone
 # 2.8.0 - Conversation
