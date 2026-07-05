@@ -1,6 +1,8 @@
 # plugins/remembrance/ops.py — offsite backup operations, shared by the tool, the
-# settings routes, and the cron handler. Produces an ENCRYPTED blob (encrypt-or-
-# refuse) and ships it to the zero-knowledge vault.
+# settings routes, and the cron handler. Encryption lives HERE, not in core:
+# local backups sit next to the live data, so only what leaves the machine needs
+# it. Flow: plain tar (core) → encrypt → VERIFY it's ciphertext → upload
+# (encrypt-or-refuse; a failed verify blocks the ship).
 import logging
 import shutil
 import tempfile
@@ -62,7 +64,9 @@ def _account():
 
 
 def _offsite_password():
-    """v1: reuse the global backup password (encrypt-or-refuse)."""
+    """The offsite-encryption password (set in the Remembrance panel; stored
+    machine-bound in ~/.config/sapphire — never inside user/, which gets
+    backed up). Encrypt-or-refuse: empty means no upload, ever."""
     return credentials.get_backup_password() or ""
 
 
@@ -71,6 +75,36 @@ def _extra_patterns():
     if isinstance(raw, str):
         raw = [p.strip() for p in raw.splitlines() if p.strip()]
     return [str(p).strip() for p in raw if str(p).strip()]
+
+
+def _verify_ciphertext(path):
+    """Prove the blob is ciphertext BEFORE it leaves the machine. Three checks,
+    most direct first: (1) it must NOT open as a tar archive — if tar can read
+    it, plaintext was about to ship; (2) it must carry the SAPPHIREBAK magic;
+    (3) it must be non-empty. Returns an error string (upload refused), or None
+    with the confirmation logged — so every upload has an explicit 'verified
+    ciphertext' line in the log, not just trust in encrypt_file()."""
+    import tarfile
+    try:
+        if path.stat().st_size == 0:
+            return "Encrypted blob is empty — refusing to upload"
+    except OSError as e:
+        return f"Encrypted blob unreadable ({e}) — refusing to upload"
+    try:
+        with tarfile.open(path, "r:*"):
+            pass
+        logger.critical(f"[remembrance] UPLOAD BLOCKED: {path.name} opens as a plain "
+                        f"tar archive — encryption did not happen")
+        return "Backup is readable as plaintext — refusing to upload"
+    except (tarfile.TarError, OSError, EOFError):
+        pass   # unreadable as an archive — exactly what ciphertext looks like
+    if not backup_crypto.is_encrypted_backup(path):
+        logger.critical(f"[remembrance] UPLOAD BLOCKED: {path.name} lacks the "
+                        f"SAPPHIREBAK magic — not a valid encrypted backup")
+        return "Encrypted blob failed verification (bad header) — refusing to upload"
+    logger.info(f"[remembrance] ciphertext verified: {path.name} is not readable as "
+                f"tar and carries the SAPPHIREBAK header — clear to upload")
+    return None
 
 
 def _err_from_http(e):
@@ -95,7 +129,7 @@ def perform_offsite_backup(cadence="daily", comment=""):
         return {"ok": False, "error": "Remembrance is not configured (set server URL, tenant ID, API key)"}
     pw = _offsite_password()
     if not pw:
-        return {"ok": False, "error": "Offsite requires encryption — set a backup password on the Backup page first"}
+        return {"ok": False, "error": "Offsite requires encryption — set an encryption password in the Remembrance settings first"}
 
     extra = _extra_patterns()
     cap_mb = int(get_prefs().get("offsite_max_mb", 2048) or 0)
@@ -116,13 +150,27 @@ def perform_offsite_backup(cadence="daily", comment=""):
     tmp = Path(tempfile.mkdtemp(prefix="remembrance_", dir=str(backup_manager.backup_dir)))
     try:
         fn = backup_manager.create_backup(backup_type="offsite", extra_patterns=extra,
-                                          password=pw, dest_dir=tmp)
+                                          dest_dir=tmp)
         if not fn:
             msg = "Backup produced no file (empty after excludes?)"
             _set_last_result(False, msg)
             return {"ok": False, "error": msg}
+        # Encrypt the plain tar here, then PROVE it's ciphertext before upload.
+        tar_path = tmp / fn
+        enc_path = tmp / (fn.removesuffix(".tar.gz") + ".sapphirebak")
         try:
-            res = client.upload(acct, tmp / fn, cadence, comment=comment)
+            backup_crypto.encrypt_file(tar_path, enc_path, pw)
+        except Exception as e:
+            msg = f"Encryption failed: {e}"
+            _set_last_result(False, msg)
+            return {"ok": False, "error": msg}
+        err = _verify_ciphertext(enc_path)
+        if err:
+            _set_last_result(False, err)
+            return {"ok": False, "error": err}
+        tar_path.unlink(missing_ok=True)   # plaintext never outlives the verify
+        try:
+            res = client.upload(acct, enc_path, cadence, comment=comment)
         except requests.HTTPError as e:
             msg = _err_from_http(e)
             _set_last_result(False, msg)

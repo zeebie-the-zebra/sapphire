@@ -1,7 +1,7 @@
 {
   "name": "remembrance",
   "short_display_name": "Remembrance",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Offsite encrypted backups to the zero-knowledge Remembrance vault. The app encrypts before upload; the server never sees your data or password.",
   "author": "Trinity (Krem, Claude, Sapphire)",
   "url": "https://remembrance.sapphireblue.dev",
@@ -22,6 +22,7 @@
     "routes": [
       {"method": "GET", "path": "config", "handler": "routes/manage.py:get_config"},
       {"method": "PUT", "path": "account", "handler": "routes/manage.py:put_account"},
+      {"method": "PUT", "path": "password", "handler": "routes/manage.py:put_password"},
       {"method": "PUT", "path": "config", "handler": "routes/manage.py:put_config"},
       {"method": "GET", "path": "status", "handler": "routes/manage.py:status"},
       {"method": "GET", "path": "download/{backup_id}", "handler": "routes/manage.py:download_blob"},

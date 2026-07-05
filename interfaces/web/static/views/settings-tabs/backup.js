@@ -62,11 +62,6 @@ export default {
                 <div id="backup-size-breakdown" style="margin-top:8px"></div>
             </div>
 
-            <div class="backup-section-divider" style="margin-top:16px">
-                <h4 style="margin:0 0 8px;font-size:var(--font-sm)">Encryption</h4>
-                <div id="backup-enc"></div>
-            </div>
-
             <div class="backup-section-divider">
                 <h4 style="margin:0 0 10px;font-size:var(--font-sm)">Backup Files</h4>
                 <div id="backup-lists"></div>
@@ -85,7 +80,6 @@ export default {
 
     async attachListeners(ctx, el) {
         await this.loadBackups(el);
-        await this.loadEncryption(el);
         await this.loadRestoreResult(el);
 
         // Exclude patterns — prefill from saved, AUTO-SAVE on blur + debounced
@@ -235,78 +229,6 @@ export default {
         box.querySelector('#restore-banner-x')?.addEventListener('click', async () => {
             box.innerHTML = '';
             try { await fetch('/api/backup/restore-result', { method: 'DELETE', headers: { 'X-CSRF-Token': csrf() } }); } catch {}
-        });
-    },
-
-    async loadEncryption(el) {
-        const box = el.querySelector('#backup-enc');
-        if (!box) return;
-        let s = { enabled: false, has_password: false };
-        try { s = await (await fetch('/api/backup/encryption-status')).json(); } catch {}
-
-        box.innerHTML = `
-            ${s.password_status === 'unreadable' ? `
-            <div style="background:rgba(224,108,108,0.2);border:1px solid var(--danger,#e06c6c);border-radius:6px;padding:10px 12px;font-size:var(--font-xs);line-height:1.6;margin-bottom:10px">
-                &#9888; <strong>Encryption is ON but the saved password can't be read.</strong> This usually means the config was reset or you moved machines. <strong>New backups are NOT being encrypted.</strong> Re-enter your password below to fix it. (Your existing encrypted backups are fine &mdash; the password still decrypts them.)
-            </div>` : ''}
-            <div style="font-size:var(--font-xs);color:var(--text-muted);line-height:1.6;margin-bottom:8px">
-                Encrypts every backup with a password only you know. Required for offsite backups.
-            </div>
-            <div style="background:rgba(224,108,108,0.12);border:1px solid var(--danger,#e06c6c);border-radius:6px;padding:10px;font-size:var(--font-xs);line-height:1.6;margin-bottom:10px">
-                &#9888; <strong>Write your password down.</strong> If you lose it, your encrypted backups are <strong>gone for good</strong> &mdash; there is no recovery. Not even us.
-            </div>
-            <label style="display:flex;align-items:center;gap:8px;font-size:var(--font-sm);margin-bottom:10px">
-                <input type="checkbox" id="enc-toggle" ${s.enabled ? 'checked' : ''} ${s.has_password ? '' : 'disabled'}>
-                Encrypt backups ${s.has_password ? '' : '<span style="color:var(--text-muted)">&mdash; set a password first</span>'}
-            </label>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
-                <input type="password" id="enc-pw" autocomplete="new-password" placeholder="${s.has_password ? 'Change password…' : 'Set a password…'}"
-                    style="flex:1;min-width:180px;padding:7px 10px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:6px;color:var(--text-bright);box-sizing:border-box">
-                <button class="btn-sm" id="enc-setpw">${s.has_password ? 'Change' : 'Set password'}</button>
-                ${s.has_password ? '<button class="btn-sm" id="enc-test">Test</button>' : ''}
-                <span id="enc-msg" style="font-size:var(--font-xs);color:var(--text-secondary)"></span>
-            </div>
-            ${s.has_password ? '<div style="font-size:var(--font-xs);color:var(--text-muted)">&#10003; Password is set.</div>' : ''}
-        `;
-
-        box.querySelector('#enc-toggle')?.addEventListener('change', async (e) => {
-            const on = e.target.checked;
-            try {
-                const r = await fetch('/api/settings/batch', {
-                    method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
-                    body: JSON.stringify({ settings: { BACKUPS_ENCRYPT: on } })
-                });
-                if (!r.ok) throw new Error();
-                ui.showToast(on ? 'Backups will be encrypted' : 'Encryption turned off', 'success');
-            } catch { e.target.checked = !on; ui.showToast('Failed to change setting', 'error'); }
-        });
-
-        box.querySelector('#enc-setpw')?.addEventListener('click', async () => {
-            const pw = box.querySelector('#enc-pw').value;
-            const msg = box.querySelector('#enc-msg');
-            if (!pw) { msg.textContent = 'Enter a password first'; return; }
-            try {
-                const r = await fetch('/api/backup/password', {
-                    method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf() },
-                    body: JSON.stringify({ password: pw })
-                });
-                if (!r.ok) throw new Error();
-                ui.showToast('Password saved — write it down!', 'success');
-                await this.loadEncryption(el);
-            } catch { msg.textContent = 'Failed to save'; }
-        });
-
-        box.querySelector('#enc-test')?.addEventListener('click', async () => {
-            const msg = box.querySelector('#enc-msg');
-            msg.textContent = 'Testing…';
-            try {
-                const r = await (await fetch('/api/backup/test-encryption', {
-                    method: 'POST', headers: { 'X-CSRF-Token': csrf() }
-                })).json();
-                msg.innerHTML = r.ok
-                    ? '<span style="color:#6c6">&#10003; Encryption works</span>'
-                    : `<span style="color:var(--danger,#e06c6c)">&#10007; ${esc(r.error || 'failed')}</span>`;
-            } catch { msg.textContent = 'Test failed'; }
         });
     },
 

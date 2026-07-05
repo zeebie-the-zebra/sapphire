@@ -130,20 +130,8 @@ class Backup:
             self.rotate_backups()
         return f"Scheduled backup complete: {', '.join(results)}"
 
-    def _encryption_password(self):
-        """The backup-encryption password if encryption is enabled AND a
-        password is set, else None (→ unencrypted backup)."""
-        if not getattr(config, 'BACKUPS_ENCRYPT', False):
-            return None
-        try:
-            from core.credentials_manager import credentials
-            return credentials.get_backup_password() or None
-        except Exception as e:
-            logger.warning(f"Could not read backup password: {e}")
-            return None
-
-    def create_backup(self, backup_type="manual", extra_patterns=None, password=None, dest_dir=None):
-        """Create a backup of the user/ directory.
+    def create_backup(self, backup_type="manual", extra_patterns=None, dest_dir=None):
+        """Create a plain .tar.gz backup of the user/ directory.
 
         Writes to `<filename>.partial` first, atomic-renames to final name on
         success. Without this, a disk-full / kill-mid-write leaves a truncated
@@ -151,32 +139,26 @@ class Backup:
         delete older valid backups in favor of the partial. Witch-hunt
         2026-04-21 finding H13.
 
+        Local backups are never encrypted — they sit on the same disk as the
+        live user/ data, so at-rest encryption here protected nothing and cost
+        users who lost the password. Encryption happens in the Remembrance
+        plugin, only when a backup leaves the machine. (Restore still decrypts
+        old .sapphirebak files — see core/routes/system.py.)
+
         Optional (offsite path; defaults reproduce the local behavior exactly):
           extra_patterns — extra exclude globs merged with the page settings.
-          password       — force-encrypt with this key (overrides the toggle).
-          dest_dir       — write the blob here instead of user_backups/.
+          dest_dir       — write the tarball here instead of user_backups/.
         """
         if not self.user_dir.exists():
             logger.error(f"User directory not found: {self.user_dir}")
             return None
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        # `password` param (if given) forces encryption with that key — the offsite
-        # encrypt-or-refuse path. Else fall back to the global toggle.
-        pw = password if password is not None else self._encryption_password()
-        encrypt = pw is not None
-        if password is None and getattr(config, 'BACKUPS_ENCRYPT', False) and not encrypt:
-            logger.warning("BACKUPS_ENCRYPT is on but no backup password is set — "
-                           "writing an UNENCRYPTED backup. Set a password on the Backup page.")
-        ext = "sapphirebak" if encrypt else "tar.gz"
-        filename = f"sapphire_{timestamp}_{backup_type}.{ext}"
+        filename = f"sapphire_{timestamp}_{backup_type}.tar.gz"
         out_dir = Path(dest_dir) if dest_dir else self.backup_dir
         out_dir.mkdir(parents=True, exist_ok=True)
         filepath = out_dir / filename
-        # Plaintext tar is always written here first; when encrypting it's an
-        # intermediate that gets encrypted into `filepath`, then deleted.
-        partial = out_dir / f"sapphire_{timestamp}_{backup_type}.tar.gz.partial"
-        enc_partial = out_dir / (filename + ".partial")
+        partial = out_dir / (filename + ".partial")
 
         try:
             # Checkpoint SQLite WAL files before backup. DBs whose checkpoint
@@ -228,49 +210,26 @@ class Backup:
                 except OSError:
                     pass
                 return None
-            # Protect the plaintext tar immediately — in the encrypt path it lives
-            # briefly as cleartext before being encrypted + unlinked.
-            try:
-                os.chmod(partial, 0o600)
-            except OSError:
-                pass
             # chmod 0600 BEFORE rename — backups contain credentials.json (0600);
             # without this the archive is world-readable by default umask.
             # Day-ruiner scout 2026-05-07 #L.
-            if encrypt:
-                # Encrypt the plaintext tar into the final .sapphirebak, drop the
-                # plaintext intermediate.
-                from core.backup_crypto import encrypt_file
-                encrypt_file(partial, enc_partial, pw)
-                try:
-                    os.chmod(enc_partial, 0o600)
-                except OSError as _e:
-                    logger.warning(f"Could not chmod backup: {_e}")
-                enc_partial.replace(filepath)   # atomic; list_backups skips .partial
-                try:
-                    partial.unlink()
-                except OSError:
-                    pass
-            else:
-                try:
-                    os.chmod(partial, 0o600)
-                except OSError as _e:
-                    logger.warning(f"Could not chmod backup: {_e}")
-                partial.replace(filepath)
+            try:
+                os.chmod(partial, 0o600)
+            except OSError as _e:
+                logger.warning(f"Could not chmod backup: {_e}")
+            partial.replace(filepath)   # atomic; list_backups skips .partial
 
             size_mb = filepath.stat().st_size / (1024 * 1024)
-            logger.info(f"Created {'encrypted ' if encrypt else ''}backup: {filename} ({size_mb:.2f} MB)")
+            logger.info(f"Created backup: {filename} ({size_mb:.2f} MB)")
             return filename
         except Exception as e:
             logger.error(f"Backup failed: {e}")
-            # Clean up both partials on failure so they don't accumulate.
-            for p in (partial, enc_partial):
-                try:
-                    p.unlink()
-                except FileNotFoundError:
-                    pass
-                except Exception as cleanup_err:
-                    logger.warning(f"Backup partial cleanup failed: {cleanup_err}")
+            try:
+                partial.unlink()
+            except FileNotFoundError:
+                pass
+            except Exception as cleanup_err:
+                logger.warning(f"Backup partial cleanup failed: {cleanup_err}")
             return None
 
     def _checkpoint_databases(self):

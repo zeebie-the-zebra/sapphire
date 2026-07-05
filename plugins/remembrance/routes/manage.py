@@ -23,6 +23,18 @@ def get_config(**_):
     }
 
 
+def put_password(body=None, **_):
+    """Set (or clear with empty) the offsite-encryption password. Stored scrambled
+    in ~/.config/sapphire — never inside user/, which gets backed up."""
+    from core.credentials_manager import credentials
+    pw = (body or {}).get("password", "")
+    if not isinstance(pw, str):
+        return {"ok": False, "error": "password must be a string"}
+    if not credentials.set_backup_password(pw):
+        return {"ok": False, "error": "Failed to store the password"}
+    return {"ok": True, "status": credentials.backup_password_status()}
+
+
 def put_account(body=None, **_):
     from core.credentials_manager import credentials
     body = body or {}

@@ -62,27 +62,59 @@ def test_cap_exceeded_refuses_before_creating(env):
     assert called == []   # refused BEFORE building a giant blob
 
 
-def test_happy_path_uploads_and_cleans_up(env, tmp_path):
+def _fake_create(backup_type, extra_patterns=None, dest_dir=None):
+    """Stand-in for core create_backup: writes a plain tar.gz (as core now
+    always does — encryption moved into this plugin)."""
+    import tarfile
+    from pathlib import Path
+    p = Path(dest_dir) / "sapphire_x_offsite.tar.gz"
+    with tarfile.open(p, "w:gz"):
+        pass
+    return p.name
+
+
+def test_happy_path_encrypts_verifies_uploads(env, tmp_path):
+    """Plain tar from core → REAL encrypt in ops → ciphertext verify → upload.
+    The plaintext tar must be gone by upload time; temp dir cleaned after."""
     _account(env)
     env.setattr(ops.backup_manager, "estimate_size", lambda extra_patterns=None: {"total_bytes": 1000})
-
-    def fake_create(backup_type, extra_patterns=None, password=None, dest_dir=None):
-        assert password == "pw"              # encrypt-or-refuse: the password IS used
-        from pathlib import Path
-        p = Path(dest_dir) / "sapphire_x_offsite.sapphirebak"
-        p.write_bytes(b"blob")
-        return p.name
-    env.setattr(ops.backup_manager, "create_backup", fake_create)
+    env.setattr(ops.backup_manager, "create_backup", _fake_create)
 
     seen = {}
     def fake_upload(acct, blob, cadence, comment=""):
-        seen.update(cadence=cadence, comment=comment, blob_exists=blob.exists())
+        seen.update(cadence=cadence, comment=comment, blob_exists=blob.exists(),
+                    blob_name=blob.name,
+                    plaintext_gone=not (blob.parent / "sapphire_x_offsite.tar.gz").exists(),
+                    is_ciphertext=ops.backup_crypto.is_encrypted_backup(blob))
         return {"id": "abc123", "size_bytes": 4, "usage_bytes": 4, "quota_bytes": 1000}
     env.setattr(ops.client, "upload", fake_upload)
 
     r = ops.perform_offsite_backup("daily", comment="before migration")
     assert r["ok"] and r["id"] == "abc123"
     assert seen["cadence"] == "daily" and seen["comment"] == "before migration" and seen["blob_exists"]
+    assert seen["blob_name"].endswith(".sapphirebak")
+    assert seen["is_ciphertext"]          # what went up carries the encrypted magic
+    assert seen["plaintext_gone"]         # plaintext unlinked BEFORE the upload
+    assert list(tmp_path.glob("remembrance_*")) == []   # temp dir cleaned up
+
+
+def test_verify_blocks_plaintext_upload(env, tmp_path):
+    """The pre-upload check: if 'encryption' silently passed plaintext through
+    (blob still opens as tar), the upload MUST be refused — never trust
+    encrypt_file, prove it."""
+    import shutil as sh
+    _account(env)
+    env.setattr(ops.backup_manager, "estimate_size", lambda extra_patterns=None: {"total_bytes": 1000})
+    env.setattr(ops.backup_manager, "create_backup", _fake_create)
+    env.setattr(ops.backup_crypto, "encrypt_file", lambda src, dst, pw: sh.copy2(src, dst))
+
+    uploads = []
+    env.setattr(ops.client, "upload", lambda *a, **k: uploads.append(1))
+
+    r = ops.perform_offsite_backup("daily")
+    assert not r["ok"]
+    assert "plaintext" in r["error"].lower()
+    assert uploads == []                                # nothing left the machine
     assert list(tmp_path.glob("remembrance_*")) == []   # temp dir cleaned up
 
 

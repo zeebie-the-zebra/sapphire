@@ -106,62 +106,6 @@ async def estimate_backup(request: Request, _=Depends(require_login)):
     return backup_manager.estimate_size(patterns=clean, extra_patterns=extra)
 
 
-@router.get("/api/backup/encryption-status")
-async def backup_encryption_status(request: Request, _=Depends(require_login)):
-    """Is backup encryption on, is a password set, and can it still be read?"""
-    from core.credentials_manager import credentials
-    status = credentials.backup_password_status()
-    return {
-        "enabled": bool(getattr(config, 'BACKUPS_ENCRYPT', False)),
-        "has_password": status != 'missing',
-        "password_ok": status == 'ok',
-        "password_status": status,
-    }
-
-
-@router.put("/api/backup/password")
-async def set_backup_password(request: Request, _=Depends(require_login)):
-    """Set (or clear with empty) the backup-encryption password. Stored
-    scrambled in ~/.config/sapphire — never inside the backup archive."""
-    from core.credentials_manager import credentials
-    data = await request.json() or {}
-    password = data.get("password", "")
-    if not isinstance(password, str):
-        raise HTTPException(status_code=400, detail="password must be a string")
-    if credentials.set_backup_password(password):
-        return {"status": "success", "has_password": credentials.has_backup_password()}
-    raise HTTPException(status_code=500, detail="Failed to store backup password")
-
-
-@router.post("/api/backup/test-encryption")
-async def test_backup_encryption(request: Request, _=Depends(require_login)):
-    """Round-trip a small sample through the stored password to prove encryption
-    is operational (crypto present, password set, encrypt→decrypt matches)."""
-    from core.credentials_manager import credentials
-    pw = credentials.get_backup_password()
-    if not pw:
-        raise HTTPException(status_code=400, detail="No backup password is set")
-    import os
-    import shutil
-    import tempfile
-    from core import backup_crypto
-    d = tempfile.mkdtemp()
-    try:
-        src, enc, out = (os.path.join(d, n) for n in ("s", "e", "o"))
-        sample = os.urandom(4096)
-        with open(src, "wb") as f:
-            f.write(sample)
-        backup_crypto.encrypt_file(src, enc, pw)
-        backup_crypto.decrypt_file(enc, out, pw)
-        with open(out, "rb") as f:
-            ok = f.read() == sample
-        return {"ok": bool(ok)}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-    finally:
-        shutil.rmtree(d, ignore_errors=True)
-
-
 def _schedule_restart():
     """Trigger a restart shortly after the response flushes (mirrors the update
     route). main.py applies the staged restore before re-spawning sapphire.py."""
