@@ -28,7 +28,10 @@ _RTP_PORT_BASE = 10080
 _OUTBOUND_TTL = 90              # secs an originated call may take to bridge back
 
 _plugin_loader = None
-_endpoints = {}                 # scope -> {"endpoint": SipEndpoint, "thread": Thread}
+_endpoints = {}                 # scope -> {"endpoint": SipEndpoint, "thread": Thread, "started": ts}
+_backoff = {}                   # scope -> {"delay": secs, "until": ts} — failing registrations
+_BACKOFF_FAST_DEATH_SEC = 60    # endpoint died this fast = registration failure, back off
+_BACKOFF_MAX_SEC = 300          # cap: one retry burst per 5 min (polite to Twilio)
 _reconcile_thread = None
 _stop = threading.Event()
 _lock = threading.Lock()
@@ -121,20 +124,43 @@ def _reconcile_once():
     desired = _desired_accounts()
     with _lock:
         # Self-heal: an endpoint whose serve thread has died is not really running.
-        # Drop it so the desired-set logic below re-registers it — recovers within
-        # one reconcile cycle (12s) instead of silently dropping calls forever.
+        # Drop it so the desired-set logic below re-registers it. A FAST death
+        # (registration rejected — 403 etc.) backs off exponentially instead of
+        # hammering Twilio every cycle; a long-lived endpoint that died (network
+        # blip) restarts on the next cycle as before.
         for scope, info in list(_endpoints.items()):
-            if not info["thread"].is_alive():
+            if info["thread"].is_alive():
+                # Survived past the fast-death window = registration works; forget
+                # any escalated delay so a future failure starts the ladder fresh.
+                if scope in _backoff and time.time() - info.get("started", 0) >= _BACKOFF_FAST_DEATH_SEC:
+                    _backoff.pop(scope, None)
+                continue
+            _endpoints.pop(scope, None)
+            if time.time() - info.get("started", 0) < _BACKOFF_FAST_DEATH_SEC:
+                delay = min(_backoff.get(scope, {}).get("delay", _RECONCILE_SEC) * 2,
+                            _BACKOFF_MAX_SEC)
+                _backoff[scope] = {"delay": delay, "until": time.time() + delay}
+                logger.warning(f"[TWILIO] endpoint '{scope}' failed fast (registration?) "
+                               f"— next retry in {delay}s")
+            else:
+                _backoff.pop(scope, None)
                 logger.warning(f"[TWILIO] endpoint '{scope}' thread is dead — restarting")
-                _endpoints.pop(scope, None)
         running = set(_endpoints.keys())
         for scope in running - desired:                     # tasks disabled / account removed
             logger.info(f"[TWILIO] deregistering '{scope}' (no enabled task)")
             _stop_endpoint(scope, _endpoints.pop(scope))
+        # Toggling a rule off (or removing the account) resets its backoff — that's
+        # the user's "I fixed the config, retry NOW" lever.
+        for scope in list(_backoff):
+            if scope not in desired:
+                _backoff.pop(scope, None)
         # stable port slots by sorted account order (NAT mapping stability)
         from core.credentials_manager import credentials
         all_scopes = sorted(a["scope"] for a in credentials.list_twilio_accounts())
         for scope in desired - running:
+            hold = _backoff.get(scope)
+            if hold and time.time() < hold["until"]:
+                continue
             _start_endpoint(scope, all_scopes.index(scope) if scope in all_scopes else 0)
 
 
@@ -152,7 +178,7 @@ def _start_endpoint(scope, slot):
     )
     t = threading.Thread(target=ep.serve_forever, daemon=True, name=f"twilio-sip-{scope}")
     t.start()
-    _endpoints[scope] = {"endpoint": ep, "thread": t}
+    _endpoints[scope] = {"endpoint": ep, "thread": t, "started": time.time()}
     logger.info(f"[TWILIO] registering account '{scope}' (SIP {_SIP_PORT_BASE + slot})")
 
 

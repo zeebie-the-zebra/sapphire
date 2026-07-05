@@ -585,12 +585,14 @@ class SipEndpoint:
             self._send(self._reg_msg(challenge, auth_header), self.registrar)
             resp = self._reg_wait()
             if resp is None:
+                logger.error(f"[TWILIO] ({self.user}) REGISTER got no response "
+                             "(network/DNS, or the Twilio domain/credential hasn't propagated yet)")
                 return False
             start, h = resp
             code = int(start.split(" ", 2)[1])
             if code in (401, 407):
                 if challenge is not None:
-                    logger.error("[TWILIO] SIP credentials rejected")
+                    logger.error(f"[TWILIO] ({self.user}) SIP credentials rejected")
                     return False
                 key = "www-authenticate" if code == 401 else "proxy-authenticate"
                 challenge = _challenge(h.get(key, ""))
@@ -603,6 +605,9 @@ class SipEndpoint:
             if 200 <= code < 300:
                 self._registered = True
                 return True
+            logger.error(f"[TWILIO] ({self.user}) REGISTER rejected: {start.strip()} "
+                         "(403 right after setup usually = credential still propagating, "
+                         "or username/password mismatch)")
             return False
         return False
 
