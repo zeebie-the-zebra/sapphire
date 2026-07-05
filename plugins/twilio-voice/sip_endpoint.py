@@ -4,9 +4,16 @@ Registers OUTBOUND to a Twilio SIP domain (no open ports — the registration +
 keepalive holds the NAT pinhole), answers incoming INVITEs, and hands each call to
 an `on_call(caller, RtpSession)` callback. All the hard-won 2026-07-02 findings are
 baked in: STUN public address in Contact/SDP, full Via-stack echo, Min-Expires 600,
-407 Proxy-Auth, stale-binding wipe. UDP transport (SIP ALG must be off; TLS lands
-in Stage 2 via the _poll_sip/_send seam — flow reuse proven by tmp/spike_sip_tls.py
-2026-07-05). Pure stdlib SIP + numpy-free here (codec lives in codec.py).
+407 Proxy-Auth, stale-binding wipe. Pure stdlib SIP + numpy-free here (codec lives
+in codec.py).
+
+Transport (Stage 2, 2026-07-05): TLS by default — one client-initiated flow to
+domain:5061 carries ALL signaling (flow reuse proven by tmp/spike_sip_tls.py).
+SNI by hostname (IP = invisible 403), Content-Length stream framing, CRLF
+ping-pong keepalive, inline reconnect-on-EOF. A router's SIP ALG can't read the
+stream, so it's irrelevant — no edge punching, no SIP STUN, no UA hole-punch.
+UDP stays as the per-account legacy fallback (needs SIP ALG off). Media is
+plain μ-law RTP over UDP on both (Twilio's supported default; SRTP not needed).
 
 Serve-loop refactor (Stage 1, 2026-07-05): the serve thread is the sole SIP
 reader and never blocks on a call — dispatch in _dispatch(), per-call media
@@ -26,6 +33,7 @@ import random
 import re
 import select
 import socket
+import ssl
 import struct
 import threading
 import time
@@ -44,15 +52,16 @@ _CALL_MAX_SEC = 7200           # hard 2h backstop against a runaway/wedged call
 STUN_MAGIC = 0x2112A442
 _PTIME = 0.02          # 20ms RTP frames
 
-# Twilio US1 SIP signaling edges (docs: 54.172.60.0/23, gateways .0-.3). A
-# restricted-cone NAT only passes inbound from addresses we've SENT to — the
-# registrar pinhole covers one edge, but INVITEs arrive from ANY of them.
-# CRLF keepalives (RFC 5626 convention) hold a pinhole to each. Found live
-# 2026-07-04: router demoted the mapping to restricted after restart churn —
-# green keepalives, Twilio error 32011 "Request timeout" on every INVITE.
+# Twilio US1 SIP signaling edges (docs: 54.172.60.0/23, gateways .0-.3) —
+# UDP transport only. A restricted-cone NAT only passes inbound from addresses
+# we've SENT to — the registrar pinhole covers one edge, but INVITEs arrive
+# from ANY of them. CRLF keepalives (RFC 5626 convention) hold a pinhole to
+# each. Found live 2026-07-04: router demoted the mapping to restricted after
+# restart churn — green keepalives, Twilio 32011 on every INVITE.
 _TWILIO_EDGES = [("54.172.60.0", 5060), ("54.172.60.1", 5060),
                  ("54.172.60.2", 5060), ("54.172.60.3", 5060)]
 _EDGE_PUNCH_SEC = 30
+_TLS_PING_SEC = 25             # CRLF ping cadence on the TLS flow (Twilio's NAT recipe)
 
 
 def _rand_hex(n=16):
@@ -245,7 +254,8 @@ class RtpSession:
 
 class SipEndpoint:
     def __init__(self, domain, user, password, on_call,
-                 sip_port=5062, rtp_port=10080, expires=600, accept_call=None):
+                 sip_port=5062, rtp_port=10080, expires=600, accept_call=None,
+                 transport="tls"):
         self.domain = domain
         self.user = user
         self.password = password
@@ -268,6 +278,10 @@ class SipEndpoint:
         self.pub_sip = None
         self.contact = None
         self._active_call = None   # {"session", "dialog", "call_id", "caller"} or None
+        self.tls = (transport == "tls")
+        self._buf = b""                     # TLS stream reassembly buffer
+        self._sip_lock = threading.Lock()   # SSL objects aren't safe for concurrent
+        self._reconnecting = False          # read/write — serialize all flow I/O
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def serve_forever(self):
@@ -280,27 +294,39 @@ class SipEndpoint:
         long calls and a second INVITE always gets a clean 486. Transport
         seam: SIP reads go through _poll_sip(), writes through _send() —
         Stage 2 (TLS) swaps their internals."""
-        self.sip = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sip.bind(("0.0.0.0", self.sip_port))
         self.rtp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.rtp.bind(("0.0.0.0", self.rtp_port))
-        self.registrar = (socket.gethostbyname(self.domain), 5060)
-        pub = stun_public_addr(self.sip)
-        ip, port = pub if pub else (self.ip, self.sip_port)
-        if not pub:
-            logger.warning("[TWILIO] STUN failed — using LAN addr (calls will fail behind NAT)")
-        self.pub_sip = (ip, port)
-        self.contact = f"<sip:{self.user}@{ip}:{port}>"
+        if self.tls:
+            # Signaling rides one client-initiated TLS flow — no local SIP bind,
+            # no SIP STUN (the flow itself holds the NAT path). Media stays
+            # UDP + STUN below, unchanged.
+            self.registrar = (self.domain, 5061)   # synthetic addr for logs; _send ignores it
+            if not self._tls_connect():
+                logger.error("[TWILIO] TLS connect failed — voice endpoint not listening")
+                return                              # fast death -> daemon backoff ladder
+        else:
+            self.sip = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sip.bind(("0.0.0.0", self.sip_port))
+            self.registrar = (socket.gethostbyname(self.domain), 5060)
+            pub = stun_public_addr(self.sip)
+            ip, port = pub if pub else (self.ip, self.sip_port)
+            if not pub:
+                logger.warning("[TWILIO] STUN failed — using LAN addr (calls will fail behind NAT)")
+            self.pub_sip = (ip, port)
+            self.contact = f"<sip:{self.user}@{ip}:{port}>"
 
-        self._deregister_all()
+        self._deregister_all()   # over TLS this also wipes stale UDP bindings (32209 guard)
         if not self._register():
             logger.error("[TWILIO] SIP registration failed — voice endpoint not listening")
             return
-        logger.info(f"[TWILIO] registered as {self.user}@{self.domain} (public {ip}:{port})")
+        logger.info(f"[TWILIO] registered as {self.user}@{self.domain} "
+                    f"({'TLS flow' if self.tls else 'UDP public'} "
+                    f"{self.pub_sip[0]}:{self.pub_sip[1]})")
         self._punch_edges()
 
+        punch_sec = _TLS_PING_SEC if self.tls else _EDGE_PUNCH_SEC
         next_reg = time.time() + self.expires / 2
-        next_punch = time.time() + _EDGE_PUNCH_SEC
+        next_punch = time.time() + punch_sec
         while not self._stop.is_set():
             try:
                 if time.time() >= next_reg:
@@ -308,7 +334,7 @@ class SipEndpoint:
                     next_reg = time.time() + self.expires / 2
                 if time.time() >= next_punch:
                     self._punch_edges()
-                    next_punch = time.time() + _EDGE_PUNCH_SEC
+                    next_punch = time.time() + punch_sec
                 for start, h, body, addr in self._poll_sip(0.5):
                     self._dispatch(start, h, body, addr)
             except Exception as e:
@@ -336,35 +362,128 @@ class SipEndpoint:
                 pass
 
     def _keepalive_register(self):
-        # NAT-drift guard: routers re-map long-lived UDP bindings (proven live
+        # NAT-drift guard (UDP only — a TLS flow is connection-oriented, drift
+        # can't happen): routers re-map long-lived UDP bindings (proven live
         # 2026-07-03: green keepalives, unroutable INVITEs). Re-STUN each
         # keepalive; if the public mapping moved, wipe the stale binding and
         # register the new Contact. STUN failure -> keep the old contact
         # (never clobber with a LAN addr). NOTE: STUN reads self.sip on this
         # (serve) thread — a SIP message landing in that ~3s window is eaten;
         # rare, and the inactivity backstop covers a lost mid-call BYE.
-        try:
-            pub = stun_public_addr(self.sip)
-            if pub and pub != self.pub_sip:
-                logger.warning(f"[TWILIO] public mapping moved {self.pub_sip} -> {pub} — re-binding")
-                self.pub_sip = pub
-                self.contact = f"<sip:{self.user}@{pub[0]}:{pub[1]}>"
-                self._deregister_all()
-        except Exception as e:
-            logger.debug(f"[TWILIO] keepalive STUN check failed: {e}")
+        if not self.tls:
+            try:
+                pub = stun_public_addr(self.sip)
+                if pub and pub != self.pub_sip:
+                    logger.warning(f"[TWILIO] public mapping moved {self.pub_sip} -> {pub} — re-binding")
+                    self.pub_sip = pub
+                    self.contact = f"<sip:{self.user}@{pub[0]}:{pub[1]}>"
+                    self._deregister_all()
+            except Exception as e:
+                logger.debug(f"[TWILIO] keepalive STUN check failed: {e}")
         ok = self._register()
         logger.info(f"[TWILIO] keepalive re-register {'ok' if ok else 'FAILED'} — {self.user}@{self.domain}")
 
     def _poll_sip(self, timeout):
-        """Transport seam: return [(start, headers, body, addr)] — at most one
-        message for UDP. Stage 2's TlsTransport replaces these internals with
-        stream framing on the registered flow."""
-        r, _, _ = select.select([self.sip], [], [], timeout)
-        if not r:
+        """Transport seam: return [(start, headers, body, addr)]. UDP: at most
+        one datagram. TLS: every complete message framed out of the stream
+        buffer; a dead flow triggers an inline reconnect (an active call's RTP
+        keeps flowing meanwhile) — if that fails, the endpoint exits and the
+        daemon's backoff ladder takes over."""
+        if not self.tls:
+            r, _, _ = select.select([self.sip], [], [], timeout)
+            if not r:
+                return []
+            data, addr = self.sip.recvfrom(65535)
+            start, h, body = _parse(data)
+            return [(start, h, body, addr)]
+        msgs = self._tls_read(timeout)
+        if msgs is None:                     # flow died (EOF/reset)
+            if not self._reconnecting:
+                self._reconnecting = True
+                try:
+                    if not self._tls_reconnect():
+                        self._stop.set()
+                finally:
+                    self._reconnecting = False
+            else:
+                # Reconnect's own register polls land here if the fresh flow
+                # dies too — EOF is sticky, don't hot-spin _reg_wait.
+                self._stop.wait(0.1)
             return []
-        data, addr = self.sip.recvfrom(65535)
-        start, h, body = _parse(data)
-        return [(start, h, body, addr)]
+        return msgs
+
+    # ── TLS transport (Stage 2) ──────────────────────────────────────────────
+    def _tls_connect(self):
+        """Open the TLS flow to the SIP domain. Hostname (not IP) is
+        load-bearing: no SNI = invisible 403 that never reaches the console."""
+        try:
+            ctx = ssl.create_default_context()
+            raw = socket.create_connection((self.domain, 5061), timeout=10)
+            self.sip = ctx.wrap_socket(raw, server_hostname=self.domain)
+            self._buf = b""
+            lip, lport = self.sip.getsockname()[:2]
+            self.pub_sip = (lip, lport)
+            self.contact = f"<sip:{self.user}@{lip}:{lport};transport=tls>"
+            logger.info(f"[TWILIO] TLS flow up ({self.sip.version()}) to "
+                        f"{self.domain}:5061, local {lip}:{lport}")
+            return True
+        except Exception as e:
+            logger.error(f"[TWILIO] TLS connect to {self.domain}:5061 failed: {e}")
+            return False
+
+    def _tls_reconnect(self):
+        """The flow died: reconnect + re-register inline on the serve thread.
+        An active call's media is a separate UDP socket, so a SIP blip mid-call
+        is invisible to the caller."""
+        logger.warning("[TWILIO] TLS flow lost — reconnecting")
+        try:
+            self.sip.close()
+        except Exception:
+            pass
+        for attempt in range(3):
+            if self._stop.is_set():
+                return False
+            if self._tls_connect():
+                self._deregister_all()   # wipe the dead flow's binding first (32209)
+                if self._register():
+                    logger.info("[TWILIO] TLS flow re-established + re-registered")
+                    return True
+            self._stop.wait(2 * (attempt + 1))
+        logger.error("[TWILIO] TLS reconnect failed — endpoint exiting (daemon will retry)")
+        return False
+
+    def _tls_read(self, timeout):
+        """Pull bytes off the flow, frame complete SIP messages by
+        Content-Length, swallow CRLF keepalive pongs. Returns a list, or None
+        when the flow is dead. recv is capped at 0.5s so cross-thread _send()
+        callers never wait long on the I/O lock."""
+        with self._sip_lock:
+            self.sip.settimeout(min(timeout, 0.5))
+            try:
+                data = self.sip.recv(65535)
+                if not data:
+                    return None                       # EOF
+                self._buf += data
+                while self.sip.pending():             # drain decrypted leftovers
+                    self._buf += self.sip.recv(65535)
+            except (socket.timeout, ssl.SSLWantReadError):
+                pass
+            except OSError:
+                return None                           # reset / SSL failure
+        out = []
+        while True:
+            while self._buf.startswith(b"\r\n"):      # keepalive pong
+                self._buf = self._buf[2:]
+            if b"\r\n\r\n" not in self._buf:
+                return out
+            head, rest = self._buf.split(b"\r\n\r\n", 1)
+            m = re.search(rb"content-length\s*:\s*(\d+)", head, re.I)
+            cl = int(m.group(1)) if m else 0
+            if len(rest) < cl:
+                return out                            # body still in flight
+            self._buf = rest[cl:]
+            start, h, body = _parse(head + b"\r\n\r\n" + rest[:cl])
+            out.append((start, h, body, self.registrar))
 
     def stop(self):
         """Signal the serve thread to exit; it deregisters on its way out.
@@ -372,8 +491,17 @@ class SipEndpoint:
         self._stop.set()
 
     def _punch_edges(self):
-        """Hold NAT pinholes open to every Twilio signaling edge (see
-        _TWILIO_EDGES). Write-only — never reads the socket."""
+        """UDP: hold NAT pinholes open to every Twilio signaling edge (see
+        _TWILIO_EDGES). TLS: CRLF ping down the flow (Twilio's documented
+        TCP/TLS keepalive; the pong is swallowed by _tls_read). Write-only —
+        never reads the socket."""
+        if self.tls:
+            try:
+                with self._sip_lock:
+                    self.sip.sendall(b"\r\n\r\n")
+            except OSError:
+                pass
+            return
         targets = list(_TWILIO_EDGES)
         if getattr(self, "registrar", None):
             targets.append(self.registrar)
@@ -464,7 +592,8 @@ class SipEndpoint:
         # (if Twilio passes them through — the daemon logs which).
         session.x_header = h.get("x-sapphire-call")
         session.start()
-        ua = _ua_public_addr(h)
+        # TLS: ACK/BYE arrive down the flow — no direct UA path, no punch.
+        ua = None if self.tls else _ua_public_addr(h)
         if ua:
             # NAT hole-punch: open our router's path from the far UA's host so its
             # direct end-to-end ACK/BYE can reach this socket. Re-punched by the
@@ -501,7 +630,7 @@ class SipEndpoint:
         try:
             while session._alive.is_set() and not self._stop.is_set():
                 now = time.time()
-                if now - last_punch > 15:
+                if not self.tls and now - last_punch > 15:
                     if dialog.get("ua"):
                         try:
                             self.sip.sendto(b"\r\n\r\n", dialog["ua"])
@@ -539,7 +668,11 @@ class SipEndpoint:
 
     # ── SIP message helpers ──────────────────────────────────────────────────
     def _send(self, text, addr):
-        self.sip.sendto(text.encode(), addr)
+        if self.tls:
+            with self._sip_lock:     # cross-thread writes (media thread's BYE)
+                self.sip.sendall(text.encode())
+        else:
+            self.sip.sendto(text.encode(), addr)
 
     def _reply(self, code, reason, req_h, addr, sdp=None):
         to = req_h.get("to", "")
@@ -561,13 +694,21 @@ class SipEndpoint:
         lines.append(f"Content-Length: {len(body)}")
         self._send("\r\n".join(lines) + "\r\n\r\n" + body, addr)
 
+    def _via(self):
+        """Via line for requests WE originate (REGISTER/BYE), per transport."""
+        if self.tls:
+            return (f"Via: SIP/2.0/TLS {self.pub_sip[0]}:{self.pub_sip[1]}"
+                    f";branch=z9hG4bK{_rand_hex(12)};rport")
+        return (f"Via: SIP/2.0/UDP {self.ip}:{self.sip_port}"
+                f";branch=z9hG4bK{_rand_hex(12)};rport")
+
     def _send_bye(self, dialog):
         h, addr = dialog["h"], dialog["addr"]
         target = self._contact_uri(h) or f"sip:{self.user}@{self.domain}"
         self.cseq += 1
         lines = [
             f"BYE {target} SIP/2.0",
-            f"Via: SIP/2.0/UDP {self.ip}:{self.sip_port};branch=z9hG4bK{_rand_hex(12)};rport",
+            self._via(),
             # In-dialog requests ride the Record-Route set from the INVITE — without
             # it the proxy has no dialog context and 481s the BYE (spike run 2-3).
             *[f"Route: {r}" for r in (h.get("_rrs") or [])],
@@ -586,7 +727,7 @@ class SipEndpoint:
         exp = 0 if wipe else self.expires
         lines = [
             f"REGISTER {uri} SIP/2.0",
-            f"Via: SIP/2.0/UDP {self.ip}:{self.sip_port};branch=z9hG4bK{_rand_hex(12)};rport",
+            self._via(),
             "Max-Forwards: 70",
             f"From: <sip:{self.user}@{self.domain}>;tag={self.from_tag}",
             f"To: <sip:{self.user}@{self.domain}>",

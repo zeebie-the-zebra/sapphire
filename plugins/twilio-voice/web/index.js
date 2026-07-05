@@ -58,6 +58,14 @@ function renderNumberEditor(body, scope, item, helpers) {
             <div class="am-hint">The E.164 number, for display and call-event payloads.</div>
         </div>
         <div class="am-group">
+            <label for="twv-transport">SIP Transport</label>
+            <select id="twv-transport">
+                <option value="tls"${(s.transport || 'tls') === 'tls' ? ' selected' : ''}>TLS (encrypted — works behind any router)</option>
+                <option value="udp"${s.transport === 'udp' ? ' selected' : ''}>UDP (legacy — needs router SIP ALG off)</option>
+            </select>
+            <div class="am-hint">Takes effect on the next (de)register cycle — toggle the number's Realtime rule off/on to apply now.</div>
+        </div>
+        <div class="am-group">
             <label for="twv-greeting">Greeting</label>
             <input type="text" id="twv-greeting" value="${s.greeting || ''}" placeholder="Hey, this is Sapphire.">
             <div class="am-hint">Spoken on pickup. A Realtime rule's greeting overrides this per-rule.</div>
@@ -91,6 +99,7 @@ function renderNumberEditor(body, scope, item, helpers) {
             sip_user: body.querySelector('#twv-user').value.trim(),
             sip_pass: body.querySelector('#twv-pass').value.trim(),
             number: body.querySelector('#twv-number').value.trim(),
+            transport: body.querySelector('#twv-transport').value,
             greeting: body.querySelector('#twv-greeting').value.trim(),
             account_sid: body.querySelector('#twv-sid').value.trim(),
             auth_token: body.querySelector('#twv-token').value.trim(),

@@ -17,7 +17,7 @@ def list_accounts(credentials=None, **_):
 
 def save_account(body=None, credentials=None, **_):
     """POST — create/update an account.
-    Body: {scope, sip_domain, sip_user, sip_pass, number?, chat?, greeting?}.
+    Body: {scope, sip_domain, sip_user, sip_pass, number?, chat?, greeting?, transport?}.
     Empty sip_pass on update keeps the stored one (don't clobber with blank)."""
     body = body or {}
     scope = (body.get("scope") or "").strip()
@@ -39,7 +39,8 @@ def save_account(body=None, credentials=None, **_):
         chat=(body.get("chat") or "default").strip(),
         greeting=(body.get("greeting") or "").strip(),
         account_sid=(body.get("account_sid") or "").strip(),
-        auth_token=auth_token)
+        auth_token=auth_token,
+        transport=(body.get("transport") or "tls").strip())
     return {"ok": bool(ok)}
 
 

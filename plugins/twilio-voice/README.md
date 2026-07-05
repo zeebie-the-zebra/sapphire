@@ -23,7 +23,8 @@ holds the pinhole). One live call per number; multiple numbers run concurrently.
    ```
 
    Then open your number → Voice Configuration → point "A call comes in" at the bin.
-6. **Router: turn SIP ALG OFF.** The #1 silent killer. No port forwarding needed.
+6. **Router: nothing.** Signaling is TLS (encrypted) by default, so router SIP
+   ALG/passthrough settings don't matter. No port forwarding needed either.
 
 Twilio config changes can take a few minutes to propagate.
 
@@ -70,4 +71,7 @@ different personas, voices, and chats per line. Concurrent-call cap is the
   that placed the call.
 - If registration drops (IP change etc.) it self-heals within ~30s; endpoint
   threads are watched and restarted by the reconcile loop (~12s).
-- SIP passthrough/ALG on the router breaks things in weird ways. Off. Always.
+- SIP signaling is **TLS by default** (verified working with router SIP
+  ALG/passthrough ON — the router can't read the stream, so it can't break it).
+  The per-account **SIP Transport** setting offers legacy UDP; only use it if
+  TLS can't connect, and turn router SIP ALG OFF if you do.

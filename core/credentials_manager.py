@@ -898,12 +898,13 @@ class CredentialsManager:
             'greeting': acct.get('greeting', ''),
             'account_sid': acct.get('account_sid', ''),
             'auth_token': self._unscramble(acct.get('auth_token', '')),
+            'transport': acct.get('transport', 'tls'),
         }
 
     def set_twilio_account(self, scope: str, sip_domain: str, sip_user: str,
                            sip_pass: str, number: str = '', chat: str = 'default',
                            greeting: str = '', account_sid: str = '',
-                           auth_token: str = '') -> bool:
+                           auth_token: str = '', transport: str = 'tls') -> bool:
         """Create/update a Twilio account. sip_pass and auth_token (the REST
         API secret for outbound calls) are scrambled before save."""
         with self._lock:
@@ -919,6 +920,7 @@ class CredentialsManager:
                     'greeting': greeting,
                     'account_sid': account_sid,
                     'auth_token': self._scramble(auth_token) if auth_token else '',
+                    'transport': transport if transport in ('tls', 'udp') else 'tls',
                 }
                 if not self._save():
                     logger.error(f"Failed to persist twilio account '{scope}'")
@@ -960,6 +962,7 @@ class CredentialsManager:
                 'configured': bool(acct.get('sip_domain') and acct.get('sip_user') and acct.get('sip_pass')),
                 'account_sid': acct.get('account_sid', ''),
                 'rest_configured': bool(acct.get('account_sid') and acct.get('auth_token')),
+                'transport': acct.get('transport', 'tls'),
             })
         return result
 

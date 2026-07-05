@@ -10,7 +10,9 @@ account's configured chat (per-chat persona = call behavior; per-task prompt
 overlay deferred). `call_ended` emits for post-call automation tasks.
 
 No open ports: outbound SIP registration + keepalive holds the NAT pinhole
-(proven 2026-07-02). UDP transport (router SIP-ALG must be off); TLS is later.
+(proven 2026-07-02). Signaling is TLS by default (Stage 2, 2026-07-05 — one
+client-initiated flow, router SIP-ALG irrelevant); UDP stays a per-account
+fallback in the account editor. Media is μ-law RTP over UDP on both.
 """
 import base64
 import json
@@ -180,6 +182,7 @@ def _start_endpoint(scope, slot):
         on_call=lambda caller, session, s=scope: _on_call(s, caller, session),
         sip_port=_SIP_PORT_BASE + slot, rtp_port=_RTP_PORT_BASE + slot * 2,
         accept_call=lambda caller, s=scope: _outbound_fresh(s) or _rule_for(s, caller) is not None,
+        transport=acct.get("transport") or "tls",
     )
     t = threading.Thread(target=ep.serve_forever, daemon=True, name=f"twilio-sip-{scope}")
     t.start()
