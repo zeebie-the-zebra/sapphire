@@ -214,6 +214,7 @@ export default {
                 const result = await res.json();
                 const lines = [
                     ...result.repaired.map(r => `✓ ${r.file} — ${r.detail}`),
+                    ...(result.skipped || []).map(r => `⏸ ${r.file} — ${r.detail}`),
                     ...result.failed.map(r => `✗ ${r.file} — ${r.detail}`),
                 ];
                 integOutput.innerHTML = _badList(lines) + `<div style="margin-top:6px">${_escapeHtml(result.message)}</div>`;

@@ -47,10 +47,48 @@ def test_verify_missing_manifest_is_graceful(tmp_path, monkeypatch):
     assert r["total"] == 0
 
 
-def test_repair_nothing_to_do_on_clean_tree():
+def test_repair_nothing_to_do_on_clean_tree(tmp_path, monkeypatch):
+    """repair() no-ops when the manifest matches. HERMETIC — runs against a tmp
+    manifest that genuinely matches, so repair() can never touch the real repo.
+
+    NEVER let repair() see the real manifest from a test: on a dev checkout the
+    release manifest mismatches by design, and repair() then git-checkouts every
+    listed file — on 2026-07-04 and 2026-07-05 this test (pre-fix) silently
+    reverted uncommitted core edits mid-session."""
+    real = "VERSION"
+    manifest = {"version": "test",
+                "files": {real: integrity._hash_file(integrity.ROOT / real)}}
+    mpath = tmp_path / "core_manifest.json"
+    mpath.write_text(integrity.manifest_json(manifest))
+    monkeypatch.setattr(integrity, "MANIFEST_PATH", mpath)
+
     r = integrity.repair()
-    assert r["repaired"] == [] and r["failed"] == []
+    assert r["repaired"] == [] and r["failed"] == [] and r["skipped"] == []
     assert r["reverify"]["ok"] is True
+
+
+def test_repair_refuses_uncommitted_edits(tmp_path, monkeypatch):
+    """The load-bearing guard: files with uncommitted local changes are SKIPPED,
+    never checked out, no matter who calls repair(). Hermetic — git access is
+    stubbed, so nothing real is read or written."""
+    real = "VERSION"
+    manifest = {"version": "test", "files": {
+        real: "0" * 64,                       # mismatched -> repair candidate
+    }}
+    mpath = tmp_path / "core_manifest.json"
+    mpath.write_text(integrity.manifest_json(manifest))
+    monkeypatch.setattr(integrity, "MANIFEST_PATH", mpath)
+    monkeypatch.setattr(integrity, "_is_git_install", lambda: True)
+    monkeypatch.setattr(integrity, "_dirty_files", lambda rels: set(rels))  # all dirty
+    checkouts = []
+    monkeypatch.setattr(integrity, "_repair_git",
+                        lambda rel: checkouts.append(rel) or (True, "restored"))
+
+    r = integrity.repair()
+    assert checkouts == []                    # git checkout NEVER ran
+    assert [s["file"] for s in r["skipped"]] == [real]
+    assert r["repaired"] == []
+    assert "refused 1" in r["message"]
 
 
 def test_core_manifest_is_current():

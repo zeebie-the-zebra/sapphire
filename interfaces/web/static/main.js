@@ -142,6 +142,22 @@ async function init() {
                     ui.showToast(`Plugin '${err.plugin}': ${err.error}${hint}`, isDeps ? 'warning' : 'error', isDeps ? 0 : 10000);
                 }
             }
+            // Core integrity: yell once per browser session if the install doesn't
+            // match its manifest. Check-and-toast ONLY — repair is a human-only
+            // button on Settings > System, never automatic.
+            if (!sessionStorage.getItem('integrity-warned')) {
+                fetch('/api/system/integrity', { credentials: 'same-origin' })
+                    .then(r => r.ok ? r.json() : null)
+                    .then(rep => {
+                        if (rep?.available && rep.ok === false) {
+                            sessionStorage.setItem('integrity-warned', '1');
+                            ui.showToast(
+                                `Core files don't match v${rep.version}: ${rep.mismatched.length} modified, ${rep.missing.length} missing. See Settings → System.`,
+                                'warning', 12000);
+                        }
+                    })
+                    .catch(() => {});
+            }
             // Discover plugin apps — promote nav apps, show Apps grid if others exist
             try {
                 const appsRes = await fetch('/api/apps');

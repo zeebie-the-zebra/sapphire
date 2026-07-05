@@ -144,8 +144,38 @@ def _repair_git(rel: str):
         return False, f"{type(e).__name__}: {e}"
 
 
-def repair(targets=None) -> dict:
+def _dirty_files(rels):
+    """Subset of `rels` carrying UNCOMMITTED local changes (index or worktree),
+    per `git status --porcelain`. Fail-SAFE: any git hiccup reports ALL files
+    dirty, so repair refuses them — 'refused to fix' beats 'silently destroyed
+    in-progress work'."""
+    try:
+        r = subprocess.run(
+            ["git", "status", "--porcelain", "--"] + list(rels), cwd=str(ROOT),
+            capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+        )
+        if r.returncode != 0:
+            return set(rels)
+        dirty = set()
+        for line in r.stdout.splitlines():
+            p = line[3:].strip().strip('"') if len(line) > 3 else ""
+            if " -> " in p:                      # rename entries: "old -> new"
+                p = p.split(" -> ", 1)[1].strip('"')
+            if p:
+                dirty.add(p)
+        return dirty & set(rels)
+    except Exception:
+        return set(rels)
+
+
+def repair(targets=None, force=False) -> dict:
     """Restore only the offending files, with per-file status + a final re-verify.
+
+    NEVER touches a file with uncommitted local changes unless force=True —
+    repair fixes drift and corruption, it does not eat in-progress work. This
+    guard is in repair() itself, not the callers, so NO invoker (route, test,
+    tool, future code) can mass-revert uncommitted edits. (2026-07-05 incident:
+    a test called repair() on a dev tree and git-reverted staged work.)
 
     git installs: `git checkout HEAD -- <file>`. If files are STILL mismatched after
     (HEAD itself is behind), the answer is to re-run the updater, surfaced in the message.
@@ -153,10 +183,22 @@ def repair(targets=None) -> dict:
     before = verify()
     bad = list(targets) if targets is not None else (before["missing"] + before["mismatched"])
     if not bad:
-        return {"repaired": [], "failed": [], "reverify": before,
+        return {"repaired": [], "failed": [], "skipped": [], "reverify": before,
                 "message": "Nothing to repair — install matches the manifest."}
 
     git = _is_git_install()
+    skipped = []
+    if git and not force:
+        dirty = _dirty_files(bad)
+        if dirty:
+            skipped = [{"file": rel, "detail": "uncommitted local edits — refusing to overwrite"}
+                       for rel in sorted(dirty)]
+            bad = [rel for rel in bad if rel not in dirty]
+
+    # Every repair run is loud — file counts up front, before anything is touched.
+    logger.warning(f"[INTEGRITY] repair invoked: restoring {len(bad)} file(s)"
+                   + (f", refusing {len(skipped)} with uncommitted local edits" if skipped else ""))
+
     repaired, failed = [], []
     for rel in bad:
         if git:
@@ -166,8 +208,11 @@ def repair(targets=None) -> dict:
         (repaired if ok else failed).append({"file": rel, "detail": detail})
 
     after = verify()
-    msg = f"Repaired {len(repaired)}, failed {len(failed)}. Now {after['matched']}/{after['total']} match."
-    if not after["ok"] and git and not failed:
+    msg = f"Repaired {len(repaired)}, failed {len(failed)}"
+    if skipped:
+        msg += f", refused {len(skipped)} (uncommitted local edits)"
+    msg += f". Now {after['matched']}/{after['total']} match."
+    if not after["ok"] and git and not failed and not skipped:
         msg += " Some files still differ — your local commit may be behind; re-run the updater."
     logger.info(f"[INTEGRITY] repair: {msg}")
-    return {"repaired": repaired, "failed": failed, "reverify": after, "message": msg}
+    return {"repaired": repaired, "failed": failed, "skipped": skipped, "reverify": after, "message": msg}
