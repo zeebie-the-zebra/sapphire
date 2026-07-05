@@ -1082,6 +1082,14 @@ class ChatSessionManager:
                             f"chat was deleted. Dropping save to avoid resurrecting it."
                         )
                         return
+                # Write-through (2026-07-05): the operator may be VIEWING the
+                # override's chat (watching a live call). Keep the in-memory
+                # singleton in sync so /api/history serves fresh turns and a
+                # later switch-away can't clobber the row with a stale snapshot
+                # (the mid-call-amnesia + vanishing-bubble root cause).
+                if is_override and self.current_chat is not None \
+                        and eff_name == self.active_chat_name:
+                    self.current_chat.messages = [dict(m) for m in eff_chat.messages]
                 logger.debug(f"Saved chat '{eff_name}' ({len(eff_chat.messages)} messages)")
             except Exception as e:
                 logger.error(f"Failed to save chat '{eff_name}': {e}")
@@ -1743,11 +1751,14 @@ class ChatSessionManager:
             logger.error(f"clear_named_chat_messages failed for '{chat_name}': {e}")
             return False
 
-    def reap_ephemeral_chats(self, now_epoch: float, source: str = "twilio") -> list:
-        """Delete expired ephemeral chats. TRIPLE-GUARDED — a chat is deleted ONLY if
+    def reap_ephemeral_chats(self, now_epoch: float, source: str = "twilio",
+                             exclude: Optional[set] = None) -> list:
+        """Delete expired ephemeral chats. GUARDED — a chat is deleted ONLY if
         ALL hold: (a) settings['ephemeral_source'] == source, (b) it has a recorded
-        ephemeral_last_call, (c) idle longer than settings['ephemeral_ttl_min'], and
-        it is NOT the active chat. A chat missing the marker is NEVER touched.
+        ephemeral_last_call, (c) idle longer than settings['ephemeral_ttl_min'],
+        (d) it is NOT the active chat, and (e) it is not in `exclude` (the daemon
+        passes chats with a LIVE call — a long call must never lose its chat
+        mid-conversation). A chat missing the marker is NEVER touched.
         Returns deleted names."""
         self._ensure_db()
         to_delete = []
@@ -1756,6 +1767,8 @@ class ChatSessionManager:
                 for row in conn.execute("SELECT name, settings FROM chats").fetchall():
                     if row['name'] == self.active_chat_name:
                         continue
+                    if exclude and row['name'] in exclude:
+                        continue                      # live call in progress
                     try:
                         s = json.loads(row['settings'])
                     except Exception:

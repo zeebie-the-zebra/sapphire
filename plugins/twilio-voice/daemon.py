@@ -112,10 +112,15 @@ def _reconcile_loop():
 
 
 def _reap_ephemeral():
-    """Delete expired per-caller ephemeral chats (triple-guarded in history)."""
+    """Delete expired per-caller ephemeral chats (guarded in history). Chats
+    with a LIVE call are excluded — a call longer than its TTL must never lose
+    its chat mid-conversation (the TTL stamp is at call START; _call_ended
+    re-stamps at hangup so the TTL means 'after their last call')."""
     try:
         from core.api_fastapi import get_system
-        get_system().llm_chat.session_manager.reap_ephemeral_chats(time.time())
+        system = get_system()
+        live = set((getattr(system, "_twilio_active_calls", None) or {}).keys())
+        system.llm_chat.session_manager.reap_ephemeral_chats(time.time(), exclude=live)
     except Exception as e:
         logger.debug(f"[TWILIO] reap skipped: {e}")
 
@@ -551,6 +556,16 @@ def _resolve_chat(system, scope, caller, task):
 def _call_ended(scope, caller, chat, ephemeral, reason, duration_sec, turns,
                 direction="inbound", origin_chat="", goal=""):
     """Fire the call_ended EVENT (user tasks) + the twilio_call_ended HOOK (plugins)."""
+    if ephemeral and chat:
+        # Re-stamp so the TTL means what the trigger help text says — the chat
+        # "survives N minutes after their LAST call" — not N minutes after call
+        # START (a call longer than its TTL would be reaped as it ends).
+        try:
+            from core.api_fastapi import get_system
+            get_system().llm_chat.session_manager.set_named_chat_settings(
+                chat, {"ephemeral_last_call": time.time()})
+        except Exception as e:
+            logger.debug(f"[TWILIO] last-call re-stamp failed: {e}")
     from core.credentials_manager import credentials
     number = credentials.get_twilio_account(scope).get("number", "")
     # chat_target key = the call's chat, so a call_ended task with "chat from payload"

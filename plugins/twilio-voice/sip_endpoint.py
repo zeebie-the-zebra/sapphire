@@ -4,8 +4,14 @@ Registers OUTBOUND to a Twilio SIP domain (no open ports — the registration +
 keepalive holds the NAT pinhole), answers incoming INVITEs, and hands each call to
 an `on_call(caller, RtpSession)` callback. All the hard-won 2026-07-02 findings are
 baked in: STUN public address in Contact/SDP, full Via-stack echo, Min-Expires 600,
-407 Proxy-Auth, stale-binding wipe. UDP transport (SIP ALG must be off; TLS is a
-later milestone). Pure stdlib SIP + numpy-free here (codec lives in codec.py).
+407 Proxy-Auth, stale-binding wipe. UDP transport (SIP ALG must be off; TLS lands
+in Stage 2 via the _poll_sip/_send seam — flow reuse proven by tmp/spike_sip_tls.py
+2026-07-05). Pure stdlib SIP + numpy-free here (codec lives in codec.py).
+
+Serve-loop refactor (Stage 1, 2026-07-05): the serve thread is the sole SIP
+reader and never blocks on a call — dispatch in _dispatch(), per-call media
+pump + teardown in _media_loop(), conversation in _run_on_call(). See
+tmp/twilio-serve-loop-refactor-plan.md.
 
 RtpSession is the transport seam the TwilioConversationSource rides:
   read(timeout)  -> inbound μ-law payload (bytes) or None
@@ -30,8 +36,8 @@ logger = logging.getLogger(__name__)
 
 # Call-teardown guards. Inbound RTP flows continuously during a live call (Twilio
 # sends silence frames too), so a gap means the caller is gone even if the BYE was
-# lost. Without these the serve thread wedges in _call_io_loop forever, blocking
-# re-registration until a restart. Krem idles a while mid-call, so 60s not 30s.
+# lost. Without these the media thread pumps a dead call forever and the line
+# stays busy until restart. Krem idles a while mid-call, so 60s not 30s.
 _CALL_INACTIVITY_SEC = 60      # no inbound RTP this long -> assume hangup
 _CALL_MAX_SEC = 7200           # hard 2h backstop against a runaway/wedged call
 
@@ -261,10 +267,19 @@ class SipEndpoint:
         self.cseq = 0
         self.pub_sip = None
         self.contact = None
+        self._active_call = None   # {"session", "dialog", "call_id", "caller"} or None
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def serve_forever(self):
-        """Bind, register, and loop: keepalive + wait for INVITE. Blocks until stop()."""
+        """Bind, register, and loop: keepalive + dispatch. Blocks until stop().
+
+        Serve-loop refactor (Stage 1, 2026-07-05): this thread is the SOLE
+        reader of self.sip and NEVER blocks on a call — per-call work runs on
+        two daemon threads (media pump reads self.rtp and owns teardown;
+        conversation runs on_call). So re-registration keeps running during
+        long calls and a second INVITE always gets a clean 486. Transport
+        seam: SIP reads go through _poll_sip(), writes through _send() —
+        Stage 2 (TLS) swaps their internals."""
         self.sip = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sip.bind(("0.0.0.0", self.sip_port))
         self.rtp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -289,39 +304,13 @@ class SipEndpoint:
         while not self._stop.is_set():
             try:
                 if time.time() >= next_reg:
-                    # NAT-drift guard: routers re-map long-lived UDP bindings (proven
-                    # live 2026-07-03: green keepalives, unroutable INVITEs). Re-STUN
-                    # each keepalive; if the public mapping moved, wipe the stale
-                    # binding and register the new Contact. STUN failure -> keep the
-                    # old contact (never clobber with a LAN addr).
-                    try:
-                        pub = stun_public_addr(self.sip)
-                        if pub and pub != self.pub_sip:
-                            logger.warning(f"[TWILIO] public mapping moved {self.pub_sip} -> {pub} — re-binding")
-                            self.pub_sip = pub
-                            self.contact = f"<sip:{self.user}@{pub[0]}:{pub[1]}>"
-                            self._deregister_all()
-                    except Exception as e:
-                        logger.debug(f"[TWILIO] keepalive STUN check failed: {e}")
-                    ok = self._register()
-                    logger.info(f"[TWILIO] keepalive re-register {'ok' if ok else 'FAILED'} — {self.user}@{self.domain}")
+                    self._keepalive_register()
                     next_reg = time.time() + self.expires / 2
                 if time.time() >= next_punch:
                     self._punch_edges()
                     next_punch = time.time() + _EDGE_PUNCH_SEC
-                r, _, _ = select.select([self.sip], [], [], 0.5)
-                if not r:
-                    continue
-                data, addr = self.sip.recvfrom(65535)
-                start, h, body = _parse(data)
-                if start.startswith("INVITE"):
-                    self._handle_call(start, h, body, addr)
-                elif start.startswith("OPTIONS"):
-                    self._reply(200, "OK", h, addr)
-                else:
-                    # TEMP probe (BYE-loss investigation): SIP arriving OUTSIDE a
-                    # call — e.g. a late BYE retransmit after inactivity teardown.
-                    logger.info(f"[TWILIO-SIPIDLE] {start} from {addr[0]}:{addr[1]}")
+                for start, h, body, addr in self._poll_sip(0.5):
+                    self._dispatch(start, h, body, addr)
             except Exception as e:
                 # A stray/malformed packet or transient socket error must NEVER kill
                 # this thread — a dead endpoint silently drops ALL future calls until
@@ -329,6 +318,9 @@ class SipEndpoint:
                 # Log, back off briefly, keep serving.
                 logger.error(f"[TWILIO] serve loop error (continuing): {e}", exc_info=True)
                 time.sleep(0.2)
+        call = self._active_call
+        if call:
+            call["session"].stop()   # media thread notices and tears down
         # Deregister HERE, on the serve thread — it must stay the socket's ONLY
         # reader. A second reader (the old stop()-side deregister) races it for
         # the reply datagram; the loser blocks forever in recvfrom and wedges
@@ -342,6 +334,37 @@ class SipEndpoint:
                 s.close()
             except Exception:
                 pass
+
+    def _keepalive_register(self):
+        # NAT-drift guard: routers re-map long-lived UDP bindings (proven live
+        # 2026-07-03: green keepalives, unroutable INVITEs). Re-STUN each
+        # keepalive; if the public mapping moved, wipe the stale binding and
+        # register the new Contact. STUN failure -> keep the old contact
+        # (never clobber with a LAN addr). NOTE: STUN reads self.sip on this
+        # (serve) thread — a SIP message landing in that ~3s window is eaten;
+        # rare, and the inactivity backstop covers a lost mid-call BYE.
+        try:
+            pub = stun_public_addr(self.sip)
+            if pub and pub != self.pub_sip:
+                logger.warning(f"[TWILIO] public mapping moved {self.pub_sip} -> {pub} — re-binding")
+                self.pub_sip = pub
+                self.contact = f"<sip:{self.user}@{pub[0]}:{pub[1]}>"
+                self._deregister_all()
+        except Exception as e:
+            logger.debug(f"[TWILIO] keepalive STUN check failed: {e}")
+        ok = self._register()
+        logger.info(f"[TWILIO] keepalive re-register {'ok' if ok else 'FAILED'} — {self.user}@{self.domain}")
+
+    def _poll_sip(self, timeout):
+        """Transport seam: return [(start, headers, body, addr)] — at most one
+        message for UDP. Stage 2's TlsTransport replaces these internals with
+        stream framing on the registered flow."""
+        r, _, _ = select.select([self.sip], [], [], timeout)
+        if not r:
+            return []
+        data, addr = self.sip.recvfrom(65535)
+        start, h, body = _parse(data)
+        return [(start, h, body, addr)]
 
     def stop(self):
         """Signal the serve thread to exit; it deregisters on its way out.
@@ -360,8 +383,50 @@ class SipEndpoint:
             except OSError:
                 pass
 
-    # ── one call ─────────────────────────────────────────────────────────────
-    def _handle_call(self, start, h, sdp, addr):
+    # ── dispatch + one call ──────────────────────────────────────────────────
+    def _dispatch(self, start, h, body, addr):
+        """Route one inbound SIP message. Runs on the serve thread — must never
+        block on a call. Also called from _reg_wait so INVITE/BYE keep working
+        during the ~5s registration window (no drop window)."""
+        call = self._active_call
+        if call and not start.startswith("SIP/2.0"):
+            # TEMP probe (BYE-loss investigation): every SIP request that
+            # reaches the socket during a call, with its source addr.
+            logger.info(f"[TWILIO-SIPCALL] {start} from {addr[0]}:{addr[1]}")
+        if start.startswith("INVITE"):
+            if call:
+                if h.get("call-id") == call["call_id"]:
+                    logger.info("[TWILIO] INVITE retransmit for the active call — ignoring (200 already sent)")
+                else:
+                    # Reject the newcomer cleanly so the carrier plays a busy
+                    # tone instead of a routing failure. (One call per line —
+                    # concurrent lines are separate endpoints.)
+                    logger.info("[TWILIO] second call while busy — replying 486 Busy Here")
+                    self._reply(486, "Busy Here", h, addr)
+                return
+            self._answer_invite(start, h, body, addr)
+        elif start.startswith("BYE"):
+            if call and h.get("call-id") == call["call_id"]:
+                logger.info("[TWILIO] caller hung up (BYE)")
+                self._reply(200, "OK", h, addr)
+                call["dialog"]["remote_bye"] = True
+                call["session"].stop()
+            else:
+                # Late BYE retransmit after teardown — a 481 stops the retransmits.
+                logger.info(f"[TWILIO-SIPIDLE] stray BYE from {addr[0]}:{addr[1]} — replying 481")
+                self._reply(481, "Call/Transaction Does Not Exist", h, addr)
+        elif start.startswith("OPTIONS"):
+            self._reply(200, "OK", h, addr)
+        elif start.startswith("ACK"):
+            pass
+        elif start.startswith("SIP/2.0"):
+            # Response outside _reg_wait (late REGISTER reply, our BYE's 200).
+            logger.debug(f"[TWILIO] stray response: {start}")
+        else:
+            # TEMP probe: SIP arriving outside a call.
+            logger.info(f"[TWILIO-SIPIDLE] {start} from {addr[0]}:{addr[1]}")
+
+    def _answer_invite(self, start, h, sdp, addr):
         m = re.search(r"c=IN IP4 ([\d.]+)", sdp)
         p = re.search(r"m=audio (\d+)", sdp)
         if not (m and p):
@@ -402,23 +467,22 @@ class SipEndpoint:
         ua = _ua_public_addr(h)
         if ua:
             # NAT hole-punch: open our router's path from the far UA's host so its
-            # direct end-to-end ACK/BYE can reach this socket. Re-punched in the
-            # io loop to hold the mapping for the whole call.
+            # direct end-to-end ACK/BYE can reach this socket. Re-punched by the
+            # media thread to hold the mapping for the whole call.
             try:
                 self.sip.sendto(b"\r\n\r\n", ua)
                 logger.info(f"[TWILIO] hole-punched SIP path to UA at {ua[0]}:{ua[1]}")
             except OSError as e:
                 logger.warning(f"[TWILIO] hole-punch failed: {e}")
-        dialog = {"h": h, "addr": addr, "remote": remote_rtp, "ua": ua}
-
-        # Run the conversation on its own thread; this thread pumps RTP in + watches
-        # the SIP socket for BYE until the session ends.
-        conv = threading.Thread(target=self._run_on_call, args=(caller, session),
-                                daemon=True, name="twilio-oncall")
-        conv.start()
-        self._call_io_loop(session, dialog)
-        session.stop()
-        conv.join(timeout=5)
+        dialog = {"h": h, "addr": addr, "remote": remote_rtp, "ua": ua, "remote_bye": False}
+        self._active_call = {"session": session, "dialog": dialog,
+                             "call_id": h.get("call-id"), "caller": caller}
+        # Conversation + media pump each get their own thread; the serve thread
+        # goes straight back to dispatching (re-register never pauses).
+        threading.Thread(target=self._run_on_call, args=(caller, session),
+                         daemon=True, name="twilio-oncall").start()
+        threading.Thread(target=self._media_loop, args=(session, dialog),
+                         daemon=True, name="twilio-media").start()
 
     def _run_on_call(self, caller, session):
         try:
@@ -428,64 +492,50 @@ class SipEndpoint:
         finally:
             session.stop()
 
-    def _call_io_loop(self, session, dialog):
-        """Route inbound RTP -> session; watch SIP for BYE. Ends when the session
-        dies, the caller hangs up (BYE), the inbound audio stops (lost-BYE guard),
-        or the call runs past the hard cap — so the serve thread ALWAYS returns to
-        re-register instead of wedging here forever."""
-        started = time.time()
-        last_rtp = started
-        last_punch = started
-        while session._alive.is_set() and not self._stop.is_set():
-            now = time.time()
-            if now - last_punch > 15:
-                if dialog.get("ua"):
-                    try:
-                        self.sip.sendto(b"\r\n\r\n", dialog["ua"])
-                    except OSError:
-                        pass
-                self._punch_edges()          # keep ALL edges open during calls too
-                last_punch = now
-            if now - last_rtp > _CALL_INACTIVITY_SEC:
-                logger.info(f"[TWILIO] no inbound audio for {_CALL_INACTIVITY_SEC}s — ending call (assumed hangup, BYE not seen)")
-                session.stop()
-                self._send_bye(dialog)
-                return
-            if now - started > _CALL_MAX_SEC:
-                logger.warning(f"[TWILIO] call exceeded {_CALL_MAX_SEC}s cap — force-ending")
-                session.stop()
-                self._send_bye(dialog)
-                return
-            r, _, _ = select.select([self.rtp, self.sip], [], [], 0.2)
-            for s in r:
-                data, addr = s.recvfrom(65535)
-                if s is self.rtp:
-                    if len(data) > 12 and (data[0] & 0xC0) == 0x80:
-                        _gap = time.time() - last_rtp          # TEMP probe: is Twilio RTP
-                        if _gap > 3:                            # continuous during silence?
-                            logger.info(f"[TWILIO-RTPGAP] inbound RTP resumed after {_gap:.1f}s gap")
-                        last_rtp = time.time()
-                        session.feed_inbound(data[12:])
-                else:
-                    start, h, _ = _parse(data)
-                    # TEMP probe (BYE-loss investigation): every SIP message that
-                    # reaches the socket during a call, with its source addr.
-                    logger.info(f"[TWILIO-SIPCALL] {start} from {addr[0]}:{addr[1]}")
-                    if start.startswith("BYE"):
-                        logger.info("[TWILIO] caller hung up (BYE)")
-                        self._reply(200, "OK", h, addr)
-                        session.stop()
-                        return
-                    if start.startswith("INVITE"):
-                        # Already on a call — reject the newcomer cleanly so the carrier
-                        # plays a busy tone instead of a routing failure. (One call at a
-                        # time until the serve-loop refactor lands.)
-                        logger.info("[TWILIO] second call while busy — replying 486 Busy Here")
-                        self._reply(486, "Busy Here", h, addr)
-                    elif start.startswith("OPTIONS"):
-                        self._reply(200, "OK", h, addr)
-        # We (Sapphire) ended it -> send BYE to the caller leg.
-        self._send_bye(dialog)
+    def _media_loop(self, session, dialog):
+        """Per-call media pump: reads self.rtp ONLY (the serve thread keeps
+        self.sip). Owns the inactivity + max-duration teardown, the mid-call
+        NAT punching, and the farewell BYE (unless the caller's BYE already
+        ended the dialog). Clears _active_call on the way out."""
+        started = last_rtp = last_punch = time.time()
+        try:
+            while session._alive.is_set() and not self._stop.is_set():
+                now = time.time()
+                if now - last_punch > 15:
+                    if dialog.get("ua"):
+                        try:
+                            self.sip.sendto(b"\r\n\r\n", dialog["ua"])
+                        except OSError:
+                            pass
+                    self._punch_edges()      # keep ALL edges open during calls too
+                    last_punch = now
+                if now - last_rtp > _CALL_INACTIVITY_SEC:
+                    logger.info(f"[TWILIO] no inbound audio for {_CALL_INACTIVITY_SEC}s — ending call (assumed hangup, BYE not seen)")
+                    break
+                if now - started > _CALL_MAX_SEC:
+                    logger.warning(f"[TWILIO] call exceeded {_CALL_MAX_SEC}s cap — force-ending")
+                    break
+                r, _, _ = select.select([self.rtp], [], [], 0.2)
+                if not r:
+                    continue
+                data, _addr = self.rtp.recvfrom(65535)
+                if len(data) > 12 and (data[0] & 0xC0) == 0x80:
+                    _gap = time.time() - last_rtp          # TEMP probe: is Twilio RTP
+                    if _gap > 3:                            # continuous during silence?
+                        logger.info(f"[TWILIO-RTPGAP] inbound RTP resumed after {_gap:.1f}s gap")
+                    last_rtp = time.time()
+                    session.feed_inbound(data[12:])
+        except Exception as e:
+            logger.error(f"[TWILIO] media loop error: {e}", exc_info=True)
+        finally:
+            session.stop()
+            if not dialog.get("remote_bye"):
+                # We (Sapphire) ended it -> send BYE to the caller leg.
+                try:
+                    self._send_bye(dialog)
+                except Exception as e:
+                    logger.error(f"[TWILIO] BYE send failed: {e}")
+            self._active_call = None
 
     # ── SIP message helpers ──────────────────────────────────────────────────
     def _send(self, text, addr):
@@ -566,17 +616,17 @@ class SipEndpoint:
         return "Digest " + ", ".join(parts)
 
     def _reg_wait(self):
+        """Wait for a REGISTER response. Non-response traffic (INVITE/BYE/
+        OPTIONS) is dispatched, not dropped — a call can arrive or hang up
+        mid-registration without loss."""
         deadline = time.time() + 5
         while time.time() < deadline:
-            r, _, _ = select.select([self.sip], [], [], deadline - time.time())
-            if not r:
-                continue
-            data, _ = self.sip.recvfrom(65535)
-            start, h, _ = _parse(data)
-            if start.startswith("SIP/2.0") and start.split(" ")[1] != "100":
-                return start, h
-            if start.startswith("OPTIONS"):
-                self._reply(200, "OK", h, self.registrar)
+            for start, h, body, addr in self._poll_sip(max(0.05, deadline - time.time())):
+                if start.startswith("SIP/2.0"):
+                    if start.split(" ")[1] != "100":
+                        return start, h
+                else:
+                    self._dispatch(start, h, body, addr)
         return None
 
     def _register(self):

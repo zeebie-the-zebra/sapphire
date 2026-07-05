@@ -190,7 +190,20 @@ async def handle_cancel(request: Request, _=Depends(require_login), system=Depen
     """
     try:
         requested_chat = request.query_params.get('chat')
-        count = system.llm_chat.cancel_streams(chat_name=requested_chat)
+        # Surface isolation (2026-07-05): a live phone call's chat may be the one
+        # the operator is viewing — web cancel must never kill the caller's turn.
+        # Scoped: no-op on a call-owned chat. Unscoped: flag everything EXCEPT them.
+        try:
+            _mgr = getattr(system, "_conversation_manager", None)
+            _ext = _mgr.external_chats() if _mgr else set()
+        except Exception:
+            _ext = set()
+        if requested_chat and requested_chat in _ext:
+            logger.info(f"CANCEL: no-op — '{requested_chat}' belongs to a live phone call")
+            return {"status": "no-op",
+                    "message": "That chat belongs to a live phone call — web cancel won't touch it."}
+        count = system.llm_chat.cancel_streams(chat_name=requested_chat,
+                                               exclude_chats=(None if requested_chat else _ext))
         if count == 0:
             if requested_chat:
                 logger.info(f"CANCEL: no-op — no active stream for chat '{requested_chat}'")

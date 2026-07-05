@@ -175,6 +175,14 @@ class ConversationManager:
         logger.info(f"[CONV] external session {session_id} ended "
                     f"({len(self.external)} still active)")
 
+    def external_chats(self):
+        """Chat names owned by live external sessions (phone calls). Web-origin
+        stop/cancel must leave these chats' streams alone even when the operator
+        is viewing one (viewing makes it the ACTIVE chat — chat-scoping alone
+        can't tell the surfaces apart)."""
+        with self._external_lock:
+            return {rec.get("chat") for rec in self.external.values() if rec.get("chat")}
+
     def stop(self):
         """Exit the OPERATOR's true speech mode and restore wakeword (idempotent).
         External sessions (phone calls) are untouched — they end individually via

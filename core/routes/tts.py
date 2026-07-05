@@ -260,8 +260,20 @@ async def tts_stop(request: Request, _=Depends(require_login), system=Depends(ge
         _active = None
     # Mute the ACTIVE chat's TTS pump only — a phone call's stream (side chat)
     # keeps talking. Without cancelling the LLM (that's the separate Stop button).
+    # Phase II follow-up (2026-07-05): when the operator is VIEWING a live call's
+    # chat, that chat IS the active chat — but its stream feeds the PHONE surface.
+    # Chat-scoping can't tell the surfaces apart, so check ownership explicitly:
+    # web stop must never mute a caller mid-sentence.
     try:
-        system.llm_chat.stop_tts_streams(chat_name=_active)
+        _mgr = getattr(system, "_conversation_manager", None)
+        _ext = _mgr.external_chats() if _mgr else set()
+    except Exception:
+        _ext = set()
+    try:
+        if _active and _active in _ext:
+            logger.info(f"[TTS-STOP] '{_active}' belongs to a live phone call — web stop leaves it alone")
+        else:
+            system.llm_chat.stop_tts_streams(chat_name=_active)
     except Exception:
         pass
     # Conversation mode plays through a separate sink and the LLM may still be

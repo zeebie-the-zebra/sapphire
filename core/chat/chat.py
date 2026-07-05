@@ -272,31 +272,40 @@ class LLMChat:
                 if not ids:
                     self._streams_by_chat.pop(chat_name, None)
 
-    def cancel_streams(self, chat_name=None):
+    def _target_stream_ids(self, chat_name, exclude_chats):
+        """Shared targeting for cancel/stop: one chat's streams, or all streams
+        minus exclude_chats (e.g. live phone-call chats — surface isolation)."""
+        if chat_name:
+            return list(self._streams_by_chat.get(chat_name, set()))
+        ids = list(self._streams_by_id.keys())
+        if exclude_chats:
+            skip = set()
+            for c in exclude_chats:
+                skip |= self._streams_by_chat.get(c, set())
+            ids = [i for i in ids if i not in skip]
+        return ids
+
+    def cancel_streams(self, chat_name=None, exclude_chats=None):
         """Set cancel_flag on active streams. If chat_name given, only that
         chat's streams (including every tab concurrently on it). Otherwise
-        all active streams across all chats. Returns count of streams flagged.
+        all active streams across all chats, minus exclude_chats (live
+        phone-call chats — their streams belong to the phone surface).
+        Returns count of streams flagged.
         """
         with self._streams_lock:
-            if chat_name:
-                ids = list(self._streams_by_chat.get(chat_name, set()))
-            else:
-                ids = list(self._streams_by_id.keys())
+            ids = self._target_stream_ids(chat_name, exclude_chats)
             targets = [self._streams_by_id[i] for i in ids if i in self._streams_by_id]
         for s in targets:
             s.cancel_flag = True
         return len(targets)
 
-    def stop_tts_streams(self, chat_name=None):
+    def stop_tts_streams(self, chat_name=None, exclude_chats=None):
         """Mute the VOICE on active streams (left-button "stop TTS") WITHOUT
         cancelling generation — the LLM keeps writing, only this message's audio
         stops. Mirrors cancel_streams' targeting. Returns count of streams muted.
         """
         with self._streams_lock:
-            if chat_name:
-                ids = list(self._streams_by_chat.get(chat_name, set()))
-            else:
-                ids = list(self._streams_by_id.keys())
+            ids = self._target_stream_ids(chat_name, exclude_chats)
             targets = [self._streams_by_id[i] for i in ids if i in self._streams_by_id]
         for s in targets:
             try:
