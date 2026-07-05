@@ -26,6 +26,11 @@ def _privacy_excluded(rel: str) -> bool:
         return True
     if rel.endswith('_mcp_key.json') or rel.endswith('mcp_client.json'):
         return True
+    # sapphire-health.token — bearer API token minted for the health-check
+    # script (user/sapphire-health.sh). Live credential; same class as the
+    # MCP keys above, and local backups are plaintext by design.
+    if rel.endswith('sapphire-health.token'):
+        return True
     return False
 
 

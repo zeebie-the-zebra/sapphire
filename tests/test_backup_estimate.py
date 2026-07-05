@@ -13,6 +13,7 @@ def test_privacy_floor_always_excluded():
     assert _privacy_excluded("a/b.tmp.456")
     assert _privacy_excluded("plugins/discord_mcp_key.json")
     assert _privacy_excluded("mcp_client.json")
+    assert _privacy_excluded("sapphire-health.token")
     assert not _privacy_excluded("history/sapphire_history.db")
 
 
