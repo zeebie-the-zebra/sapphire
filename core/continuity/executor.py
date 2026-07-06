@@ -542,12 +542,10 @@ class ContinuityExecutor:
                 target_chat = match
             else:
                 logger.info(f"[Continuity] Creating new chat: {target_chat}")
-                if not session_manager.create_chat(target_chat):
-                    # Chat was created between our check and now — use the sanitized name
-                    target_chat = normalized
-                else:
-                    target_chat = normalized
-                    publish(Events.CHAT_CREATED, {"name": target_chat})
+                # create_chat now publishes CHAT_CREATED itself (the creation
+                # chokepoint), so no explicit publish here.
+                session_manager.create_chat(target_chat)
+                target_chat = normalized
 
             # Build ExecutionContext — isolated, no singleton mutation.
             # "Webhook specifies chat name" (trigger_config.chat_from_payload): the

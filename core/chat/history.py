@@ -1165,11 +1165,16 @@ class ChatSessionManager:
                 )
                 conn.commit()
                 logger.info(f"Created new chat: {safe_name}")
-                return True
-                
         except Exception as e:
             logger.error(f"Failed to create chat '{chat_name}': {e}")
             return False
+
+        # Announce OUTSIDE the db connection so SSE handlers can't re-enter the
+        # write lock. Every new chat — web "+", cron target, ephemeral phone call —
+        # routes through here, so this single publish refreshes the chat dropdown
+        # on every connected browser (main.js listens for CHAT_CREATED).
+        publish(Events.CHAT_CREATED, {"name": safe_name})
+        return True
 
     def delete_chat(self, chat_name: str) -> bool:
         """Delete chat. Recreates default if deleted, switches active if needed."""

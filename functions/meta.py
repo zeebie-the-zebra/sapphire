@@ -784,6 +784,9 @@ def _switch_model(args):
         lines = [f"Current model: {label(current) if current in providers else current}"]
         if ratchet:
             lines.append("Privacy ratchet is ON — switches only move DOWN this list, never back up.")
+            if current not in roster:
+                lines.append("You're above the list (least private) — you can switch to any model below, "
+                             "then privacy only rolls downhill from there.")
         lines.append("Switchable models (top = least private):")
         for i, key in enumerate(roster, 1):
             if key not in providers:
@@ -801,6 +804,11 @@ def _switch_model(args):
         return f"'{name}' is not on the switch roster. Call switch_model without params to see options.", False
     if target == current:
         return f"Already on {label(target)}.", True
+    # Privacy ratchet, option B: 'auto' (and any current not on the roster) is the
+    # invisible top rung — least private. So a first switch away from 'auto' is
+    # always "downhill" and allowed; the ratchet only locks once she's pinned to a
+    # concrete roster model. `current in roster` being false here is intentional,
+    # not a bypass — don't "fix" it.
     if ratchet and current in roster and roster.index(target) < roster.index(current):
         return (f"Privacy ratchet: can't switch back up to "
                 f"{providers.get(target, {}).get('display_name', target)} — this chat moved to "
