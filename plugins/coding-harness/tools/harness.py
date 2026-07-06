@@ -10,7 +10,10 @@ import fnmatch
 import logging
 import os
 import re
+import signal
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -347,6 +350,30 @@ def _search_files(args, settings):
     return '\n'.join(hits), True
 
 
+# Memory ceiling for a single command's captured output. The display limit
+# truncates for readability; this bounds RAM so `yes` / `cat /dev/zero` can't
+# OOM the whole assistant before truncation ever runs.
+_MAX_CAPTURE_FLOOR = 2_000_000
+
+
+def _kill_tree(proc):
+    """Kill the command AND every descendant, not just the direct shell child.
+    subprocess only ever signals `/bin/sh -c`; a pipeline or backgrounded job
+    would leave grandchildren running (holding ports/CPU) after a timeout.
+    POSIX: signal the whole session process group. Windows: taskkill /T."""
+    try:
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                           capture_output=True)
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def _run_command(args, settings):
     command = args.get('command')
     if not command:
@@ -366,25 +393,78 @@ def _run_command(args, settings):
     limit = int(args.get('max_output') or _setting(settings, 'output_limit'))
 
     logger.info(f"HARNESS [{cwd}] $ {command[:100]}")
+    # Own process group so a timeout can kill the whole tree (see _kill_tree),
+    # and stderr merged into stdout so a single byte cap bounds RAM. Read in a
+    # thread that stops at capture_cap; the main loop enforces the wall clock.
+    capture_cap = max(limit * 4, _MAX_CAPTURE_FLOOR)
+    popen_kw = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    shell=True, cwd=str(cwd))
+    if os.name == 'nt':
+        popen_kw['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kw['start_new_session'] = True
     try:
-        result = subprocess.run(
-            command, capture_output=True, text=True,
-            timeout=timeout, shell=True, cwd=str(cwd),
-            encoding='utf-8', errors='replace',
-        )
-    except subprocess.TimeoutExpired:
-        logger.warning(f"Command timed out after {timeout}s: {command[:100]}")
-        return f"Command timed out after {timeout}s.", False
+        proc = subprocess.Popen(command, **popen_kw)
+    except Exception as e:
+        raise HarnessError(f"Failed to launch command: {e}")
 
-    parts = []
-    if result.stdout:
-        parts.append(result.stdout)
-    if result.stderr.strip():
-        parts.append(f"STDERR: {result.stderr.strip()}")
-    full = '\n'.join(parts) if parts else '(no output)'
+    chunks, total, overflow = [], [0], [False]
+
+    def _drain():
+        try:
+            while True:
+                b = proc.stdout.read(65536)
+                if not b:
+                    break
+                room = capture_cap - total[0]
+                if room > 0:
+                    chunks.append(b[:room])
+                    total[0] += min(len(b), room)
+                if total[0] >= capture_cap:
+                    overflow[0] = True   # stop draining; kill below
+                    break
+        except Exception:
+            pass
+
+    reader = threading.Thread(target=_drain, daemon=True)
+    reader.start()
+
+    end = time.monotonic() + timeout
+    timed_out = False
+    while True:
+        try:
+            proc.wait(timeout=0.2)
+            break                        # exited on its own
+        except subprocess.TimeoutExpired:
+            if overflow[0]:
+                break                    # output cap hit → kill below
+            if time.monotonic() >= end:
+                timed_out = True
+                break
+    if proc.poll() is None:
+        _kill_tree(proc)
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+    reader.join(timeout=2)
+    try:
+        proc.stdout.close()
+    except Exception:
+        pass
+
+    full = b''.join(chunks).decode('utf-8', 'replace') or '(no output)'
     full, note = _truncate_tail(full, limit)
-    header = f"[{_rel(cwd, wd)}] $ {command}\nExit code: {result.returncode}{note}"
-    return f"{header}\n\n{full}", result.returncode == 0
+    if timed_out:
+        extra, ok = f" — TIMED OUT after {timeout}s (process tree killed)", False
+        logger.warning(f"Command timed out after {timeout}s: {command[:100]}")
+    elif overflow[0]:
+        extra, ok = f" — OUTPUT CAPPED at {capture_cap} bytes (process tree killed)", False
+        logger.warning(f"Command output exceeded {capture_cap} bytes: {command[:100]}")
+    else:
+        extra, ok = "", proc.returncode == 0
+    header = f"[{_rel(cwd, wd)}] $ {command}\nExit code: {proc.returncode}{extra}{note}"
+    return f"{header}\n\n{full}", ok
 
 
 _HANDLERS = {
