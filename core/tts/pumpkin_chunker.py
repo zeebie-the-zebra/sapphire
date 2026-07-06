@@ -44,11 +44,17 @@ class PumpkinChunker:
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def start(self):
-        """Begin a turn: clear state and spin up the playback worker."""
-        self.should_stop.clear()
+        """Begin a turn: clear state and spin up the playback worker.
+
+        Each turn gets a FRESH stop Event, captured by its worker: a zombie
+        worker that outlived its join timeout (wedged PortAudio write) keeps
+        its own already-set Event, so the next turn's start() can't revive
+        its loop by clearing a shared flag (2026-07-06 herring hunt)."""
+        self.should_stop = threading.Event()
         self._finished = False
         self._drain_queue()
-        self._worker = threading.Thread(target=self._run, daemon=True, name="pumpkin-chunker")
+        self._worker = threading.Thread(target=self._run, args=(self.should_stop,),
+                                        daemon=True, name="pumpkin-chunker")
         self._worker.start()
 
     def feed_chunk(self, chunk):
@@ -72,20 +78,24 @@ class PumpkinChunker:
         self._close_stream()
 
     # ── worker ───────────────────────────────────────────────────────────────
-    def _run(self):
+    def _run(self, stop_evt):
         try:
-            while not self.should_stop.is_set():
+            while not stop_evt.is_set():
                 try:
                     chunk = self._queue.get(timeout=0.1)
                 except queue.Empty:
                     if self._finished:
                         break
                     continue
-                self._play_one(chunk)
+                self._play_one(chunk, stop_evt)
         finally:
-            self._close_stream()
+            # Fence: only the CURRENT worker may close the stream. A zombie
+            # that outlived its join must not tear down the next turn's
+            # stream (or fire TTS_STOPPED) on its way out.
+            if self._worker is threading.current_thread():
+                self._close_stream()
 
-    def _play_one(self, chunk):
+    def _play_one(self, chunk, stop_evt):
         try:
             pcm = self._decode(chunk)
         except Exception as e:
@@ -95,7 +105,7 @@ class PumpkinChunker:
             return
 
         with self.lock:
-            if self.should_stop.is_set():
+            if stop_evt.is_set():
                 return
             if self._stream is None:
                 try:
@@ -104,25 +114,25 @@ class PumpkinChunker:
                     publish(Events.TTS_PLAYING, {"surface": "local"})
                 except Exception as e:
                     logger.error(f"[PUMPKIN] OutputStream open failed: {e}")
-                    self.should_stop.set()
+                    stop_evt.set()
                     return
 
         # 100ms slices for interruptibility (matches tts_client streaming path)
         slice_size = max(1, int(self.output_rate * 0.1))
         for i in range(0, len(pcm), slice_size):
-            if self.should_stop.is_set():
+            if stop_evt.is_set():
                 return
             try:
                 self._stream.write(pcm[i:i + slice_size].reshape(-1, 1))
             except Exception as e:
                 logger.warning(f"[PUMPKIN] write error: {e}")
-                self.should_stop.set()
+                stop_evt.set()  # own turn's event only — a zombie can't poison the next turn
                 return
 
         pause = chunk.get("pause_after_ms", 0) or 0
         if pause > 0:
             # cancellable: wakes immediately on stop()
-            self.should_stop.wait(timeout=pause / 1000.0)
+            stop_evt.wait(timeout=pause / 1000.0)
 
     # ── decode (testable without a device) ───────────────────────────────────
     def _decode(self, chunk):

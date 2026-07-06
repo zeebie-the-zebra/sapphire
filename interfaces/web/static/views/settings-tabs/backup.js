@@ -28,20 +28,13 @@ export default {
                     settings, memories, knowledge, AI notes, user plugins,
                     plugin state, and avatars
                 </div>
-                ${window.__managed ? `
-                <div style="margin:10px 0 4px"><strong>Also included (managed mode):</strong></div>
-                <div style="color:var(--text-secondary)">
-                    API keys and credentials (LLM keys, email passwords, bitcoin wallets)
-                    are stored inside your data volume and included in backups
-                </div>
-                ` : `
                 <div style="margin:10px 0 4px"><strong>Not included:</strong></div>
                 <div style="color:var(--text-muted)">
                     API keys and credentials (LLM keys, email passwords, SSH servers,
-                    bitcoin wallets) are stored separately at ~/.config/sapphire/ for
-                    security and are not part of the backup archive
+                    bitcoin wallets) are stored separately (~/.config/sapphire/, or the
+                    config volume in Docker) for security and are not part of the
+                    backup archive — keep your own copy of those
                 </div>
-                `}
             </div>
 
             <div class="backup-section-divider" style="margin-top:16px">

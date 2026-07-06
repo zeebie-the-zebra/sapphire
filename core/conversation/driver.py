@@ -147,8 +147,12 @@ class ConversationDriver:
 
             stream, sid, chat = self.system.llm_chat.begin_stream(self._chat_name)
             try:
+                armed = False    # barge-in stays blocked until prose actually flows
                 for event in stream.chat_stream(text):
                     et = event.get("type") if isinstance(event, dict) else None
+                    if not armed and et in ("content", "tts_chunk"):
+                        self.engine.arm_barge()   # she's talking now — interruptible
+                        armed = True
                     if et == "content":
                         publish(Events.VOICE_TURN_CHUNK,
                                 {"message_id": message_id, "text": event.get("text", ""),

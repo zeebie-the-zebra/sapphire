@@ -18,8 +18,14 @@ Transitions
   USER_SPEAKING --silence >= endpoint_silence_ms,
                   speech  >= min_speech_ms---------------------> on_turn(audio); RESPONDING
   USER_SPEAKING --endpoint but speech < min_speech_ms (blip)---> IDLE  (discard)
-  RESPONDING    --speech >= barge_hold_ms----------------------> on_barge_in(); USER_SPEAKING (new utterance)
+  RESPONDING    --speech >= barge_hold_ms, barge ARMED---------> on_barge_in(); USER_SPEAKING (new utterance)
   RESPONDING    --turn_finished() (TTS done, no barge)---------> IDLE
+
+Barge arming (2026-07-06): entering RESPONDING DISARMS barge-in; the driver
+calls arm_barge() when prose actually starts flowing (first content/tts_chunk).
+Speech during LLM preprocessing or thinking is ignored — there's nothing to
+interrupt yet, and firing barges there killed turns before she could answer
+(a user who talk-pauses-talks in that window cancelled every turn).
 
 Callback contract
 -----------------
@@ -31,6 +37,8 @@ Callback contract
 
   turn_finished()     the driver calls this when the response (TTS) completes with
                       no barge-in, returning the engine to IDLE.
+  arm_barge()         the driver calls this when the response becomes interruptible
+                      (prose streaming / audio playing).
 
 PCM frames are int16 little-endian bytes; frame duration is derived from length,
 so timing is deterministic (no wall clock) — feed known-size frames in tests.
@@ -59,6 +67,7 @@ class ConversationEngine:
         self._silence_ms = 0.0
         self._utterance_ms = 0.0
         self._barge_ms = 0.0
+        self.barge_enabled = False   # armed by the driver once prose flows
 
     def _frame_ms(self, pcm):
         # int16 LE PCM: 2 bytes/sample
@@ -79,6 +88,7 @@ class ConversationEngine:
         if self._speech_ms >= self.min_speech_ms:
             self.state = RESPONDING
             self._barge_ms = 0.0
+            self.barge_enabled = False   # disarmed until the driver arms on first prose
             self._on_turn(audio)
         else:
             self.state = IDLE  # too short — discard the blip
@@ -106,14 +116,21 @@ class ConversationEngine:
             return
 
         if self.state == RESPONDING:
-            if is_speech:
+            if is_speech and self.barge_enabled:
                 self._barge_ms += dur
                 if self._barge_ms >= self.barge_hold_ms:
                     self._on_barge_in()
                     self._start_utterance(pcm)  # capture the barge-in utterance
             else:
+                # Silence OR disarmed (LLM preproc/thinking — nothing to interrupt):
+                # the hold timer restarts fresh once prose arms it.
                 self._barge_ms = 0.0
             return
+
+    def arm_barge(self):
+        """Driver calls this once the response is interruptible (prose streaming /
+        audio playing). Until then, speech over a silent RESPONDING state is ignored."""
+        self.barge_enabled = True
 
     def turn_finished(self):
         """Driver calls this when the RESPONDING turn (TTS) completes with no barge-in."""
@@ -126,3 +143,4 @@ class ConversationEngine:
         self.state = IDLE
         self._buf = []
         self._speech_ms = self._silence_ms = self._utterance_ms = self._barge_ms = 0.0
+        self.barge_enabled = False

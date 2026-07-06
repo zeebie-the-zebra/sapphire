@@ -561,6 +561,17 @@ function initEventBus() {
         ui.showToast(`Task "${data?.task || 'Unknown'}": ${data?.error || 'failed'}`, 'error', 10000);
     });
 
+    // DB corruption sentinel (backup housekeeping) — halts ALL backups until
+    // cleared. Was journalctl-only; this event had zero subscribers before the
+    // 2026-07-06 herring hunt (#14).
+    eventBus.on('sapphire_health_alert', (data) => {
+        const dbs = (data?.dbs || []).join(', ');
+        ui.showToast(
+            `Database integrity check FAILED${dbs ? ` (${dbs})` : ''} — ` +
+            `backups are halted until the sentinel is cleared in Settings > Backup`,
+            'error', 15000);
+    });
+
     // Re-fetch conversation-mode state and route it through the same event the
     // toggle buttons already listen on (chat.js). SSE reconnects use replay=false,
     // so a conversation_mode_changed fired during a gap is otherwise lost forever —

@@ -54,7 +54,7 @@ def test_decode_resamples_to_output_rate():
 def test_play_one_opens_stream_and_writes_slices():
     fake = FakeStream()
     pc = PumpkinChunker(output_rate=48000, stream_factory=lambda: fake)
-    pc._play_one(wav_chunk(dur=0.25, rate=48000))      # 12000 samples -> ~3 slices of 4800
+    pc._play_one(wav_chunk(dur=0.25, rate=48000), pc.should_stop)   # 12000 samples -> ~3 slices of 4800
     assert pc._is_playing is True
     assert len(fake.writes) >= 2
 

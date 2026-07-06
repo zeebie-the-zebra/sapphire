@@ -58,6 +58,7 @@ def test_barge_in_during_responding():
     for _ in range(3):
         e.push_frame(*frame(100, False))      # -> RESPONDING
     assert e.state == RESPONDING and len(turns) == 1
+    e.arm_barge()                             # prose flowing — driver armed us
     e.push_frame(*frame(100, True))           # 100ms speech >= 90ms barge_hold
     assert barges == [1]
     assert e.state == USER_SPEAKING           # now capturing the barge-in utterance
@@ -69,10 +70,32 @@ def test_brief_noise_does_not_barge():
     for _ in range(3):
         e.push_frame(*frame(100, False))
     assert e.state == RESPONDING
+    e.arm_barge()
     e.push_frame(*frame(50, True))            # 50ms blip (< 90ms barge_hold)
     e.push_frame(*frame(100, False))          # silence resets barge timer
     assert barges == []
     assert e.state == RESPONDING
+
+
+def test_no_barge_while_disarmed_preproc():
+    """Speech during LLM preproc/thinking (RESPONDING but not armed) is ignored —
+    the friend-cadence bug: talk-pause-talk before prose ever flowed cancelled
+    every turn. Arming restarts the hold timer fresh."""
+    e, turns, barges = _engine(endpoint_silence_ms=300, min_speech_ms=100)
+    e.push_frame(*frame(150, True))
+    for _ in range(3):
+        e.push_frame(*frame(100, False))      # -> RESPONDING, disarmed
+    assert e.state == RESPONDING
+    for _ in range(5):
+        e.push_frame(*frame(100, True))       # 500ms of talking over her silence
+    assert barges == []                        # nothing to interrupt — ignored
+    assert e.state == RESPONDING
+    e.arm_barge()                              # prose starts
+    e.push_frame(*frame(50, True))             # accumulation starts FRESH (50 < 90)
+    assert barges == []
+    e.push_frame(*frame(50, True))             # 100ms total since arming
+    assert barges == [1]
+    assert e.state == USER_SPEAKING
 
 
 def test_turn_finished_returns_to_idle():

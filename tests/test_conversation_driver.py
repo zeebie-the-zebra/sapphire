@@ -121,6 +121,7 @@ def test_barge_in_cancels_generation_and_stops_sink():
         d.push_frame(*frame(100, False))             # -> RESPONDING
     assert d.engine.state == RESPONDING
     d._active_sink = sink                            # simulate a turn-in-progress sink
+    d.engine.arm_barge()                             # prose flowing (turn thread suppressed)
 
     d.push_frame(*frame(100, True))                  # barge over the response
     system.cancel_generation.assert_called_once()
@@ -135,6 +136,7 @@ def test_turn_finished_noop_after_barge():
     for _ in range(3):
         d.push_frame(*frame(100, False))
     assert d.engine.state == RESPONDING
+    d.engine.arm_barge()
     d.push_frame(*frame(100, True))                  # barge -> USER_SPEAKING
     d.engine.turn_finished()                         # stale finish from the cancelled turn
     assert d.engine.state == USER_SPEAKING
