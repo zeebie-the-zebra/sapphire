@@ -131,6 +131,19 @@ def perform_offsite_backup(cadence="daily", comment=""):
     if not pw:
         return {"ok": False, "error": "Offsite requires encryption — set an encryption password in the Remembrance settings first"}
 
+    # Corruption gate: the local scheduled/manual paths halt on active corruption
+    # sentinels to preserve last-known-good — the offsite path must too, or corrupt
+    # DBs ship to the vault daily while cadence retention ages out the clean copies.
+    try:
+        sentinels = backup_manager._active_corruption_sentinels()
+    except Exception:
+        sentinels = []
+    if sentinels:
+        msg = (f"Offsite backup halted — active corruption sentinel(s): "
+               f"{', '.join(str(s) for s in sentinels)}. Clear them in Settings > Backup first.")
+        _set_last_result(False, msg)
+        return {"ok": False, "error": msg}
+
     extra = _extra_patterns()
     cap_mb = int(get_prefs().get("offsite_max_mb", 2048) or 0)
     # Runaway guard: refuse before building a giant local blob (the 150 GB war story).

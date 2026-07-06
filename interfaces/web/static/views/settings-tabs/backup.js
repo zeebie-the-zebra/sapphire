@@ -1,7 +1,7 @@
 // settings-tabs/backup.js - Backup management
 import * as ui from '../../ui.js';
 
-let backups = { daily: [], weekly: [], monthly: [], manual: [] };
+let backups = { daily: [], weekly: [], monthly: [], manual: [], update: [] };
 let expanded = {};
 
 export default {
@@ -238,7 +238,7 @@ export default {
         if (!lists) return;
 
         let totalSize = 0, totalCount = 0;
-        for (const type of ['daily', 'weekly', 'monthly', 'manual']) {
+        for (const type of ['daily', 'weekly', 'monthly', 'manual', 'update']) {
             for (const b of (backups[type] || [])) {
                 totalSize += b.size || 0;
                 totalCount++;
@@ -247,7 +247,7 @@ export default {
 
         if (stats) stats.textContent = `${totalCount} backups \u00B7 ${fmtSize(totalSize)}`;
 
-        lists.innerHTML = ['daily', 'weekly', 'monthly', 'manual'].map(type => {
+        lists.innerHTML = ['daily', 'weekly', 'monthly', 'manual', 'update'].map(type => {
             const items = backups[type] || [];
             const isOpen = expanded[type];
             return `

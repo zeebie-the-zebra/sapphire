@@ -402,7 +402,11 @@ class Backup:
 
     def list_backups(self):
         """List all backups grouped by type."""
-        backups = {"daily": [], "weekly": [], "monthly": [], "manual": []}
+        # "update" = pre-update safety tars from the updater (filename
+        # sapphire_<ts>_pre_update.tar.gz parses to type "update"). Absent from
+        # this dict they were a ghost tier: UI-invisible and never rotated —
+        # one permanent full tar per update (2026-07-06 herring hunt).
+        backups = {"daily": [], "weekly": [], "monthly": [], "manual": [], "update": []}
 
         if not self.backup_dir.exists():
             return backups
@@ -499,7 +503,8 @@ class Backup:
             "daily": getattr(config, 'BACKUPS_KEEP_DAILY', 7),
             "weekly": getattr(config, 'BACKUPS_KEEP_WEEKLY', 4),
             "monthly": getattr(config, 'BACKUPS_KEEP_MONTHLY', 3),
-            "manual": getattr(config, 'BACKUPS_KEEP_MANUAL', 5)
+            "manual": getattr(config, 'BACKUPS_KEEP_MANUAL', 5),
+            "update": getattr(config, 'BACKUPS_KEEP_UPDATE', 3)
         }
 
         deleted = 0

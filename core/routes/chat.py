@@ -763,6 +763,18 @@ async def create_private_chat(request: Request, _=Depends(require_login), system
 @router.delete("/api/chats/{chat_name}")
 async def delete_chat(chat_name: str, request: Request, _=Depends(require_login), system=Depends(get_system)):
     """Delete a chat."""
+    # Surface isolation (2026-07-06): deleting a chat that hosts a LIVE phone
+    # call silently drops the call's brain override on its next turn — the
+    # caller's turns would land in the operator's active chat with the
+    # operator's persona/tools/scopes. Refuse until the call ends.
+    try:
+        _mgr = getattr(system, "_conversation_manager", None)
+        _ext = _mgr.external_chats() if _mgr else set()
+    except Exception:
+        _ext = set()
+    if chat_name in _ext:
+        raise HTTPException(status_code=409,
+                            detail=f"'{chat_name}' has a live phone call — hang up before deleting.")
     try:
         was_active = (chat_name == system.llm_chat.get_active_chat())
         if system.llm_chat.delete_chat(chat_name):

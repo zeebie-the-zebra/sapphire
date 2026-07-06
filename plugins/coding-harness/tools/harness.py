@@ -453,7 +453,14 @@ def _run_command(args, settings):
     except Exception:
         pass
 
-    full = b''.join(chunks).decode('utf-8', 'replace') or '(no output)'
+    raw = b''.join(chunks)
+    try:
+        full = raw.decode('utf-8')
+    except UnicodeDecodeError:
+        # Windows console tools emit the OEM codepage (cp850/cp437), not UTF-8 —
+        # the 'oem' codec keeps their output readable instead of mojibake.
+        full = raw.decode('oem' if os.name == 'nt' else 'utf-8', 'replace')
+    full = full or '(no output)'
     full, note = _truncate_tail(full, limit)
     if timed_out:
         extra, ok = f" — TIMED OUT after {timeout}s (process tree killed)", False

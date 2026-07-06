@@ -561,6 +561,22 @@ function initEventBus() {
         ui.showToast(`Task "${data?.task || 'Unknown'}": ${data?.error || 'failed'}`, 'error', 10000);
     });
 
+    // Re-fetch conversation-mode state and route it through the same event the
+    // toggle buttons already listen on (chat.js). SSE reconnects use replay=false,
+    // so a conversation_mode_changed fired during a gap is otherwise lost forever —
+    // the toggle wedges dark while the mode is ON, and a dark button can never
+    // send stop (2026-07-06 herring hunt: the phone one-way-trap reproducer).
+    const resyncTrueSpeech = async () => {
+        try {
+            const r = await fetch('/api/runtime/true-speech');
+            if (r.ok) {
+                const d = await r.json();
+                eventBus.dispatch('conversation_mode_changed',
+                    { enabled: d.enabled === true, source: d.source || null });
+            }
+        } catch { /* offline — next resync covers it */ }
+    };
+
     // Server restart detection — full state resync
     eventBus.on(eventBus.Events.SERVER_RESTARTED, async () => {
         console.log('[Main] Server restarted — full resync');
@@ -568,6 +584,7 @@ function initEventBus() {
         await populateChatDropdown();
         await refresh(false);
         await updateScene();
+        await resyncTrueSpeech();
     });
 
     // SSE reconnect — resync state in case events were missed during disconnect
@@ -582,6 +599,7 @@ function initEventBus() {
         await populateChatDropdown();
         await refresh(false);
         await updateScene();
+        await resyncTrueSpeech();
     });
 
     // STT events

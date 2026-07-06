@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "files": {
     "plugin.json": "sha256:3567dcd72fbe5878cd74fde5dc6ec03340c4c2488b27e72d318a18b6e9487f54",
-    "tools/harness.py": "sha256:c75b96665a1fb9fafb9f2136a047d1605a499b9abcb830e7455e9f16bc90f0f3"
+    "tools/harness.py": "sha256:e04942104ce8c9cc5e281bab05350824fef83fb58589bb6736e25f80215ac6ca"
   },
-  "signature": "G4mv/mDINbTr6s1qRZf6chKw2muK5MC82fdWDKFPSEhKgE50i6IAoLpfjioPG23LER0HK1opRFUmYwuGUfAhBg=="
+  "signature": "qAN4P6Fk3uoUBwNk9nxQqesjxDP0CrD4Sc6bXGsn6lgJ7GUSbDKnYfyHlzCd1/JC3S4DUjQe9hO08crP/hdwCw=="
 }

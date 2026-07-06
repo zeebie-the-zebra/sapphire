@@ -751,13 +751,15 @@ class VoiceChatSystem:
             self.tts_server_manager = None
             logger.info("Kokoro TTS server stopped")
 
-    def cancel_generation(self, chat_name: str = None) -> bool:
+    def cancel_generation(self, chat_name: str = None, exclude_chats=None) -> bool:
         """Public cancel for in-progress LLM streaming.
 
         Since H4 (2026-04-22) streaming is per-request rather than a shared
         singleton, this delegates to LLMChat.cancel_streams. Optional
         chat_name scopes the cancel to one chat's active streams; omit to
-        cancel all active streams.
+        cancel all active streams. exclude_chats spares named chats from an
+        unscoped cancel (live phone-call chats — their streams belong to the
+        phone surface, same contract as the web routes).
 
         Called by voice-commands stop hook and any plugin that wants to
         interrupt generation. Returns True if at least one stream was
@@ -767,7 +769,7 @@ class VoiceChatSystem:
             llm_chat = getattr(self, 'llm_chat', None)
             if llm_chat is None or not hasattr(llm_chat, 'cancel_streams'):
                 return False
-            count = llm_chat.cancel_streams(chat_name=chat_name)
+            count = llm_chat.cancel_streams(chat_name=chat_name, exclude_chats=exclude_chats)
             if count:
                 logger.info(f"cancel_generation: flagged {count} stream(s)")
                 return True
