@@ -9146,3 +9146,101 @@ a.gallery-caption:hover {
     .store-body { grid-template-columns: 1fr; }
     .store-sidebar { display: none; }
 }
+
+/* ═══ Mind Palace views (palace/*.js — active when mindpalace plugin is on) ═══ */
+.palace-chunk-list { display: flex; flex-direction: column; gap: 10px; }
+.palace-more-wrap { text-align: center; padding: 14px 0; }
+.palace-count { color: var(--text-muted, #888); font-size: 12px; margin-left: auto; flex-shrink: 0; }
+.palace-search {
+    flex: 1 1 200px; min-width: 0; padding: 7px 10px;
+    background: var(--bg-tertiary, #1a1b2e); color: var(--text-primary, #eee);
+    border: 1px solid var(--border, #333); border-radius: 6px; font-size: 13px;
+}
+.palace-select {
+    padding: 6px 8px; background: var(--bg-tertiary, #1a1b2e);
+    color: var(--text-primary, #eee); border: 1px solid var(--border, #333);
+    border-radius: 6px; font-size: 13px; cursor: pointer;
+}
+
+/* Layer + tier + entity chips on chunk cards */
+.palace-layer {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px; text-transform: lowercase;
+}
+.palace-layer-events   { background: #14263e; color: #7fb5f5; border: 1px solid #24466e; }
+.palace-layer-self     { background: #2a1b3e; color: #c39df5; border: 1px solid #4a336e; }
+.palace-layer-entities { background: #14321e; color: #7fdf9f; border: 1px solid #24583a; }
+.palace-layer-knowledge{ background: #3a2a14; color: #f5c57f; border: 1px solid #6e4e24; }
+.palace-tier {
+    font-size: 10px; padding: 2px 6px; border-radius: 8px;
+    background: var(--bg-tertiary, #1a1b2e); color: var(--text-muted, #999);
+    border: 1px solid var(--border, #333);
+}
+.palace-ent-chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    background: #14321e; color: #7fdf9f; border: 1px solid #24583a;
+}
+
+/* Favorite star */
+.palace-fav {
+    background: none; border: none; cursor: pointer; font-size: 15px;
+    color: var(--text-muted, #666); padding: 0 4px; line-height: 1;
+}
+.palace-fav.is-fav { color: #f5c542; }
+.palace-fav:hover { color: #f5c542; }
+
+/* Meta expander — the metadata window */
+.palace-meta { margin-top: 8px; font-size: 12px; }
+.palace-meta summary {
+    cursor: pointer; color: var(--text-muted, #777); user-select: none;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.palace-meta[open] summary { margin-bottom: 6px; }
+.palace-meta-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+.palace-meta-row b { color: var(--text-muted, #888); font-weight: 600; font-size: 11px; }
+.palace-meta-kv {
+    background: var(--bg-tertiary, #1a1b2e); border: 1px solid var(--border, #333);
+    border-radius: 6px; padding: 2px 8px; color: var(--text-secondary, #bbb);
+}
+.palace-meta-kv b { margin-right: 4px; }
+.palace-pill {
+    background: #14263e; color: #7fb5f5; border: 1px solid #24466e;
+    border-radius: 10px; padding: 1px 8px; font-size: 11px;
+}
+.palace-pill-dim { background: var(--bg-tertiary, #1a1b2e); color: var(--text-muted, #999); border-color: var(--border, #333); }
+.palace-meta-dim { color: var(--text-muted, #777); font-size: 11px; }
+
+/* Entities view */
+.palace-kind-pills { gap: 6px; }
+.palace-kpill {
+    background: var(--bg-tertiary, #1a1b2e); color: var(--text-secondary, #bbb);
+    border: 1px solid var(--border, #333); border-radius: 14px;
+    padding: 4px 12px; font-size: 12px; cursor: pointer;
+}
+.palace-kpill span { color: var(--text-muted, #777); margin-left: 2px; }
+.palace-kpill.active { border-color: var(--accent, #4a9eff); color: var(--text-primary, #eee); }
+.palace-ent-card { cursor: pointer; }
+.palace-ent-card:hover { border-color: var(--accent, #4a9eff); }
+.palace-ent-meta { margin: 4px 0 6px; }
+.palace-kind { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+.palace-kind-person { background: #14263e; color: #7fb5f5; border: 1px solid #24466e; }
+.palace-kind-place  { background: #14321e; color: #7fdf9f; border: 1px solid #24583a; }
+.palace-kind-thing  { background: #3a2a14; color: #f5c57f; border: 1px solid #6e4e24; }
+.palace-kind-other  { background: #2a1b3e; color: #c39df5; border: 1px solid #4a336e; }
+.palace-kind-none   { background: var(--bg-tertiary, #1a1b2e); color: var(--text-muted, #888); border: 1px solid var(--border, #333); }
+.palace-ent-counts div { font-size: 12px; }
+
+/* Entity detail modal */
+.palace-ent-modal { max-width: 720px; width: min(720px, 92vw); }
+.palace-ent-modal .pr-modal-body { max-height: 70vh; overflow-y: auto; }
+.palace-tier-section { margin: 14px 0; }
+.palace-tier-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-muted, #888); margin-bottom: 8px;
+    border-bottom: 1px solid var(--border, #2a2b3e); padding-bottom: 4px;
+}
+.palace-mention {
+    display: flex; gap: 8px; align-items: baseline; padding: 6px 8px;
+    border-bottom: 1px solid var(--border, #22233a); font-size: 12px;
+}
+.palace-mention-layer { flex-shrink: 0; color: var(--text-muted, #777); font-size: 11px; }
+.palace-mention-text { flex: 1; color: var(--text-secondary, #bbb); min-width: 0; }

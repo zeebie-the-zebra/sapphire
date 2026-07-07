@@ -1,0 +1,195 @@
+// views/palace/entities.js - Mind › Entities, palace edition (L2: people /
+// places / things). Entity cards → detail modal with tiered chunks, the
+// mention graph ("woven into N memories"), and human-editable kind.
+import { renderSectionHeader, bindSectionHeader } from '../../shared/section-header.js';
+import { helpPills } from '../../features/video-link.js';
+import { renderScopeSidebar, bindScopeSidebar } from '../../shared/scope-sidebar.js';
+import { listScopes } from '../../shared/scope-api.js';
+import { escHtml, timeAgo, scopeForChatTab, subscribeMindDomain } from '../../shared/mind-common.js';
+import { setupModalClose } from '../../shared/modal.js';
+import * as ui from '../../ui.js';
+import { PALACE_TABS, SCOPE_ENDPOINT, palaceGet, palaceSend, labelChip, keyPill, metaPanel, bindChunkCards } from './common.js';
+
+const SCOPE_KEY = 'memory_scope';
+const DOMAIN = 'people';
+const KINDS = ['person', 'place', 'thing', 'other'];
+const KIND_ICONS = { person: '\u{1F464}', place: '\u{1F4CD}', thing: '\u{1F4E6}', other: '\u{1F535}' };
+const TIER_NAMES = { 1: 'Headline', 2: 'Facts', 3: 'Trivia' };
+
+let container = null;
+let scope = 'default';
+let scopes = [];
+let unsub = null;
+let _kindFilter = '';   // '' = all
+
+export default {
+    init(el) { container = el; },
+    async show() {
+        if (!unsub) unsub = subscribeMindDomain(DOMAIN, () => scope, () => container?.offsetParent !== null, renderEntities);
+        if (window._mindScope) { scope = window._mindScope; delete window._mindScope; }
+        else { const s = await scopeForChatTab(SCOPE_KEY); if (s) scope = s; }
+        delete window._mindTab;
+        scopes = await listScopes(SCOPE_ENDPOINT);
+        render();
+    },
+    hide() { if (unsub) { unsub(); unsub = null; } }
+};
+
+function content() { return container?.querySelector('#pal-ent-content'); }
+
+function render() {
+    if (!container) return;
+    container.innerHTML = `
+        ${renderSectionHeader({ tabs: PALACE_TABS, active: 'people', help: helpPills('Entities', { doc: 'MEMORY.md', inline: true }), status: '\u{1F3DB}️ Mind Palace — the people, places, and things she knows. Mentions in new memories weave entities into the graph automatically.' })}
+        <div class="two-panel">
+            ${renderScopeSidebar(scopes, scope)}
+            <div class="panel-right">
+                <div class="view-body view-scroll" id="pal-ent-content"></div>
+            </div>
+        </div>`;
+    bindSectionHeader(container);
+    bindScopeSidebar(container, {
+        onScopeChange: (s) => { scope = s; _kindFilter = ''; render(); },
+        onChanged: async (s) => { scope = s || 'default'; _kindFilter = ''; scopes = await listScopes(SCOPE_ENDPOINT); render(); },
+    });
+    renderEntities();
+}
+
+function kindChip(kind) {
+    if (!kind) return '<span class="palace-kind palace-kind-none">unsorted</span>';
+    return `<span class="palace-kind palace-kind-${escHtml(kind)}">${KIND_ICONS[kind] || ''} ${escHtml(kind)}</span>`;
+}
+
+async function renderEntities() {
+    const el = content();
+    if (!el) return;
+    let data;
+    try {
+        data = await palaceGet(`entities?scope=${encodeURIComponent(scope)}`);
+    } catch (e) {
+        el.innerHTML = `<div class="mind-empty">Failed to load: ${escHtml(e.message)}</div>`;
+        return;
+    }
+    const all = data.entities || [];
+    const counts = { '': all.length };
+    for (const k of [...KINDS, null]) counts[k ?? 'none'] = all.filter(x => (x.kind ?? null) === k).length;
+    const list = _kindFilter === ''
+        ? all
+        : all.filter(x => (_kindFilter === 'none' ? !x.kind : x.kind === _kindFilter));
+
+    const pill = (val, label, n) => n || val === '' ?
+        `<button class="palace-kpill ${_kindFilter === val ? 'active' : ''}" data-kind="${val}">${label} <span>${n}</span></button>` : '';
+
+    el.innerHTML = `
+        <div class="mind-toolbar palace-kind-pills">
+            ${pill('', 'All', all.length)}
+            ${pill('person', '\u{1F464} People', counts.person)}
+            ${pill('place', '\u{1F4CD} Places', counts.place)}
+            ${pill('thing', '\u{1F4E6} Things', counts.thing)}
+            ${pill('other', '\u{1F535} Other', counts.other)}
+            ${pill('none', 'Unsorted', counts.none)}
+        </div>
+        ${list.length ? `<div class="mind-people-grid">
+            ${list.map(e => `
+                <div class="mind-person-card palace-ent-card" data-id="${e.id}" role="button" tabindex="0">
+                    <div class="mind-person-name">${escHtml(e.name)}</div>
+                    <div class="palace-ent-meta">${kindChip(e.kind)}</div>
+                    <div class="mind-person-details palace-ent-counts">
+                        <div>\u{1F4C4} ${e.chunk_count} ${e.chunk_count === 1 ? 'entry' : 'entries'}</div>
+                        <div>\u{1F578}️ woven into ${e.edge_count} ${e.edge_count === 1 ? 'memory' : 'memories'}</div>
+                        ${e.mentions ? `<div title="Mentions since the librarian's last pass">\u{1F514} ${e.mentions} unprocessed</div>` : ''}
+                    </div>
+                </div>`).join('')}
+        </div>` : '<div class="mind-empty">No entities in this scope yet — save a memory to the entities layer, or mention someone new.</div>'}
+    `;
+
+    el.querySelectorAll('.palace-kpill').forEach(btn => {
+        btn.addEventListener('click', () => { _kindFilter = btn.dataset.kind; renderEntities(); });
+    });
+    el.querySelectorAll('.palace-ent-card').forEach(card => {
+        card.addEventListener('click', () => showEntityModal(parseInt(card.dataset.id)));
+    });
+}
+
+async function showEntityModal(eid) {
+    let data;
+    try {
+        data = await palaceGet(`entities/${eid}`);
+    } catch (e) { ui.showToast(`Failed to load entity: ${e.message}`, 'error'); return; }
+    const ent = data.entity;
+    const byTier = { 1: [], 2: [], 3: [], other: [] };
+    for (const c of data.chunks) (byTier[c.tier] || byTier.other).push(c);
+
+    document.querySelector('.mind-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'pr-modal-overlay mind-modal-overlay';
+    overlay.innerHTML = `
+        <div class="pr-modal palace-ent-modal">
+            <div class="pr-modal-header">
+                <h3>${escHtml(ent.name)}</h3>
+                <select id="pal-ent-kind" class="palace-select" title="What kind of entity is this?">
+                    <option value="" ${!ent.kind ? 'selected' : ''}>unsorted</option>
+                    ${KINDS.map(k => `<option value="${k}" ${ent.kind === k ? 'selected' : ''}>${KIND_ICONS[k]} ${k}</option>`).join('')}
+                </select>
+                <button class="mind-btn-sm mind-modal-close">✕</button>
+            </div>
+            <div class="pr-modal-body view-scroll">
+                ${[1, 2, 3].filter(t => byTier[t].length).map(t => `
+                    <div class="palace-tier-section">
+                        <div class="palace-tier-title">${TIER_NAMES[t]}</div>
+                        ${byTier[t].map(c => `
+                            <div class="mind-mem-card palace-chunk" data-id="${c.id}">
+                                <div class="mind-mem-header">
+                                    ${labelChip(c.label)}${keyPill(c.private_key)}
+                                    <span class="mind-mem-time">${escHtml(timeAgo(c.created))}</span>
+                                    <span class="mind-mem-id">[${c.id}]</span>
+                                </div>
+                                <div class="mind-mem-content">${escHtml(c.content)}</div>
+                                ${metaPanel(c.meta)}
+                                <div class="mind-mem-actions">
+                                    <button class="mind-btn-sm palace-del-chunk" data-id="${c.id}" title="Delete">✕</button>
+                                </div>
+                            </div>`).join('')}
+                    </div>`).join('') || '<div class="mind-empty">No entries yet</div>'}
+                <div class="palace-tier-section">
+                    <button class="mind-btn" id="pal-ent-addfact">+ Add fact</button>
+                </div>
+                ${data.mentioned_in.length ? `
+                    <div class="palace-tier-section">
+                        <div class="palace-tier-title">\u{1F578}️ Woven into ${data.mentioned_in.length} ${data.mentioned_in.length === 1 ? 'memory' : 'memories'}</div>
+                        ${data.mentioned_in.map(m => `
+                            <div class="palace-mention">
+                                <span class="palace-mention-layer">${escHtml(m.layer)}</span>
+                                <span class="palace-mention-text">${escHtml(m.content.length > 140 ? m.content.slice(0, 140) + '…' : m.content)}</span>
+                                <span class="mind-mem-time">${escHtml(timeAgo(m.created))}</span>
+                            </div>`).join('')}
+                    </div>` : ''}
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.mind-modal-close').addEventListener('click', () => overlay.remove());
+    setupModalClose(overlay, () => overlay.remove());
+
+    overlay.querySelector('#pal-ent-kind').addEventListener('change', async (e) => {
+        try {
+            await palaceSend(`entities/${eid}`, 'PUT', { kind: e.target.value || null });
+            ui.showToast('Kind updated', 'success');
+            renderEntities();
+        } catch (err) { ui.showToast(`Update failed: ${err.message}`, 'error'); }
+    });
+
+    overlay.querySelector('#pal-ent-addfact').addEventListener('click', async () => {
+        const text = prompt(`New fact about ${ent.name} (max 512 chars):`);
+        if (!text?.trim()) return;
+        try {
+            await palaceSend('chunks', 'POST', {
+                content: text.trim(), scope: ent.scope, layer: 'entities', entity: ent.name,
+            });
+            ui.showToast('Saved', 'success');
+            overlay.remove();
+            showEntityModal(eid);
+        } catch (err) { ui.showToast(`Save failed: ${err.message}`, 'error'); }
+    });
+
+    bindChunkCards(overlay, async () => { overlay.remove(); showEntityModal(eid); renderEntities(); }, ui);
+}

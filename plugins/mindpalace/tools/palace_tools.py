@@ -559,6 +559,20 @@ def _private_key_clause(private_key, col='private_key'):
     return f"{col} IS NULL", []
 
 
+# Palace layers → classic Mind UI domains, so the existing MIND_CHANGED SSE
+# rail refreshes whichever view shows this data (palace or classic alike).
+_MIND_DOMAIN = {'events': 'memory', 'self': 'memory',
+                'entities': 'people', 'knowledge': 'knowledge'}
+
+
+def _publish_mind(layer, scope, action):
+    try:
+        from core.mind_events import publish_mind_changed
+        publish_mind_changed(_MIND_DOMAIN.get(layer, 'memory'), scope, action)
+    except Exception:
+        pass  # UI freshness is best-effort; never fails a tool call
+
+
 def _validate_layer(layer):
     """Return (layer_or_None, error_or_None). None layer = all layers (reads)."""
     if layer is None or layer == '':
@@ -836,6 +850,8 @@ def _save_memory(content: str, scope: str, layer: str = None, entity: str = None
             global _backfill_done
             _backfill_done = False
 
+        _publish_mind(layer, scope, 'save')
+
         bits = [f"ID: {chunk_id}", f"layer: {layer}"]
         if entity:
             bits.append(f"entity: {entity}")
@@ -1018,7 +1034,7 @@ def _delete_memory(memory_id: int, scope: str, private_key: str = None) -> tuple
         with _get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT id, content, private_key FROM chunks WHERE id = ? AND scope = ?',
+                'SELECT id, content, private_key, layer FROM chunks WHERE id = ? AND scope = ?',
                 (memory_id, scope),
             )
             row = cursor.fetchone()
@@ -1037,6 +1053,7 @@ def _delete_memory(memory_id: int, scope: str, private_key: str = None) -> tuple
                 "DELETE FROM edges WHERE (src_type='chunk' AND src_id=?) OR (dst_type='chunk' AND dst_id=?)",
                 (memory_id, memory_id))
             conn.commit()
+        _publish_mind(row[3], scope, 'delete')
         preview = row[1][:50] + ('...' if len(row[1]) > 50 else '')
         logger.info(f"[MINDPALACE] Deleted chunk {memory_id} from scope '{scope}'")
         return f"Deleted memory [{memory_id}]: {preview}", True

@@ -21,13 +21,22 @@
         "data_key": "scopes",
         "value_field": "name",
         "name_field": "name",
-        "label_template": "{name} ({count})"
+        "label_template": "{name} ({count})",
+        "nav_target": "mind:memories"
       }
     ],
     "routes": [
       {"method": "GET", "path": "scopes", "handler": "routes/scopes.py:list_scopes"},
       {"method": "POST", "path": "scopes", "handler": "routes/scopes.py:create_scope"},
-      {"method": "DELETE", "path": "scopes/{name}", "handler": "routes/scopes.py:delete_scope"}
+      {"method": "DELETE", "path": "scopes/{name}", "handler": "routes/scopes.py:delete_scope"},
+      {"method": "GET", "path": "status", "handler": "routes/browse.py:status"},
+      {"method": "GET", "path": "chunks", "handler": "routes/browse.py:list_chunks"},
+      {"method": "POST", "path": "chunks", "handler": "routes/browse.py:create_chunk"},
+      {"method": "DELETE", "path": "chunks/{cid}", "handler": "routes/browse.py:delete_chunk"},
+      {"method": "POST", "path": "chunks/{cid}/favorite", "handler": "routes/browse.py:toggle_favorite"},
+      {"method": "GET", "path": "entities", "handler": "routes/browse.py:list_entities"},
+      {"method": "GET", "path": "entities/{eid}", "handler": "routes/browse.py:entity_detail"},
+      {"method": "PUT", "path": "entities/{eid}", "handler": "routes/browse.py:update_entity"}
     ]
   }
 }

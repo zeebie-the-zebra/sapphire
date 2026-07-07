@@ -34,9 +34,11 @@ const VIEW_MODULES = {
     daemons:  `./views/daemons.js${_v}`,
     realtime: `./views/realtime.js${_v}`,
     webhooks: `./views/webhooks.js${_v}`,
-    memories: `./views/memories.js${_v}`,
-    people:   `./views/people.js${_v}`,
-    knowledge: `./views/knowledge.js${_v}`,
+    // Mind trio routes through a dispatcher: palace views when the mindpalace
+    // plugin is active, classic views otherwise (probed live on each show).
+    memories: `./views/mind-dispatch.js?view=memories${_v ? '&v=' + window.__v : ''}`,
+    people:   `./views/mind-dispatch.js?view=people${_v ? '&v=' + window.__v : ''}`,
+    knowledge: `./views/mind-dispatch.js?view=knowledge${_v ? '&v=' + window.__v : ''}`,
     'ai-knowledge': `./views/ai-knowledge.js${_v}`,
     goals:    `./views/goals.js${_v}`,
     settings: `./views/settings.js${_v}`,
