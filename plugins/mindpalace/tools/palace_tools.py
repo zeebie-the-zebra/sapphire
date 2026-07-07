@@ -139,6 +139,11 @@ TOOLS = [
                         "description": "Max results",
                         "default": 10
                     },
+                    "depth": {
+                        "type": "integer",
+                        "description": "How far to follow connections from the results: 0 = direct matches only (default), 1 = also pull the people/places/things linked to the results and their key facts (the usual choice mid-conversation), 2 = walk a neighborhood further through shared connections (best for waking up, orienting, or deep dives — noticeably longer output).",
+                        "default": 0
+                    },
                     "private_key": {
                         "type": "string",
                         "description": "Gating word — pass to include private rows saved with this word."
@@ -932,10 +937,21 @@ def _vector_search(query: str, scope: str, labels: list, limit: int,
     return scored[:limit]
 
 
+def _spider_block(query, scope, private_key, hit_ids, depth):
+    """Bridge to the spider. `sys.modules[__name__]` hands the spider THE
+    module instance actually executing (package or standalone-loaded alike) —
+    the import-identity trap the metadata tests documented."""
+    import sys
+    from plugins.mindpalace.tools import spider
+    return spider.spider_block(sys.modules[__name__], query, scope,
+                               private_key, hit_ids, depth)
+
+
 def _search_memory(query: str, scope: str, limit: int = 10, label: str = None,
-                   layer: str = None, private_key: str = None) -> tuple:
+                   layer: str = None, private_key: str = None, depth: int = 0) -> tuple:
     """v2 cascade with a layer filter: FTS-AND → FTS-OR+prefix → vector → LIKE.
-    First non-empty strategy wins. Spider/depth arrives in the next step."""
+    First non-empty strategy wins. depth>0 appends the spidered neighborhood
+    of the results (tools/spider.py — Dijkstra, two edge prices)."""
     try:
         if not query or not query.strip():
             return "Search query cannot be empty.", False
@@ -948,6 +964,16 @@ def _search_memory(query: str, scope: str, limit: int = 10, label: str = None,
         layer_note = f" in layer '{layer}'" if layer else ""
         private_key = private_key.strip() if (private_key and private_key.strip()) else None
 
+        def _finish(rows):
+            results = [_format_chunk(*r[:6]) for r in rows]
+            out = f"Found {len(rows)} memories:\n" + "\n".join(results)
+            if depth:
+                block = _spider_block(query, scope, private_key,
+                                      [r[0] for r in rows], depth)
+                if block:
+                    out += "\n\n" + block
+            return out, True
+
         _backfill_embeddings()
 
         with _get_connection() as conn:
@@ -958,24 +984,21 @@ def _search_memory(query: str, scope: str, limit: int = 10, label: str = None,
                     rows = _fts_search(cursor, fts_exact, scope, labels, limit,
                                        private_key=private_key, layer=layer)
                     if rows:
-                        results = [_format_chunk(*r[:6]) for r in rows]
-                        return f"Found {len(rows)} memories:\n" + "\n".join(results), True
+                        return _finish(rows)
 
                     fts_broad = _sanitize_fts_query(query, use_or=True, use_prefix=True)
                     if fts_broad != fts_exact:
                         rows = _fts_search(cursor, fts_broad, scope, labels, limit,
                                            private_key=private_key, layer=layer)
                         if rows:
-                            results = [_format_chunk(*r[:6]) for r in rows]
-                            return f"Found {len(rows)} memories:\n" + "\n".join(results), True
+                            return _finish(rows)
                 except sqlite3.OperationalError as e:
                     logger.warning(f"[MINDPALACE] FTS5 query failed: {e}")
 
         vec_results = _vector_search(query, scope, labels, limit,
                                      private_key=private_key, layer=layer)
         if vec_results:
-            results = [_format_chunk(*r[:6]) for r in vec_results]
-            return f"Found {len(vec_results)} memories:\n" + "\n".join(results), True
+            return _finish(vec_results)
 
         # LIKE fallback
         terms = query.lower().split()[:5]
@@ -991,8 +1014,14 @@ def _search_memory(query: str, scope: str, limit: int = 10, label: str = None,
                     params + like_params + [limit])
                 rows = cursor.fetchall()
             if rows:
-                results = [_format_chunk(*r) for r in rows]
-                return f"Found {len(rows)} memories:\n" + "\n".join(results), True
+                return _finish(rows)
+
+        # Zero direct hits — G4 rung 1/2 can still find an entity epicenter
+        # (e.g. the query names someone whose facts use different words).
+        if depth:
+            block = _spider_block(query, scope, private_key, [], depth)
+            if block:
+                return f"No direct matches for '{query}'{layer_note}{label_note}.\n\n" + block, True
 
         return f"No memories found for '{query}'{layer_note}{label_note}.", True
 
@@ -1085,7 +1114,8 @@ def execute(function_name: str, arguments: dict, config) -> tuple:
                                   limit=arguments.get("limit", 10),
                                   label=arguments.get("label"),
                                   layer=arguments.get("layer"),
-                                  private_key=arguments.get("private_key"))
+                                  private_key=arguments.get("private_key"),
+                                  depth=arguments.get("depth", 0))
         elif function_name == "get_recent_memories":
             return _get_recent_memories(scope, count=arguments.get("count", 10),
                                         label=arguments.get("label"),
