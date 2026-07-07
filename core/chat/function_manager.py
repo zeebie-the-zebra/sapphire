@@ -30,13 +30,35 @@ logger = logging.getLogger(__name__)
 scope_rag:       ContextVar       = ContextVar('scope_rag',       default=None)
 scope_private:   ContextVar[bool] = ContextVar('scope_private',   default=False)
 
+# Save-time provenance context for tool executors ({chat, persona, model,
+# channel} dict or None). Not a scope — setting=None keeps it out of
+# apply_scopes, sidebar dropdowns, persona inheritance, continuity task
+# fields, and the force-None closure. Registry membership is what buys it
+# snapshot/restore, so it survives Starlette's per-yield context resets on
+# the same rail scopes do. Consumers read it via set at chat setup →
+# snapshot → restore in execute_function. First consumer: mindpalace metadata.
+tool_context:    ContextVar       = ContextVar('tool_context',    default=None)
+
 # Scope registry — single source of truth for all scope operations.
 # Only rag + private at module load; everything else added by plugin_loader.
 # 'setting' is the key in chat_settings dict (None = not user-settable via sidebar).
 SCOPE_REGISTRY = {
     'rag':       {'var': scope_rag,       'default': None,      'setting': None},
     'private':   {'var': scope_private,   'default': False,     'setting': 'private_chat'},
+    'tool_context': {'var': tool_context, 'default': None,      'setting': None},
 }
+
+
+def set_tool_context(scopes: dict = None, **fields):
+    """Set provenance fields for tool executors, dropping falsy values.
+    When `scopes` (a snapshot dict from snapshot_scopes) is given, updates it
+    in place — call sites snapshot scopes before provider selection resolves
+    the model, so the snapshot needs patching after the fact."""
+    ctx = {k: v for k, v in fields.items() if v} or None
+    tool_context.set(ctx)
+    if scopes is not None:
+        scopes['tool_context'] = ctx
+    return ctx
 
 
 def __getattr__(name):

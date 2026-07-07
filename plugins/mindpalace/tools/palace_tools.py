@@ -788,16 +788,48 @@ def _save_memory(content: str, scope: str, layer: str = None, entity: str = None
             if layer == 'entities':
                 entity_id = upsert_entity(cursor, entity, scope)
                 tier = 2  # facts; headlines (tier 1) are librarian/import territory
+
+            # Tier A metadata + entity-match edge seeding — mechanical, never
+            # blocks the save (failure degrades to a thinner meta row).
+            meta_json = None
+            matched, mention_ids = [], []
+            try:
+                from plugins.mindpalace.tools import metadata as md
+                cursor.execute(
+                    "SELECT id, name FROM entities WHERE scope IN (?, 'global')",
+                    (scope,))
+                ent_rows = cursor.fetchall()
+                matched = md.match_entities(content, [n for _, n in ent_rows])
+                if entity:
+                    # Own entity is covered by the entity_id column — no
+                    # self-edge, no "linked:" echo of the entity just named.
+                    matched = [m for m in matched if m.lower() != entity.lower()]
+                name_to_id = {n: i for i, n in ent_rows}
+                mention_ids = [name_to_id[m] for m in matched if m in name_to_id]
+                exclude = {m.lower() for m in matched}
+                if entity:
+                    exclude.add(entity.lower())
+                meta_json = json.dumps(
+                    md.save_meta(content, exclude_names=exclude),
+                    ensure_ascii=False)
+            except Exception as e:
+                logger.warning(f"[MINDPALACE] Metadata stamping failed (save continues): {e}")
+
             cursor.execute(
                 'INSERT INTO chunks (layer, scope, content, entity_id, tier, label, '
-                'favorite, importance, private_key, created, updated, '
+                'favorite, importance, private_key, meta, created, updated, '
                 'embedding, embedding_provider, embedding_dim) '
-                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (layer, scope, content, entity_id, tier, label,
-                 1 if favorite else 0, importance, private_key, now, now,
+                 1 if favorite else 0, importance, private_key, meta_json, now, now,
                  embedding_blob, embedding_provider, embedding_dim)
             )
             chunk_id = cursor.lastrowid
+            if mention_ids:
+                try:
+                    md.seed_edges(cursor, chunk_id, mention_ids, now)
+                except Exception as e:
+                    logger.warning(f"[MINDPALACE] Edge seeding failed (save continues): {e}")
             conn.commit()
 
         if embed_failed_mid_session:
@@ -807,6 +839,8 @@ def _save_memory(content: str, scope: str, layer: str = None, entity: str = None
         bits = [f"ID: {chunk_id}", f"layer: {layer}"]
         if entity:
             bits.append(f"entity: {entity}")
+        if matched:
+            bits.append(f"linked: {', '.join(matched)}")
         if label:
             bits.append(f"label: {label}")
         if favorite:

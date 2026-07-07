@@ -665,10 +665,17 @@ class LLMChat:
             logger.info(f"[TOOLS] Prompt mode: {self.function_manager._get_current_prompt_mode()}")
             
             provider_key, provider, model_override = self._select_provider()
-            
+
             # Determine effective model (per-chat override or provider default)
             effective_model = model_override if model_override else provider.model
-            
+
+            # Provenance for tool executors (mindpalace metadata). Patches the
+            # _scopes snapshot taken above, since the model resolves only here.
+            from core.chat.function_manager import set_tool_context
+            set_tool_context(_scopes, chat=chat_name,
+                             persona=chat_settings.get('prompt'),
+                             model=effective_model)
+
             # Get generation params for this provider/model
             gen_params = get_generation_params(
                 provider_key, 

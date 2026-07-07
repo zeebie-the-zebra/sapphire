@@ -461,6 +461,16 @@ def _run_import(what: str, config) -> str:
     if any_copied:
         palace_tools.reset_backfill_latch()
 
+    # Stamp derivable metadata (stats/temporal refs/noun candidates) + seed
+    # entity-mention edges on everything just imported. Idempotent (md_v
+    # marker); runs AFTER people-import so events link to person entities.
+    md_result = None
+    try:
+        from plugins.mindpalace.tools import metadata
+        md_result = metadata.backfill()
+    except Exception as e:
+        md_result = {'error': str(e)}
+
     # ── Human-readable summary ──
     lines = ["Import from the classic memory system (v2 → mind palace):"]
     for store in targets:
@@ -473,6 +483,13 @@ def _run_import(what: str, config) -> str:
             if failed:
                 bit += f", {failed} failed"
             lines.append(bit + ".")
+    if md_result:
+        if 'error' in md_result:
+            lines.append(f"  • metadata: backfill failed ({md_result['error']}) — "
+                         "memories are saved and searchable regardless.")
+        else:
+            lines.append(f"  • metadata: {md_result.get('stamped', 0)} chunks stamped, "
+                         f"{md_result.get('edges', 0)} entity links seeded.")
     lines.append("The old databases were opened read-only and were NOT modified — "
                  "they remain your switch-back path.")
     return "\n".join(lines)

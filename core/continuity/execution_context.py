@@ -238,6 +238,15 @@ class ExecutionContext:
         self.fm.set_rag_scope(None)
         self.fm.set_private_chat(False)
 
+        # Provenance for tool executors (mindpalace metadata). Set before the
+        # snapshot so it rides along. model may be '' here (resolved later by
+        # _resolve_provider) — set_tool_context drops falsy fields.
+        from core.chat.function_manager import set_tool_context
+        set_tool_context(None, chat=self.task_settings.get('chat_target'),
+                         persona=self.task_settings.get('prompt'),
+                         model=self.task_settings.get('model'),
+                         channel='continuity')
+
         return snapshot_all_scopes()
 
     def _resolve_provider(self) -> Tuple:
