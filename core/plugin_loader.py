@@ -443,10 +443,24 @@ class PluginLoader:
                     voice_match=voice_match
                 )
 
-        # Register tools with FunctionManager
+        # Register tools with FunctionManager. A refusal dict means a tool-name
+        # collision with an already-loaded plugin — mutual exclusivity by design
+        # (e.g. memory vs mindpalace share tool names on purpose). Unwind this
+        # plugin's partial registrations and report not-loaded; the boot loop
+        # preserves user intent (retry next restart). Scopes stay — the scope
+        # registry is idempotent and the owning plugin's entry was never
+        # displaced.
         tool_paths = capabilities.get("tools", [])
         if tool_paths and self._function_manager:
-            self._function_manager.register_plugin_tools(name, plugin_dir, tool_paths)
+            refusal = self._function_manager.register_plugin_tools(name, plugin_dir, tool_paths)
+            if refusal:
+                self._function_manager.unregister_plugin_tools(name)
+                hook_runner.unregister_plugin(name)
+                self._load_errors.append(refusal)
+                from core.event_bus import publish, Events
+                publish(Events.PLUGIN_LOAD_ERROR, refusal)
+                logger.warning(f"[PLUGINS] {name}: not loaded — {refusal['error']}")
+                return False
 
         # Register dashboard widgets — same shape as other capabilities.
         # Widget render modules are served at /plugin-web/{name}/{render_path}.

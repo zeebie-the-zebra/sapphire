@@ -384,6 +384,13 @@ class FunctionManager:
             plugin_dir: Path to plugin root directory
             tool_paths: List of relative paths to tool files (e.g., ["tools/ha.py"])
 
+        Returns:
+            None on success (including per-module non-fatal errors, which are
+            logged and skipped as before). On a tool-NAME collision with an
+            already-registered tool, returns a refusal dict {plugin, error,
+            hint} — mutual exclusivity: the caller must unwind this plugin and
+            not load it. First-loaded plugin wins.
+
         Phase 4 sys.modules idempotency: for each plugin tool file, we compute a
         canonical module name (e.g., ``plugins.memory.tools.memory_tools``). If
         that name is already in ``sys.modules``, we REUSE the existing module —
@@ -479,14 +486,30 @@ class FunctionManager:
                     mode_filter = namespace.get('MODE_FILTER')
                     settings_gate = namespace.get('SETTINGS_GATED')
 
-                    # Check for function name conflicts BEFORE mutating state
+                    # Check for function name conflicts BEFORE mutating state.
+                    # A collision means mutual exclusivity by design (e.g. the
+                    # memory and mindpalace plugins share tool names on purpose):
+                    # refuse THIS plugin cleanly, first-loaded wins. Return the
+                    # refusal so _load_plugin unwinds and reports it — before
+                    # 2026-07-06 the ValueError raised here was swallowed by the
+                    # generic except below and the plugin half-loaded with its
+                    # tools silently missing.
                     existing_names = {t['function']['name'] for t in self.all_possible_tools}
                     for tool in tools:
                         fname = tool['function']['name']
                         if fname in existing_names:
-                            owner = self._function_module_map.get(fname, 'unknown')
-                            logger.error(f"\033[91mPlugin '{plugin_name}' tool '{fname}' conflicts with existing tool from '{owner}' — plugin NOT loaded\033[0m")
-                            raise ValueError(f"Tool name '{fname}' already registered by '{owner}'")
+                            owner_mod = self._function_module_map.get(fname, '')
+                            owner = self.function_modules.get(owner_mod, {}).get('_plugin') or owner_mod or 'core'
+                            logger.warning(
+                                f"Plugin '{plugin_name}' tool '{fname}' is already provided by "
+                                f"'{owner}' — refusing '{plugin_name}' (mutually exclusive)")
+                            return {
+                                "plugin": plugin_name,
+                                "error": (f"Tool '{fname}' is already active from '{owner}'. "
+                                          f"'{plugin_name}' and '{owner}' are mutually exclusive — "
+                                          f"enable one, not both."),
+                                "hint": f"Disable plugin '{owner}' to use '{plugin_name}'.",
+                            }
 
                     self.function_modules[module_name] = {
                         'module': None,
