@@ -17,8 +17,10 @@ const CLASSIC = {
     memories: `./memories.js${_v}`,
     people: `./people.js${_v}`,
     knowledge: `./knowledge.js${_v}`,
+    // 'self' has no classic equivalent — L0 is palace-only (handled in show()).
 };
 const PALACE = {
+    self: `./palace/self.js${_v}`,
     memories: `./palace/memories.js${_v}`,
     people: `./palace/entities.js${_v}`,
     knowledge: `./palace/knowledge.js${_v}`,
@@ -46,7 +48,20 @@ async function palaceActive() {
 export default {
     init(el) { container = el; },
     async show() {
-        const wantKind = (await palaceActive()) ? 'palace' : 'classic';
+        const active = await palaceActive();
+        const wantKind = active ? 'palace' : 'classic';
+        // L0 self layer is palace-only. Under the classic system there's no
+        // self view — show a friendly pointer instead of erroring on a
+        // missing module import.
+        if (VIEW === 'self' && !active) {
+            if (impl?.hide) { try { impl.hide(); } catch {} }
+            impl = null; implKind = null;
+            container.innerHTML = `<div class="view-placeholder">
+                <h2>\u{1F4A0} Self</h2>
+                <p style="color:var(--text-muted);font-size:var(--font-sm)">The self layer lives in the Mind Palace memory system. Enable the Mind Palace plugin to give Sapphire a self-sheet.</p>
+            </div>`;
+            return;
+        }
         if (implKind !== wantKind) {
             if (impl?.hide) { try { impl.hide(); } catch {} }
             try {

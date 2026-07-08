@@ -2,7 +2,7 @@
   "name": "mindpalace",
   "short_display_name": "Mind Palace",
   "short_name": "Mind Palace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Layered memory supersystem (v3) — self/events/entities/knowledge layers behind one tool surface. Mutually exclusive with the Memory plugin: enable one, not both. Import copies from the classic system; old data is never touched.",
   "author": "sapphire",
   "icon": "🏛️",
@@ -11,7 +11,8 @@
   "capabilities": {
     "tools": [
       "tools/palace_tools.py",
-      "tools/import_tools.py"
+      "tools/import_tools.py",
+      "tools/self_tools.py"
     ],
     "scopes": [
       {
@@ -34,6 +35,9 @@
       {"method": "POST", "path": "chunks", "handler": "routes/browse.py:create_chunk"},
       {"method": "DELETE", "path": "chunks/{cid}", "handler": "routes/browse.py:delete_chunk"},
       {"method": "POST", "path": "chunks/{cid}/favorite", "handler": "routes/browse.py:toggle_favorite"},
+      {"method": "GET", "path": "self", "handler": "routes/self_routes.py:get_sheet"},
+      {"method": "PUT", "path": "self/{section}", "handler": "routes/self_routes.py:put_section"},
+      {"method": "GET", "path": "self/{section}/history", "handler": "routes/self_routes.py:section_history"},
       {"method": "GET", "path": "entities", "handler": "routes/browse.py:list_entities"},
       {"method": "GET", "path": "entities/{eid}", "handler": "routes/browse.py:entity_detail"},
       {"method": "PUT", "path": "entities/{eid}", "handler": "routes/browse.py:update_entity"}

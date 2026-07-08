@@ -8,7 +8,7 @@ let currentView = null;
 const VIEW_GROUPS = {
     personas: ['personas', 'prompts', 'toolsets', 'spices'],
     triggers: ['heartbeat', 'scheduled', 'daemons', 'realtime', 'webhooks'],
-    mind: ['memories', 'people', 'knowledge', 'ai-knowledge', 'goals'],
+    mind: ['self', 'memories', 'people', 'knowledge', 'ai-knowledge', 'goals'],
     settings: ['settings', 'help', 'video-guide']
 };
 

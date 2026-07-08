@@ -83,6 +83,8 @@
       "search_memory",
       "get_recent_memories",
       "delete_memory",
+      "read_self",
+      "update_self",
       "save_knowledge",
       "search_knowledge",
       "delete_knowledge",

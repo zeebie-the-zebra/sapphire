@@ -7,8 +7,10 @@ export const API = '/api/plugin/mindpalace';
 export const SCOPE_ENDPOINT = `${API}/scopes`;
 
 // Same tab ids as MIND_TABS (ids === view ids, routing unchanged) — only the
-// People label shifts: the palace L2 is people/places/THINGS.
+// People label shifts: the palace L2 is people/places/THINGS. Self (L0) leads
+// the strip — it's the palace-only layer and the identity root of the graph.
 export const PALACE_TABS = [
+    { id: 'self', label: 'Self', icon: '\u{1F4A0}' },
     { id: 'memories', label: 'Memories', icon: '\u{1F9E0}' },
     { id: 'people', label: 'Entities', icon: '\u{1F465}' },
     { id: 'knowledge', label: 'Human Knowledge', icon: '\u{1F4DA}' },

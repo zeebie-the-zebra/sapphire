@@ -9244,3 +9244,55 @@ a.gallery-caption:hover {
 }
 .palace-mention-layer { flex-shrink: 0; color: var(--text-muted, #777); font-size: 11px; }
 .palace-mention-text { flex: 1; color: var(--text-secondary, #bbb); min-width: 0; }
+
+/* ── Self view (L0) — the self sheet. Visually distinct: section cards in a
+      responsive grid, live dashboard up top, autosave textareas. ── */
+.palace-self-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 14px; margin-top: 14px;
+}
+.palace-self-card { display: flex; flex-direction: column; }
+.palace-self-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.palace-self-title { font-weight: 600; color: var(--text, #e6e6f0); font-size: 14px; }
+.palace-self-hint { color: var(--text-muted, #888); font-size: 11px; margin-bottom: 8px; }
+.palace-mode-chip { font-size: 12px; opacity: 0.75; cursor: help; }
+.palace-self-saved { color: #7fdf9f; font-size: 11px; }
+.palace-self-hist, .palace-self-delbox { margin-left: 0; }
+.palace-self-card-head .palace-self-hist,
+.palace-self-card-head .palace-self-saved { margin-left: auto; }
+.palace-self-card-head .palace-self-delbox { margin-left: 4px; }
+.palace-self-text {
+    width: 100%; min-height: 78px; resize: vertical; box-sizing: border-box;
+    background: var(--input-bg, #16172a); color: var(--text, #e6e6f0);
+    border: 1px solid var(--border, #2a2b3e); border-radius: 8px;
+    padding: 8px 10px; font: inherit; font-size: 13px; line-height: 1.45;
+}
+.palace-self-text:focus { outline: none; border-color: #c39df5; }
+
+/* Handles: key-value editor */
+.palace-kv-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.palace-kv { display: flex; gap: 6px; align-items: center; }
+.palace-kv-key, .palace-kv-val {
+    background: var(--input-bg, #16172a); color: var(--text, #e6e6f0);
+    border: 1px solid var(--border, #2a2b3e); border-radius: 6px;
+    padding: 5px 8px; font: inherit; font-size: 12px; min-width: 0;
+}
+.palace-kv-key { flex: 0 0 34%; }
+.palace-kv-val { flex: 1; }
+.palace-kv-key:focus, .palace-kv-val:focus { outline: none; border-color: #c39df5; }
+
+/* Dashboard: computed, read-only, distinct purple frame (self layer color) */
+.palace-self-dash {
+    background: linear-gradient(180deg, #1c1330, #16172a);
+    border: 1px solid #4a336e; border-radius: 12px; padding: 14px 16px;
+}
+.palace-dash-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 10px; margin: 10px 0;
+}
+.palace-dash-stat { text-align: center; }
+.palace-dash-n { font-size: 22px; font-weight: 700; color: #c39df5; line-height: 1.1; }
+.palace-dash-l { font-size: 10px; color: var(--text-muted, #888); text-transform: uppercase; letter-spacing: 0.05em; }
+.palace-dash-sub { display: block; font-size: 9px; opacity: 0.8; letter-spacing: 0; text-transform: none; }
+.palace-dash-woven { font-size: 12px; color: var(--text-secondary, #bbb); margin-top: 6px; }
+.palace-dash-since { font-size: 11px; color: var(--text-muted, #777); margin-top: 4px; }
