@@ -242,7 +242,10 @@ class ClaudeProvider(BaseProvider):
         thinking_enabled = self.config.get('thinking_enabled')
         if thinking_enabled is None:
             thinking_enabled = getattr(config, 'CLAUDE_THINKING_ENABLED', False)
-        disable_thinking = params.get('disable_thinking', False)
+        # B2: the Settings "disable thinking" checkbox lives on provider config —
+        # honor it as a fallback when the per-request param isn't set (continue/
+        # prefill set the param directly). Without this it was a no-op on Claude.
+        disable_thinking = params.get('disable_thinking', self.config.get('disable_thinking', False))
 
         # SAFETY: Auto-disable thinking if active tool cycle lacks thinking_raw
         if needs_thinking_disabled:
@@ -333,7 +336,10 @@ class ClaudeProvider(BaseProvider):
         thinking_enabled = self.config.get('thinking_enabled')
         if thinking_enabled is None:
             thinking_enabled = getattr(config, 'CLAUDE_THINKING_ENABLED', False)
-        disable_thinking = params.get('disable_thinking', False)
+        # B2: the Settings "disable thinking" checkbox lives on provider config —
+        # honor it as a fallback when the per-request param isn't set (continue/
+        # prefill set the param directly). Without this it was a no-op on Claude.
+        disable_thinking = params.get('disable_thinking', self.config.get('disable_thinking', False))
         
         # SAFETY: Auto-disable thinking if active tool cycle lacks thinking_raw
         if needs_thinking_disabled:

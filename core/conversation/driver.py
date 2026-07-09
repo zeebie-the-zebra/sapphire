@@ -147,11 +147,15 @@ class ConversationDriver:
 
             stream, sid, chat = self.system.llm_chat.begin_stream(self._chat_name)
             try:
-                armed = False    # barge-in stays blocked until prose actually flows
+                armed = False    # barge-in stays blocked until AUDIO actually flows
                 for event in stream.chat_stream(text):
                     et = event.get("type") if isinstance(event, dict) else None
-                    if not armed and et in ("content", "tts_chunk"):
-                        self.engine.arm_barge()   # she's talking now — interruptible
+                    # D1: arm only on tts_chunk (real audio), NOT "content". Thinking
+                    # is streamed as <think>-wrapped content events with no audio, so
+                    # arming on content let a caller's talk-pause-talk cadence cancel a
+                    # reasoning model's turn during its silent thinking phase.
+                    if not armed and et == "tts_chunk":
+                        self.engine.arm_barge()   # she's speaking now — interruptible
                         armed = True
                     if et == "content":
                         publish(Events.VOICE_TURN_CHUNK,

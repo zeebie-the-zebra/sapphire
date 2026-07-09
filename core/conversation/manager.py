@@ -146,6 +146,15 @@ class ConversationManager:
                 logger.warning(f"[CONV] start_external({source_label}) refused — "
                                f"{len(self.external)}/{cap} slots in use")
                 return None
+            # A2: serialize per chat. Two live sessions on one chat each seed from a
+            # start-of-session snapshot and persist the WHOLE messages column, so the
+            # last writer silently erases the other's turns. One live stream per chat
+            # name; a second caller targeting an already-live chat is refused here and
+            # rejected by the caller like a busy line.
+            if chat_name and any(r.get("chat") == chat_name for r in self.external.values()):
+                logger.warning(f"[CONV] start_external({source_label}) refused — "
+                               f"chat '{chat_name}' already has a live session")
+                return None
             driver = self._build_driver(chat_name=chat_name)
             gate = self._build_gate()
             try:

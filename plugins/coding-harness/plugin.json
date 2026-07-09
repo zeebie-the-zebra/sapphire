@@ -2,7 +2,7 @@
   "name": "coding-harness",
   "short_display_name": "Coding Harness",
   "version": "1.0.0",
-  "description": "Coding Harness — file read/write/edit, search, and shell commands in a sandboxed working directory",
+  "description": "Coding Harness — file read/write/edit, search, and shell commands, with file tools and command cwd scoped to a working directory",
   "author": "sapphire",
   "icon": "🧰",
   "url": "https://sapphireblue.dev",
@@ -23,7 +23,7 @@
         "type": "boolean",
         "label": "Sandbox to Working Directory",
         "default": true,
-        "help": "Confine file tools and command cwd to the working directory"
+        "help": "Confines the file tools (read/write/edit) and each run_command's STARTING directory to the working dir. run_command still uses a shell, so a command can read/write outside it (e.g. 'cat ../file') — the blacklist below is the real guardrail for commands."
       },
       {
         "key": "output_limit",

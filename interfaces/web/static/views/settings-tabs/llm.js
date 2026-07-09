@@ -322,7 +322,7 @@ function _advancedFieldsHtml(prefix, v = {}) {
                     </label>
                 </div>
                 <div class="text-muted" style="font-size:0.8em;margin-left:24px;margin-top:2px">
-                    Tries the right switch per model — GLM/Z.AI, Qwen, Claude, Gemini. Some reasoning models (o1, DeepSeek-R1) can't fully disable. Cuts latency by skipping the reasoning phase.
+                    Tries the right switch per model — GLM/Z.AI, Qwen, Fireworks reasoning, and Claude (incl. Anthropic-compatible). OpenAI o-series/GPT-5 and Gemini can't be disabled from here yet — hit 🧠 Thinking to see what a given model actually does. Cuts latency by skipping the reasoning phase.
                 </div>
                 <div class="field-row" style="margin-top:8px;align-items:flex-start">
                     <label style="padding-top:4px">Extra body (JSON)</label>

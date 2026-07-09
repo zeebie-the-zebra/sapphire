@@ -538,7 +538,7 @@ def set_active_model(system, provider_key: str) -> tuple:
         return False, "Failed to save chat settings"
     from core.event_bus import publish, Events
     publish(Events.CHAT_SETTINGS_CHANGED, {
-        "chat": sm.get_active_chat_name(),
+        "chat": sm._effective_chat_name(),
         "settings": {"llm_primary": provider_key},
         "origin": None,
     })

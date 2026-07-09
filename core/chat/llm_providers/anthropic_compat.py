@@ -305,7 +305,9 @@ class AnthropicCompatProvider(BaseProvider):
             request_kwargs["temperature"] = self._clamp_temperature(params["temperature"])
 
         # Thinking support (opt-in, no safety guards)
-        disable_thinking = params.get('disable_thinking', False)
+        # B2: honor the provider-config "disable thinking" checkbox as a fallback
+        # when the per-request param isn't set (else the checkbox was a no-op here).
+        disable_thinking = params.get('disable_thinking', self.config.get('disable_thinking', False))
         if self._thinking_enabled and not disable_thinking:
             if request_kwargs["max_tokens"] <= self._thinking_budget:
                 request_kwargs["max_tokens"] = self._thinking_budget + 8000
@@ -346,7 +348,9 @@ class AnthropicCompatProvider(BaseProvider):
             request_kwargs["temperature"] = self._clamp_temperature(params["temperature"])
 
         # Thinking support (opt-in, no safety guards)
-        disable_thinking = params.get('disable_thinking', False)
+        # B2: honor the provider-config "disable thinking" checkbox as a fallback
+        # when the per-request param isn't set (else the checkbox was a no-op here).
+        disable_thinking = params.get('disable_thinking', self.config.get('disable_thinking', False))
         if self._thinking_enabled and not disable_thinking:
             if request_kwargs["max_tokens"] <= self._thinking_budget:
                 request_kwargs["max_tokens"] = self._thinking_budget + 8000

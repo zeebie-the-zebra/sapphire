@@ -228,6 +228,12 @@ def _reconstruct_thinking_content(content: str, thinking: str) -> str:
 
 
 class ConversationHistory:
+    # Whether THIS chat is mid-tool-cycle (Claude thinking_raw handling). Lives on
+    # the history object so concurrent streams — a phone call and the web UI each
+    # have their own ConversationHistory — can't clobber each other's cycle state.
+    # Class-attr default so every instance reads False before its first turn.
+    _in_tool_cycle = False
+
     def __init__(self, max_history: int = 30):
         self.max_history = max_history
         self.messages = []
@@ -1399,6 +1405,21 @@ class ChatSessionManager:
             pass
         return self.active_chat_name
 
+    @property
+    def _in_tool_cycle(self) -> bool:
+        """Tool-cycle state for THIS turn's chat. Proxies to the effective chat's
+        history so a phone call and the web UI don't share one flag (which would
+        drop Claude's thinking_raw mid-cycle → provider 400). Every existing call
+        site — including the streaming-cleanup finally — reads through here."""
+        ch = self._effective_chat()
+        return getattr(ch, "_in_tool_cycle", False) if ch is not None else False
+
+    @_in_tool_cycle.setter
+    def _in_tool_cycle(self, value: bool):
+        ch = self._effective_chat()
+        if ch is not None:
+            ch._in_tool_cycle = bool(value)
+
     def make_stream_session(self, chat_name: str) -> Optional[Dict[str, Any]]:
         """Build a per-context stream session for `chat_name`: its settings + a
         ConversationHistory seeded from its stored messages. system_prompt/tools
@@ -1645,19 +1666,24 @@ class ChatSessionManager:
             return 0
 
     def clear(self):
-        self.current_chat.clear()
-        self._in_tool_cycle = False
-        self._save_current_chat()
+        # A1: clear the EFFECTIVE chat (a per-stream override's chat, else the
+        # active one). Without this, reset_chat from a phone call or a background
+        # conversation wiped the operator's active WEB chat instead of the call's.
+        eff_chat = self._effective_chat()
+        eff_name = self._effective_chat_name()
+        eff_chat.clear()
+        eff_chat._in_tool_cycle = False
+        self._save_current_chat()  # already routes to the effective chat
 
-        # Clear tool images for this chat
+        # Clear tool images for the effective chat
         try:
             with self._get_connection() as conn:
-                conn.execute("DELETE FROM tool_images WHERE chat_name = ?", (self.active_chat_name,))
+                conn.execute("DELETE FROM tool_images WHERE chat_name = ?", (eff_name,))
                 conn.commit()
         except Exception:
             pass  # Table may not exist yet
 
-        publish(Events.CHAT_CLEARED)
+        publish(Events.CHAT_CLEARED, {"chat_name": eff_name})
 
     def edit_message_by_content(self, role: str, original_content: str, new_content: str) -> bool:
         """Edit message and save."""
@@ -1697,8 +1723,27 @@ class ChatSessionManager:
             return None
 
     def update_chat_settings(self, settings: Dict[str, Any]) -> bool:
-        """Update current chat's settings and save."""
+        """Update the EFFECTIVE chat's settings and save. Normally the active chat;
+        under a per-stream brain override (phone call / background conversation) the
+        stream's own chat — so an AI switch_model/switch_toolset/set_voice writes to
+        the chat it is actually running in, not the operator's active web chat."""
         try:
+            eff_chat = self._effective_chat()
+            if eff_chat is not self.current_chat:
+                # Override active — merge into the stream's own chat via a direct DB
+                # write, and keep this turn's in-memory snapshot in sync.
+                eff_name = self._effective_chat_name()
+                ok = self.set_named_chat_settings(eff_name, settings)
+                if ok:
+                    try:
+                        from core.chat.stream_brain import get_override
+                        o = get_override()
+                        if o is not None and o.get("settings") is not None:
+                            o["settings"].update(settings)
+                    except Exception:
+                        pass
+                    logger.info(f"Updated settings for override chat '{eff_name}'")
+                return ok
             self.current_settings.update(settings)
             self._save_current_chat()
             logger.info(f"Updated settings for chat '{self.active_chat_name}'")

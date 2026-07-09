@@ -430,12 +430,16 @@ function initEventBus() {
         }, 100);
     };
 
-    // AI typing events
-    eventBus.on(eventBus.Events.AI_TYPING_START, () => {
+    // AI typing events. D4: ignore a foreign stream's typing (a live phone call /
+    // background conversation) — it isn't the operator's own turn, and refreshing
+    // their active chat on it caused spurious churn.
+    eventBus.on(eventBus.Events.AI_TYPING_START, (data) => {
+        if (data?.foreign) return;
         console.log('[EventBus] AI typing started');
     });
 
-    eventBus.on(eventBus.Events.AI_TYPING_END, () => {
+    eventBus.on(eventBus.Events.AI_TYPING_END, (data) => {
+        if (data?.foreign) return;
         console.log('[EventBus] AI typing ended');
         debouncedRefresh();
     });

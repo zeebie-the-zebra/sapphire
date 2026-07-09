@@ -382,6 +382,14 @@ def _on_call(scope, caller, session):
             _call_ended(scope, caller, "", False, "no_matching_rule", 0.0, 0)
             return
         chat, ephemeral = _resolve_chat(system, scope, caller, task)
+        if chat is None:
+            # B1: rule couldn't yield a safe isolated chat (no chat_target on a
+            # non-ephemeral rule, or ephemeral setup failed). Refuse rather than
+            # drop the caller into the owner's 'default' chat.
+            logger.warning(f"[TWILIO] no safe chat for {caller} — refusing call")
+            session.stop()
+            _call_ended(scope, caller, "", False, "no_safe_chat", 0.0, 0)
+            return
 
     # One live call per chat: the per-chat hooks (phone context, hangup sentinel)
     # resolve their call by chat name — two calls sharing one chat would cross wires
@@ -506,7 +514,12 @@ def _resolve_chat(system, scope, caller, task):
     tc = (task or {}).get("trigger_config", {})
     if not bool(tc.get("ephemeral")):
         chat_target = ((task or {}).get("chat_target") or "").strip()
-        return (chat_target or "default"), False
+        # B1: never drop an inbound caller into the owner's 'default' chat (full
+        # history + all tools + owner scopes). A non-ephemeral rule must name its
+        # chat_target explicitly; with none set, refuse the call.
+        if not chat_target:
+            return None, False
+        return chat_target, False
 
     ttl_min = float(tc.get("ephemeral_minutes", 10) or 10)
     digits = "".join(c for c in (caller or "") if c.isalnum()) or "unknown"
@@ -535,8 +548,17 @@ def _resolve_chat(system, scope, caller, task):
         # chat actually has a working model (not the system default).
         if (task or {}).get("prompt"):
             patch["prompt"] = task["prompt"]
-        if (task or {}).get("toolset"):
-            patch["toolset"] = task["toolset"]
+        # B1: a stranger's line is locked down by DEFAULT. Toolset falls back to
+        # 'none' (not the 'all' create_chat inherits); every scope falls back to an
+        # isolated per-caller value (the throwaway chat name), never the owner's
+        # 'default'. The rule opts INTO capability/memory by setting these itself.
+        patch["toolset"] = (task or {}).get("toolset") or "none"
+        try:
+            from core.chat.function_manager import scope_setting_keys
+            for _sk in scope_setting_keys():
+                patch[_sk] = (task or {}).get(_sk) or safe
+        except Exception as _se:
+            logger.warning(f"[TWILIO] scope isolation fallback failed ({_se})")
         if tc.get("tts_voice"):                     # rule's voice -> per-stream TTS
             patch["tts_voice"] = tc["tts_voice"]
         prov = (task or {}).get("provider")
@@ -544,15 +566,12 @@ def _resolve_chat(system, scope, caller, task):
             patch["llm_primary"] = prov
         if (task or {}).get("model"):
             patch["llm_model"] = task["model"]
-        # Memory/knowledge scopes — a caller with tools reaches an ISOLATED scope,
-        # never the owner's default.
-        for _k, _v in (task or {}).items():
-            if _k.startswith("scope_") and _v:
-                patch[_k] = _v
         system.llm_chat.session_manager.set_named_chat_settings(safe, patch)
     except Exception as e:
-        logger.warning(f"[TWILIO] ephemeral chat setup failed ({e}); using 'default'")
-        return "default", False
+        # B1: a setup failure must NOT dump a stranger into the owner's 'default'
+        # chat — refuse the call instead.
+        logger.warning(f"[TWILIO] ephemeral chat setup failed ({e}); refusing call")
+        return None, False
     return safe, True
 
 

@@ -350,15 +350,20 @@ export async function init(container) {
             } catch (e) { /* silent */ }
         }));
 
-        // AI starts — show stop button, reset stream state
-        _chatUnsubs.push(eventBus.on(eventBus.Events.AI_TYPING_START, () => {
+        // AI starts — show stop button, reset stream state (D4: skip foreign turns)
+        _chatUnsubs.push(eventBus.on(eventBus.Events.AI_TYPING_START, (data) => {
+            if (data?.foreign) return;
             _aiStreamEl = null;
             _thinkOpen = false;
             chatStop?.classList.add('visible');
         }));
 
-        // AI done or error — hide stop button
-        const hideStop = () => chatStop?.classList.remove('visible');
+        // AI done or error — hide stop button (D4: a phone call's END/TTS_STOPPED
+        // must not hide the operator's own Stop button mid-turn).
+        const hideStop = (data) => {
+            if (data?.foreign || data?.surface === 'phone') return;
+            chatStop?.classList.remove('visible');
+        };
         _chatUnsubs.push(eventBus.on(eventBus.Events.AI_TYPING_END, hideStop));
         _chatUnsubs.push(eventBus.on(eventBus.Events.LLM_ERROR, hideStop));
         _chatUnsubs.push(eventBus.on(eventBus.Events.TTS_STOPPED, hideStop));
@@ -942,7 +947,13 @@ export async function init(container) {
     // Wire SSE events — AI-init writers feed rail 3, user-init feed rail 4.
     const unsubs = [];
     for (const [event, state] of Object.entries(AI_TRANSITIONS)) {
-        const unsub = eventBus.on(event, () => writeAIRail(state));
+        // D4: the operator's avatar reflects HER local state — ignore a phone
+        // call / background conversation's turn (AI_TYPING carries foreign; TTS
+        // carries surface). Events without these flags pass through unchanged.
+        const unsub = eventBus.on(event, (data) => {
+            if (data?.foreign || data?.surface === 'phone') return;
+            writeAIRail(state);
+        });
         if (unsub) unsubs.push(unsub);
     }
     for (const [event, cfg] of Object.entries(USER_TRANSITIONS)) {

@@ -700,7 +700,6 @@ def _set_voice(args):
 
 def _reset_chat(args):
     from core import prompts
-    from core.event_bus import publish, Events
 
     reason = args.get('reason')
     if not reason:
@@ -708,10 +707,8 @@ def _reset_chat(args):
 
     logger.info(f"AI INITIATED CHAT RESET - Reason: {reason}")
     sm = _system().llm_chat.session_manager
-    chat_name = sm.get_active_chat_name()
-    sm.clear()
+    sm.clear()  # clears + persists the EFFECTIVE chat and publishes CHAT_CLEARED
     prompts.clear_transients()
-    publish(Events.CHAT_CLEARED, {"chat_name": chat_name, "origin": None})
     return f"Chat reset. Reason: {reason}", True
 
 

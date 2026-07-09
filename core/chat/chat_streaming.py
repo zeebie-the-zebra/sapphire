@@ -98,9 +98,12 @@ class StreamingChat:
         """
         logger.info(f"[START] [STREAMING START] cancel_flag={self.cancel_flag}, prefill={bool(prefill)}, skip_user={skip_user_message}, images={len(images) if images else 0}, files={len(files) if files else 0}")
 
-        # Publish typing start event
+        # Publish typing start event. D4: tag the surface so the operator's browser
+        # ignores a phone call / background conversation's typing (target_chat set =
+        # foreign stream). Untagged, a live call flickered the operator's avatar +
+        # Stop button and re-fetched their active chat.
         self.is_streaming = True
-        publish(Events.AI_TYPING_START)
+        publish(Events.AI_TYPING_START, {"foreign": bool(self.target_chat), "chat": self.target_chat})
 
         # Immediate feedback that backend received the request
         yield {"type": "stream_started"}
@@ -192,7 +195,7 @@ class StreamingChat:
                         else:
                             self.ephemeral = True
                         yield {"type": "content", "text": response}
-                    publish(Events.AI_TYPING_END)
+                    publish(Events.AI_TYPING_END, {"foreign": bool(self.target_chat), "chat": self.target_chat})
                     self.is_streaming = False
                     return
                 user_input = hook_event.input  # may have been mutated
@@ -1066,4 +1069,4 @@ class StreamingChat:
                     stream_brain.reset_override(_brain_token)
                 except Exception:
                     pass
-            publish(Events.AI_TYPING_END)
+            publish(Events.AI_TYPING_END, {"foreign": bool(self.target_chat), "chat": self.target_chat})
