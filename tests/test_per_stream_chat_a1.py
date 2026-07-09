@@ -167,4 +167,89 @@ def test_override_reset_restores_active_writes(sm):
     # immediately after reset, a write must go to the active chat again
     sm.add_user_message("back-to-active")
     assert "back-to-active" in _texts(sm.read_chat_messages(active))
+
+
+# ─────────────── A1 write-routing (2026-07-09): clear / settings / tool-cycle ───────────────
+# These three methods READ the override but historically WROTE the active chat.
+# reset_chat wiped the operator's web chat; switch_model moved the wrong chat's
+# provider; a shared _in_tool_cycle bool dropped Claude thinking_raw mid-cycle (400).
+
+def test_clear_routes_to_override_chat_active_untouched(sm):
+    """reset_chat from a phone stream clears the CALL's chat, never the operator's
+    active web chat (the wrong-chat-wipe: data loss on a bystander chat)."""
+    active = sm.get_active_chat_name()
+    sm.add_user_message("active-keepsafe")             # active/default
+    sess = sm.make_stream_session("phone")
+    tok = stream_brain.set_override(sess)
+    try:
+        sm.add_user_message("phone-msg")
+        assert "phone-msg" in _texts(sm.read_chat_messages("phone"))
+        sm.clear()                                     # AI calls reset_chat mid-call
+    finally:
+        stream_brain.reset_override(tok)
+    assert sm.read_chat_messages("phone") == []        # the call's chat emptied
+    assert "active-keepsafe" in _texts(sm.read_chat_messages(active))  # web chat intact
+
+
+def test_clear_no_override_clears_active(sm):
+    """OFF-path: clear with no override empties the active chat (unchanged)."""
+    active = sm.get_active_chat_name()
+    sm.add_user_message("doomed")
+    sm.clear()
+    assert sm.read_chat_messages(active) == []
+
+
+def test_update_chat_settings_routes_to_override_active_untouched(sm):
+    """switch_model / switch_toolset / set_voice from a phone stream write the CALL's
+    settings, not the operator's active chat (the wrong-chat model/privacy switch)."""
+    active = sm.get_active_chat_name()
+    active_model_before = sm.current_settings.get("llm_primary")
+    sess = sm.make_stream_session("phone")
+    tok = stream_brain.set_override(sess)
+    try:
+        assert sm.update_chat_settings({"llm_primary": "local_only", "toolset": "none"})
+        # in-turn snapshot reflects the change immediately (same-turn reads consistent)
+        assert sm.get_chat_settings().get("llm_primary") == "local_only"
+    finally:
+        stream_brain.reset_override(tok)
+    assert sm.read_chat_settings("phone")["llm_primary"] == "local_only"
+    assert sm.read_chat_settings("phone")["toolset"] == "none"
+    # the active/default chat kept its provider — no silent cross-chat switch
+    assert sm.current_settings.get("llm_primary") == active_model_before
+    assert sm.read_chat_settings(active)["llm_primary"] == active_model_before
+
+
+def test_update_chat_settings_no_override_writes_active(sm):
+    """OFF-path: settings write with no override hits the active chat (unchanged)."""
+    active = sm.get_active_chat_name()
+    assert sm.update_chat_settings({"llm_primary": "web_pick"})
+    assert sm.current_settings["llm_primary"] == "web_pick"
+    assert sm.read_chat_settings(active)["llm_primary"] == "web_pick"
+
+
+def test_in_tool_cycle_is_per_chat_no_cross_stream_leak(sm):
+    """The tool-cycle flag lives on each chat's history, so a web turn completing
+    can't clear a concurrent phone turn's flag mid-cycle (the provider-400 root)."""
+    sess = sm.make_stream_session("phone")
+    tok = stream_brain.set_override(sess)
+    try:
+        sm._in_tool_cycle = True
+        assert sm._in_tool_cycle is True               # reads the phone chat's flag
+    finally:
+        stream_brain.reset_override(tok)
+    assert sm._in_tool_cycle is False                  # active chat's own flag, independent
+    assert sess["history"]._in_tool_cycle is True      # phone's flag was not clobbered
+
+
+def test_in_tool_cycle_active_and_override_independent(sm):
+    """A flag set on the active chat does not bleed into an override chat's view."""
+    sm._in_tool_cycle = True                           # active/default enters a cycle
+    sess = sm.make_stream_session("phone")
+    tok = stream_brain.set_override(sess)
+    try:
+        assert sm._in_tool_cycle is False              # phone chat: fresh, own flag
+        sm._in_tool_cycle = True
+    finally:
+        stream_brain.reset_override(tok)
+    assert sm.current_chat._in_tool_cycle is True      # active flag survived intact
     assert "back-to-active" not in _texts(sm.read_chat_messages("phone"))

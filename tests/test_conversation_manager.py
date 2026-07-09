@@ -137,6 +137,34 @@ def test_external_slot_cap_refuses_over_capacity():
     assert len(mgr.external) == 2
 
 
+def test_external_same_chat_refused_serialize_per_chat():
+    """A2 (2026-07-09): two live sessions on ONE chat would each seed from a
+    start-of-session snapshot and whole-column overwrite, silently eating the
+    other's turns. A second session targeting an already-live chat is refused
+    (the caller rejects it like a busy line); a DIFFERENT chat still gets in."""
+    system = _system_with_real_handoff()
+    mgr = ConversationManager(system, gate=MagicMock())
+    a = mgr.start_external(_ctor(), chat_name="shared", session_id="a")
+    b = mgr.start_external(_ctor(), chat_name="shared", session_id="b")
+    assert a is not None
+    assert b is None                              # same chat → refused
+    assert len(mgr.external) == 1
+    c = mgr.start_external(_ctor(), chat_name="other", session_id="c")
+    assert c is not None                          # per-chat, not a global lock
+    assert len(mgr.external) == 2
+
+
+def test_external_chatless_sessions_not_serialized():
+    """chat_name=None sessions aren't collision-checked — only truthy names
+    serialize (guards the `if chat_name` in the A2 check)."""
+    system = _system_with_real_handoff()
+    mgr = ConversationManager(system, gate=MagicMock())
+    a = mgr.start_external(_ctor(), session_id="a")   # chat_name None
+    b = mgr.start_external(_ctor(), session_id="b")   # chat_name None
+    assert a is not None and b is not None            # both allowed (not refused on None)
+    assert len(mgr.external) == 2
+
+
 def test_stop_external_ends_one_leaves_other():
     system = _system_with_real_handoff()
     mgr = ConversationManager(system, gate=MagicMock())

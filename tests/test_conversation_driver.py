@@ -140,3 +140,45 @@ def test_turn_finished_noop_after_barge():
     d.push_frame(*frame(100, True))                  # barge -> USER_SPEAKING
     d.engine.turn_finished()                         # stale finish from the cancelled turn
     assert d.engine.state == USER_SPEAKING
+
+
+# ── D1 (2026-07-09): barge arms on AUDIO, not thinking-as-content ────────────
+# chat_stream emits thinking as <think>-wrapped {"type":"content"} events with NO
+# tts_chunk (thinking isn't spoken). Arming on content let a reasoning model's
+# silent thinking phase be barged/cancelled by a caller's talk-pause-talk cadence.
+
+@patch("core.conversation.driver.publish")
+def test_barge_not_armed_during_thinking_content_only(pub):
+    """Content with no audio (a full thinking block) must never arm barge."""
+    events = [
+        {"type": "content", "text": "<think>"},
+        {"type": "content", "text": "let me reason about this"},
+        {"type": "content", "text": "</think>"},
+        {"type": "done"},
+    ]
+    d, system, fs, sink = _driver(events=events)
+    d.engine.arm_barge = MagicMock()
+    d.push_frame(*frame(150, True))
+    for _ in range(3):
+        d.push_frame(*frame(100, False))             # -> synchronous streaming turn
+    d.engine.arm_barge.assert_not_called()           # no audio ever flowed → never armed
+
+
+@patch("core.conversation.driver.publish")
+def test_barge_arms_once_on_tts_chunk(pub):
+    """With real audio, barge arms exactly once — at the tts_chunk, not on the
+    thinking/prose content events that precede it."""
+    events = [
+        {"type": "content", "text": "<think>"},
+        {"type": "content", "text": "thinking"},
+        {"type": "content", "text": "</think>"},
+        {"type": "content", "text": "Hello"},        # prose, still no audio yet
+        {"type": "tts_chunk", "audio_b64": "x", "stream_id": "s"},
+        {"type": "done"},
+    ]
+    d, system, fs, sink = _driver(events=events)
+    d.engine.arm_barge = MagicMock()
+    d.push_frame(*frame(150, True))
+    for _ in range(3):
+        d.push_frame(*frame(100, False))
+    d.engine.arm_barge.assert_called_once()          # armed only at the tts_chunk
