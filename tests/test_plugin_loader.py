@@ -503,6 +503,8 @@ def _make_mock_fm():
     fm._loop_warn_map = {}
     fm._function_module_map = {}
     fm._mode_filters = {}
+    fm._settings_gates = {}
+    fm.current_toolset_name = "none"
     return fm
 
 
@@ -1159,6 +1161,7 @@ def execute(function_name, arguments, config):
             fm._is_local_map = {}
             fm._loop_warn_map = {}
             fm._function_module_map = {}
+            fm._settings_gates = {}
             fm.current_toolset_name = "none"
             fm.register_plugin_tools("idem_c", plugin_dir, ["tools/idem_c_tool.py"])
             assert canonical in sys.modules, "sanity: canonical should be registered"

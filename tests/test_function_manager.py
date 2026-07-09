@@ -40,6 +40,7 @@ class TestAbilityResolution:
             ]
             mgr._enabled_tools = []
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr.current_toolset_name = "none"
 
             with patch('core.chat.function_manager.toolset_manager') as mock_ts:
@@ -57,6 +58,7 @@ class TestAbilityResolution:
             mgr.all_possible_tools = [{'function': {'name': 'func1'}}]
             mgr._enabled_tools = mgr.all_possible_tools.copy()
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr.function_modules = {}
             mgr.current_toolset_name = "all"
             
@@ -84,6 +86,7 @@ class TestAbilityResolution:
             ]
             mgr._enabled_tools = []
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr.current_toolset_name = "none"
             
             with patch('core.chat.function_manager.toolset_manager') as mock_ts:
@@ -109,6 +112,7 @@ class TestAbilityResolution:
             ]
             mgr._enabled_tools = []
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr.current_toolset_name = "none"
             
             with patch('core.chat.function_manager.toolset_manager') as mock_ts:
@@ -134,6 +138,7 @@ class TestAbilityResolution:
             ]
             mgr._enabled_tools = []
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr.current_toolset_name = "none"
 
             with patch('core.chat.function_manager.toolset_manager') as mock_ts:
@@ -183,6 +188,7 @@ class TestCustomSentinelReApply:
                 {'function': {'name': 'func_c'}},
             ]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr.current_toolset_name = "custom"
             return mgr
 
@@ -210,6 +216,7 @@ class TestCustomSentinelReApply:
             mgr.all_possible_tools = [{'function': {'name': 'func_a'}}]
             mgr._enabled_tools = []
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr.current_toolset_name = "custom"
             with patch('core.chat.function_manager.toolset_manager') as mock_ts:
                 mock_ts.toolset_exists.return_value = False
@@ -232,6 +239,7 @@ class TestNewToolAutoJoinsActiveSavedToolset:
             mgr.all_possible_tools = []
             mgr._enabled_tools = []
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._network_functions = set()
             mgr._is_local_map = {}
             mgr._function_module_map = {}
@@ -374,8 +382,10 @@ class TestExecution:
 
             mgr._enabled_tools = [{'function': {'name': 'test_func'}}]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr.execution_map = {'test_func': mock_executor}
             mgr._is_local_map = {'test_func': True}
             mgr._function_module_map = {}
@@ -396,8 +406,10 @@ class TestExecution:
 
             mgr._enabled_tools = [{'function': {'name': 'allowed_func'}}]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr.execution_map = {'disabled_func': MagicMock()}
             mgr._is_local_map = {}
             mgr._function_module_map = {}
@@ -424,8 +436,10 @@ class TestExecution:
 
             mgr._enabled_tools = [{'function': {'name': 'orphan_func'}}]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr.execution_map = {}
             mgr._is_local_map = {'orphan_func': True}
             mgr._function_module_map = {}
@@ -448,8 +462,10 @@ class TestExecution:
 
             mgr._enabled_tools = [{'function': {'name': 'crashy_func'}}]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr.execution_map = {'crashy_func': failing_executor}
             mgr._is_local_map = {'crashy_func': True}
             mgr._function_module_map = {}
@@ -480,8 +496,10 @@ class TestNetworkToolDetection:
                 {'function': {'name': 'web_search'}},
             ]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr._network_functions = {'web_search', 'web_fetch'}
 
             assert mgr.has_network_tools_enabled() is True
@@ -496,8 +514,10 @@ class TestNetworkToolDetection:
                 {'function': {'name': 'another_local'}},
             ]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr._network_functions = {'web_search', 'web_fetch'}
 
             assert mgr.has_network_tools_enabled() is False
@@ -539,6 +559,7 @@ class TestModeFiltering:
             }
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr.function_modules = {
                 'test_module': {'available_functions': ['mono_only', 'assembled_only', 'both_modes']},
                 'other_module': {'available_functions': ['no_filter']},
@@ -571,6 +592,7 @@ class TestModeFiltering:
             }
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr.function_modules = {
                 'test_module': {'available_functions': ['mono_only', 'assembled_only', 'both_modes']},
             }
@@ -593,8 +615,10 @@ class TestModeFiltering:
                 {'function': {'name': 'func_b'}},
             ]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr.function_modules = {}
 
             filtered = mgr.enabled_tools
@@ -620,8 +644,10 @@ class TestEnabledFunctionNames:
                 {'function': {'name': 'func_c'}},
             ]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
 
             names = mgr.get_enabled_function_names()
 
@@ -634,8 +660,10 @@ class TestEnabledFunctionNames:
 
             mgr._enabled_tools = []
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
 
             names = mgr.get_enabled_function_names()
 
@@ -660,8 +688,10 @@ class TestAbilityInfo:
                 {'function': {'name': 'fetch'}},
             ]
             mgr._mode_filters = {}
+            mgr._settings_gates = {}
             mgr._story_engine = None
             mgr._story_engine_enabled = False
+            mgr._settings_gates = {}
             mgr.function_modules = {
                 'web': {'available_functions': ['search', 'fetch']}
             }

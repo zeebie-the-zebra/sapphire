@@ -490,7 +490,7 @@ def test_inline_tool_image_base64_scrubbed_from_new_messages():
         if isinstance(content, list):
             assert not any(isinstance(b, dict) and b.get("type") == "image" for b in content), \
                 f"inline base64 image leaked into persisted {m.get('role')} message"
-    assert any("Tool returned image" in str(m.get("content", "")) for m in new), \
+    assert any("shown to the user" in str(m.get("content", "")) for m in new), \
         "injected image note should survive the scrub as text"
 
 

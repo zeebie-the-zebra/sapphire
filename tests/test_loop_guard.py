@@ -29,6 +29,7 @@ def _bare_fm():
     """FunctionManager with no heavy __init__ — just the loop-guard surface."""
     fm = FunctionManager.__new__(FunctionManager)
     fm._loop_warn_map = {}
+    fm._settings_gates = {}
     return fm
 
 
@@ -135,6 +136,7 @@ def test_register_and_unregister_loop_warn_map():
         fm._is_local_map = {}
         fm._mode_filters = {}
         fm._loop_warn_map = {}
+        fm._settings_gates = {}
         fm.current_toolset_name = "none"
 
         tool = {"type": "function", "loop_warn_after": 2, "loop_warn_message": "stop",
