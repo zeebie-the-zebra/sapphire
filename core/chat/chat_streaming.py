@@ -252,7 +252,9 @@ class StreamingChat:
             reset_scopes()
             chat_settings = self.main_chat.session_manager.get_chat_settings()
             self.main_chat.function_manager.apply_scopes(chat_settings)
-            chat_name = self.main_chat.session_manager.get_active_chat_name()
+            # Effective chat (matches the get_chat_settings() applied above) — a phone
+            # call reads ITS RAG scope, never the operator's active-chat documents.
+            chat_name = self.main_chat.session_manager._effective_chat_name()
             self.main_chat.function_manager.set_rag_scope(f"__rag__:{chat_name}")
 
             # Snapshot scopes as a plain dict — survives across Starlette's
@@ -500,7 +502,8 @@ class StreamingChat:
                     call_type = "tool_call" if tool_calls else "conversation"
                     estimated = metadata["tokens"].get("estimated", False)
                     try:
-                        chat_name = self.main_chat.session_manager.get_active_chat_name()
+                        # effective chat: a phone call's tokens attribute to ITS chat.
+                        chat_name = self.main_chat.session_manager._effective_chat_name()
                         token_metrics.record(chat_name, provider_key, effective_model,
                                              call_type, metadata, estimated=estimated)
                     except Exception:

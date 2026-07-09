@@ -573,7 +573,10 @@ class LLMChat:
         if rag_level == 'off':
             return None
 
-        chat_name = self.session_manager.get_active_chat_name()
+        # Effective chat, not active (matches the get_chat_settings() above): a phone
+        # call / background conversation reads ITS chat's RAG docs, never the operator's
+        # active-chat documents. Without this a stranger's call could pull owner files.
+        chat_name = self.session_manager._effective_chat_name()
         rag_scope = f"__rag__:{chat_name}"
 
         try:
@@ -644,7 +647,9 @@ class LLMChat:
             reset_scopes()
             chat_settings = self.session_manager.get_chat_settings()
             self.function_manager.apply_scopes(chat_settings)
-            chat_name = self.session_manager.get_active_chat_name()
+            # Effective chat (matches the get_chat_settings() applied above) — a stream
+            # on a non-active chat reads ITS RAG scope, not the operator's active chat.
+            chat_name = self.session_manager._effective_chat_name()
             self.function_manager.set_rag_scope(f"__rag__:{chat_name}")
             _scopes = self.function_manager.snapshot_scopes()
 
@@ -918,9 +923,10 @@ class LLMChat:
                     "tokens_per_second": round(tokens_info.get("content", 0) / duration, 1) if duration > 0 else 0
                 }
 
-                # Record metrics
+                # Record metrics — effective chat so a phone call's tokens attribute
+                # to ITS chat, not the operator's active chat.
                 try:
-                    chat_name = self.session_manager.get_active_chat_name()
+                    chat_name = self.session_manager._effective_chat_name()
                     token_metrics.record(chat_name, provider_key, effective_model,
                                          "conversation", metadata,
                                          estimated=tokens_info.get("estimated", False))
@@ -998,7 +1004,8 @@ class LLMChat:
             }
 
             try:
-                chat_name = self.session_manager.get_active_chat_name()
+                # effective chat: attribute a stream's tokens to ITS chat.
+                chat_name = self.session_manager._effective_chat_name()
                 token_metrics.record(chat_name, provider_key, effective_model,
                                      "conversation", metadata,
                                      estimated=tokens_info.get("estimated", False))

@@ -691,7 +691,7 @@ def _set_voice(args):
     except Exception as e:
         logger.error(f"Error applying TTS settings live: {e}")
         return f"Saved, but failed to apply live: {e}", False
-    publish(Events.CHAT_SETTINGS_CHANGED, {"chat": sm.get_active_chat_name(), "settings": updates, "origin": None})
+    publish(Events.CHAT_SETTINGS_CHANGED, {"chat": sm._effective_chat_name(), "settings": updates, "origin": None})
 
     changed = ', '.join(f"{k}={v}" for k, v in updates.items())
     logger.info(f"Voice settings changed: {changed}")
