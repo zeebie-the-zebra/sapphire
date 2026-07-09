@@ -33,6 +33,33 @@ except Exception as _e:
 
 import pytest
 
+
+# ─── Destructive-git safety net (2026-07-09) ─────────────────────────────────
+# integrity._repair_git runs `git checkout HEAD -- <file>` — reverting a file to
+# HEAD, which silently eats uncommitted local edits. That is exactly the
+# 2026-07-05 incident (a test reached repair() on a dev tree and reverted staged
+# work mid-session). This net replaces it with a LOUD RuntimeError for the whole
+# suite, so no test — present or future — can `git checkout` the working tree.
+# The one test that legitimately exercises repair's git path stubs _repair_git
+# itself, which overrides this. Makes the suite structurally safe with uncommitted
+# work, not merely safe because each test happens to be careful.
+#
+# (updater is NOT wrapped here: it defers pulls to boot-time apply_pending_update
+# and every test stubs _run_git for tree-mutating ops, so it's hermetic already —
+# and a source-inspection test reads _run_git's source, which a wrapper would break.)
+@pytest.fixture(autouse=True)
+def _no_destructive_git(monkeypatch):
+    def _blocked_repair(rel):
+        raise RuntimeError(
+            f"BLOCKED: real integrity._repair_git({rel!r}) during a test — would "
+            "`git checkout` the working tree. Stub _repair_git in your test.")
+    try:
+        import core.integrity as _integ
+        monkeypatch.setattr(_integ, "_repair_git", _blocked_repair, raising=False)
+    except Exception:
+        pass
+
+
 # ─── Thread leak guard ────────────────────────────────────────────────────────
 # Default every threading.Thread created during tests to daemon=True. Some
 # concurrency tests (SQLite write stress in test_220_regression, scope-bleed
